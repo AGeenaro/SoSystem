@@ -88,10 +88,26 @@ let syncTimer = null;
 let syncing = false;
 function colorForName(name){ let h=0; for(let i=0;i<name.length;i++){ h = name.charCodeAt(i) + ((h<<5)-h); } return AVATAR_COLORS[Math.abs(h) % AVATAR_COLORS.length]; }
 function initials(nome, sobrenome){ return ((nome[0]||'')+(sobrenome[0]||'')).toUpperCase(); }
+function productCodeTaken(codigo, exceptIndex){
+  const key = String(codigo || '').trim().toLowerCase();
+  if(!key) return false;
+  return state.products.some(function(product, index){
+    if(exceptIndex !== undefined && index === exceptIndex) return false;
+    return String(product.codigo || '').trim().toLowerCase() === key;
+  });
+}
 function genErpCode(classificacao){
   const mid = classificacao==='PI' ? '2000' : '3000';
-  const last4 = String(Math.floor(1000 + Math.random()*9000));
-  return '30.' + mid + '.' + last4;
+  const used = {};
+  state.products.forEach(function(product){
+    const parts = String(product.codigo || '').split('.');
+    if(parts[0]==='30' && parts[1]===mid && /^\d{4}$/.test(parts[2] || '')) used[parts[2]] = true;
+  });
+  for(let n = 1; n <= 9999; n++){
+    const last4 = String(n).padStart(4, '0');
+    if(!used[last4]) return '30.' + mid + '.' + last4;
+  }
+  return '30.' + mid + '.' + String(Date.now()).slice(-4);
 }
 function formatOrderNumber(n){ const s = String(n).padStart(6,'0'); return s.slice(0,3) + '.' + s.slice(3); }
 function formatEmployeeNumber(n){ return String(n).padStart(4,'0'); }
@@ -1382,6 +1398,7 @@ function renderCadastro(){
 function renderProductCatalog(){
   const box = document.getElementById('productCatalog');
   if(!box) return;
+  const suggestedCode = genErpCode('PF');
   const families = state.families.map(function(family){
     const group = state.groups.find(function(item){ return item.id === family.grupoId; });
     const label = group ? family.nome + ' · ' + group.nome : family.nome;
@@ -1392,11 +1409,11 @@ function renderProductCatalog(){
     <form onsubmit="saveProductItem(event)">
       <div class="field-row">
         <div class="field"><label>Nome do item</label><input id="itemDescricao" data-edit="engenharia" required maxlength="120" placeholder="Ex: Ponteira 20mm"></div>
-        <div class="field"><label>Código</label><input id="itemCodigo" data-edit="engenharia" placeholder="Em branco gera um código"></div>
+        <div class="field"><label>Código</label><input id="itemCodigo" data-edit="engenharia" data-auto="${escapeHtml(suggestedCode)}" value="${escapeHtml(suggestedCode)}" maxlength="40"></div>
       </div>
       <div class="field-row">
         <div class="field"><label>Classificação</label>
-          <select id="itemClasse" data-edit="engenharia"><option value="PI">PI — intermediário</option><option value="PF" selected>PF — final</option></select>
+          <select id="itemClasse" data-edit="engenharia" onchange="refreshItemCode()"><option value="PI">PI — intermediário</option><option value="PF" selected>PF — final</option></select>
         </div>
         <div class="field"><label>Tempo (min/peça)</label><input id="itemTempo" data-edit="engenharia" type="number" min="0" step="0.1" value="1"></div>
         <div class="field"><label>Família</label>
@@ -1424,7 +1441,7 @@ async function saveProductItem(event){
   const familiaId = document.getElementById('itemFamilia').value;
   if(!descricao){ toast('Informe o nome do produto.', 'error'); return; }
   if(!codigo) codigo = genErpCode(classificacao);
-  if(state.products.some(function(product){ return product.codigo === codigo; })){
+  if(productCodeTaken(codigo)){
     toast('Já existe um produto com este código.', 'error');
     return;
   }
@@ -1434,6 +1451,17 @@ async function saveProductItem(event){
   renderProductCatalog();
   applyAccess();
   toast('Produto cadastrado.', 'success');
+}
+function refreshItemCode(){
+  const input = document.getElementById('itemCodigo');
+  const classe = document.getElementById('itemClasse');
+  if(!input || !classe) return;
+  const current = input.value.trim();
+  const auto = input.getAttribute('data-auto') || '';
+  if(current && current !== auto) return;
+  const next = genErpCode(classe.value || 'PF');
+  input.value = next;
+  input.setAttribute('data-auto', next);
 }
 function renderEngenhariaTable(){
   const tbody = document.getElementById('engTbody');
@@ -1465,6 +1493,11 @@ async function addProductRow(){
 async function updateProduct(idx, field, value){
   if(deny('engenharia')) return;
   const p = state.products[idx]; if(!p) return;
+  if(field==='codigo'){
+    value = String(value || '').trim();
+    if(!value){ toast('Informe o código.', 'error'); renderEngenhariaTable(); return; }
+    if(productCodeTaken(value, idx)){ toast('Já existe um produto com este código.', 'error'); renderEngenhariaTable(); return; }
+  }
   if(field==='tempoFabricacaoMin') value = Math.max(0, Number(value)||0);
   p[field] = value;
   await persist();
@@ -1475,8 +1508,10 @@ async function updateClassificacao(idx, newClass){
   const p = state.products[idx]; if(!p) return;
   p.classificacao = newClass;
   const parts = (p.codigo||'').split('.');
-  const last4 = (parts[2] && /^\d{4}$/.test(parts[2])) ? parts[2] : String(Math.floor(1000+Math.random()*9000));
-  p.codigo = '30.' + (newClass==='PI'?'2000':'3000') + '.' + last4;
+  const last4 = (parts[2] && /^\d{4}$/.test(parts[2])) ? parts[2] : '';
+  let codigo = last4 ? ('30.' + (newClass==='PI'?'2000':'3000') + '.' + last4) : genErpCode(newClass);
+  if(productCodeTaken(codigo, idx)) codigo = genErpCode(newClass);
+  p.codigo = codigo;
   await persist();
   renderEngenhariaTable();
   toast('Classificação atualizada — código ' + p.codigo, 'success');
@@ -2838,6 +2873,7 @@ window.fillOrderFamilies = fillOrderFamilies;
 window.fillOrderItems = fillOrderItems;
 window.addOrderItem = addOrderItem;
 window.removeOrderDraftItem = removeOrderDraftItem;
+window.refreshItemCode = refreshItemCode;
 window.saveProductItem = saveProductItem;
 window.saveGroup = saveGroup;
 window.saveFamily = saveFamily;
