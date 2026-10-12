@@ -594,6 +594,11 @@ function renderNav(){
 let knownCompanies = [];
 let companyListLoaded = false;
 let companyListReady = false;
+function companiesByName(list){
+  return (list || []).slice().sort(function(a, b){
+    return String(a.name || '').localeCompare(String(b.name || ''), 'pt', { sensitivity: 'base' });
+  });
+}
 function renderCompanyFoot(){
   const foot = document.getElementById('companyFoot');
   if(!foot) return;
@@ -617,7 +622,7 @@ function renderCompanyFoot(){
   foot.innerHTML = `<b>Empresa:</b> ${escapeHtml(mine ? mine.name : 'Sem empresa')}`;
 }
 async function refreshCompanyFoot(){
-  try{ knownCompanies = (await accountApi('/api/companies')).data || []; }
+  try{ knownCompanies = companiesByName((await accountApi('/api/companies')).data || []); }
   catch(e){ knownCompanies = []; }
   companyListReady = true;
   renderCompanyFoot();
@@ -2697,7 +2702,7 @@ async function loadAccessUsers(){
   const body = document.getElementById('accessUsersBody');
   if(!body) return;
   try{
-    try{ accessCompanies = (await accountApi('/api/companies')).data || []; }catch(e){ accessCompanies = []; }
+    try{ accessCompanies = companiesByName((await accountApi('/api/companies')).data || []); }catch(e){ accessCompanies = []; }
     fillUserCompanySelect();
     const result = await accountApi('/api/users');
     accessUserCache = result.data || [];
@@ -3271,7 +3276,7 @@ async function renderCompanySettings(){
   const box = document.getElementById('companySettings');
   if(!box || !sessionUser) return;
   let companies = [];
-  try{ companies = (await accountApi('/api/companies')).data || []; }catch(e){ companies = []; }
+  try{ companies = companiesByName((await accountApi('/api/companies')).data || []); }catch(e){ companies = []; }
   const selected = activeCompanyId();
   const current = companies.find(function(company){ return company.id === selected; }) || companies[0] || null;
   const suporte = sessionUser.role === 'administrador_suporte';
