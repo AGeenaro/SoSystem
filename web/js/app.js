@@ -2500,64 +2500,89 @@ function permissionChecks(role, current){
     return `<label class="perm-item"><input type="checkbox" value="${item.module}" ${checked}> ${item.label}</label>`;
   }).join('')}</div>`;
 }
+let settingsChoice = 'empresa';
 function renderConfiguracoes(){
   const el = document.getElementById('panel-configuracoes');
   if(!el || !sessionUser) return;
-  const roles = sessionUser.role === 'administrador_suporte'
-    ? ['visualizador','operador','administrador','administrador_suporte']
-    : ['visualizador','operador','administrador'];
+  const choices = [
+    ['empresa', 'Empresa', 'Nome, limites e bloqueio da empresa.'],
+    ['usuario', 'Usuário', 'Contas que entram no sistema.'],
+    ['perfil', 'Perfil de Usuário', 'Seu nome, e-mail e senha.']
+  ];
   el.innerHTML = `
     <div class="section-title">${icon('sliders',19)} Configurações</div>
-    <div class="section-sub">Perfil de acesso e contas que entram no sistema.</div>
-    <form id="profileForm" class="card" style="margin-bottom:14px;" onsubmit="saveProfile(event)">
-      <div class="section-title" style="font-size:16px;">Meu perfil</div>
-      <div class="section-sub">${escapeHtml(ROLE_LABELS[sessionUser.role] || sessionUser.role)}</div>
-      <div class="field-row">
-        <div class="field"><label>Nome</label><input id="cfgName" required minlength="2" maxlength="80" value="${escapeHtml(sessionUser.name)}"></div>
-        <div class="field"><label>E-mail</label><input id="cfgEmail" type="email" required value="${escapeHtml(sessionUser.email)}"></div>
-      </div>
-      <div class="field"><label>Nova senha</label>
-        <div class="password-field">
-          <input id="cfgPassword" type="password" minlength="8" maxlength="72" autocomplete="new-password" placeholder="Deixe em branco para manter">
-          <button class="eye-btn" type="button" onclick="togglePassword('cfgPassword', this)">mostrar</button>
+    <div class="section-sub">Escolha um assunto. Os outros ficam fora desta tela.</div>
+    <div class="settings-choices">${choices.map(function(choice){
+      return `<button class="settings-choice${settingsChoice===choice[0]?' active':''}" type="button" onclick="setSettingsChoice('${choice[0]}')"><b>${choice[1]}</b><span>${choice[2]}</span></button>`;
+    }).join('')}</div>
+    <div id="settingsPanel"></div>`;
+  renderSettingsPanel();
+}
+function setSettingsChoice(id){
+  settingsChoice = id;
+  renderConfiguracoes();
+}
+function renderSettingsPanel(){
+  const panel = document.getElementById('settingsPanel');
+  if(!panel || !sessionUser) return;
+  if(settingsChoice === 'perfil'){
+    panel.innerHTML = `
+      <form id="profileForm" class="card" onsubmit="saveProfile(event)">
+        <div class="section-title" style="font-size:16px;">Seus dados</div>
+        <div class="section-sub">${escapeHtml(ROLE_LABELS[sessionUser.role] || sessionUser.role)}. Esta tela altera só a sua conta.</div>
+        <div class="field-row">
+          <div class="field"><label>Nome</label><input id="cfgName" required minlength="2" maxlength="80" value="${escapeHtml(sessionUser.name)}"></div>
+          <div class="field"><label>E-mail</label><input id="cfgEmail" type="email" required value="${escapeHtml(sessionUser.email)}"></div>
         </div>
-      </div>
-      <button class="btn btn-primary" type="submit">Salvar perfil</button>
-    </form>
-    ${canManageUsers() ? `
-    <form id="accessUserForm" class="card" style="margin-bottom:14px;" onsubmit="saveAccessUser(event)">
-      <div class="section-title" style="font-size:16px;">Usuários do sistema</div>
-      <div class="section-sub">Visualizador só consulta o que for marcado. Operador altera as áreas marcadas e não mexe em contas. Administrador conduz o sistema, sem o acesso de suporte.</div>
-      <input type="hidden" id="editingUserId" value="">
-      <div class="field-row">
-        <div class="field"><label>Nome</label><input id="userName" required minlength="2"></div>
-        <div class="field"><label>E-mail</label><input id="userEmail" type="email" required></div>
-      </div>
-      <div class="field-row">
-        <div class="field"><label>Senha provisória</label><input id="userPassword" disabled placeholder="Gerada ao salvar e mostrada uma vez"></div>
-        <div class="field"><label>Perfil</label>
-          <select id="userRole" onchange="renderPermissionChoices()">${roles.map(function(role){ return `<option value="${role}">${ROLE_LABELS[role]}</option>`; }).join('')}</select>
+        <div class="field"><label>Nova senha</label>
+          <div class="password-field">
+            <input id="cfgPassword" type="password" minlength="8" maxlength="72" autocomplete="new-password" placeholder="Deixe em branco para manter">
+            <button class="eye-btn" type="button" onclick="togglePassword('cfgPassword', this)">mostrar</button>
+          </div>
         </div>
-      </div>
-      <div class="field" id="userCompanyField">
-        <label>Empresa</label>
-        <select id="userCompany"><option value="">Escolha a empresa</option></select>
-      </div>
-      <div id="permissionChoices"></div>
-      <button class="btn btn-primary" type="submit">Salvar usuário</button>
-    </form>
-    <div class="card"><div class="table-wrap"><table>
-      <thead><tr><th>Nome</th><th>E-mail</th><th>Perfil</th><th>Empresa</th><th style="width:140px;"></th></tr></thead>
-      <tbody id="accessUsersBody"><tr class="empty-row"><td colspan="5">Carregando contas…</td></tr></tbody>
-    </table></div></div>` : `<div class="card">Seu perfil consulta e, quando permitido, altera a produção. Contas novas são criadas por um administrador.</div>`}
-  `;
-  if(canManageUsers()){
-    renderPermissionChoices();
-    loadAccessUsers();
+        <button class="btn btn-primary" type="submit">Salvar perfil</button>
+      </form>`;
+    return;
   }
-  const extra = document.createElement('div');
-  extra.id = 'companySettings';
-  el.appendChild(extra);
+  if(settingsChoice === 'usuario'){
+    const roles = sessionUser.role === 'administrador_suporte'
+      ? ['visualizador','operador','administrador','administrador_suporte']
+      : ['visualizador','operador','administrador'];
+    panel.innerHTML = canManageUsers() ? `
+      <form id="accessUserForm" class="card" style="margin-bottom:14px;" onsubmit="saveAccessUser(event)">
+        <div class="section-title" style="font-size:16px;">Contas de acesso</div>
+        <div class="section-sub">Quem entra no sistema, em qual empresa, e o que pode ver ou alterar.</div>
+        <input type="hidden" id="editingUserId" value="">
+        <div class="field-row">
+          <div class="field"><label>Nome</label><input id="userName" required minlength="2"></div>
+          <div class="field"><label>E-mail</label><input id="userEmail" type="email" required></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Senha provisória</label><input id="userPassword" disabled placeholder="Gerada ao salvar e mostrada uma vez"></div>
+          <div class="field"><label>Perfil de acesso</label>
+            <select id="userRole" onchange="renderPermissionChoices()">${roles.map(function(role){ return `<option value="${role}">${ROLE_LABELS[role]}</option>`; }).join('')}</select>
+          </div>
+        </div>
+        <div class="field" id="userCompanyField">
+          <label>Empresa</label>
+          <select id="userCompany"><option value="">Escolha a empresa</option></select>
+        </div>
+        <div id="permissionChoices"></div>
+        <button class="btn btn-primary" type="submit">Salvar usuário</button>
+      </form>
+      <div class="card"><div class="table-wrap"><table>
+        <thead><tr><th>Nome</th><th>E-mail</th><th>Perfil</th><th>Empresa</th><th style="width:140px;"></th></tr></thead>
+        <tbody id="accessUsersBody"><tr class="empty-row"><td colspan="5">Carregando contas…</td></tr></tbody>
+      </table></div></div>
+      <div class="card" style="margin-top:14px;" id="passwordRequestList">Carregando pedidos de senha…</div>` : `<div class="card">Contas novas são criadas por um administrador. Os seus dados ficam em Perfil de Usuário.</div>`;
+    if(canManageUsers()){
+      renderPermissionChoices();
+      loadAccessUsers();
+      loadPasswordRequests();
+    }
+    return;
+  }
+  panel.innerHTML = '<div id="companySettings"></div>';
   renderCompanySettings();
 }
 let accessCompanies = [];
@@ -3138,7 +3163,7 @@ async function renderCompanySettings(){
   const manager = canManageUsers();
   box.innerHTML = `
     <div class="card" style="margin-top:14px;">
-      <div class="section-title" style="font-size:16px;">Empresa</div>
+      <div class="section-title" style="font-size:16px;">Dados da empresa</div>
       <div class="section-sub">Versão ${escapeHtml((window.PRODIFY_CONFIG && window.PRODIFY_CONFIG.version) || '')}</div>
       ${suporte ? `<div class="field"><label>Empresa ativa</label><select id="activeCompany" onchange="selectCompany(this.value)"><option value="">Escolha</option>${companies.map(function(company){ return `<option value="${company.id}" ${company.id===selected?'selected':''}>${escapeHtml(company.name)}</option>`; }).join('')}</select></div>
         <form onsubmit="createCompany(event)"><div class="field-row"><div class="field"><label>Nova empresa</label><input id="newCompanyName" required minlength="2"></div></div><button class="btn btn-primary" type="submit">Criar empresa</button></form>` : ''}
@@ -3154,9 +3179,7 @@ async function renderCompanySettings(){
         ${manager ? '<button class="btn btn-primary" type="submit">Salvar empresa</button>' : ''}
       </form>` : '<div class="section-sub">Nenhuma empresa cadastrada.</div>'}
     </div>
-    ${manager ? '<div class="card" style="margin-top:14px;" id="passwordRequestList">Carregando pedidos de senha…</div>' : ''}
     <div class="card" style="margin-top:14px;" id="logList">Carregando logs…</div>`;
-  if(manager) loadPasswordRequests();
   loadOwnLogs();
 }
 async function selectCompany(id){
@@ -3329,6 +3352,7 @@ window.toggleCompanyBlock = toggleCompanyBlock;
 window.resolvePasswordRequest = resolvePasswordRequest;
 window.toggleUserBlock = toggleUserBlock;
 window.logout = logout;
+window.setSettingsChoice = setSettingsChoice;
 window.saveProfile = saveProfile;
 window.saveAccessUser = saveAccessUser;
 window.deleteAccessUser = deleteAccessUser;
