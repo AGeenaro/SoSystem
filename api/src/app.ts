@@ -450,7 +450,10 @@ export function createApp(options: AppOptions): Express {
     const self = actor.id === id;
     if (actor.mustChangePassword && !(self && input.password)) assertPasswordReady(actor);
     if (!self) assertCanManage(actor, target, input.role);
-    if (self && (input.role || input.permissions)) {
+    if (self && input.role) {
+      throw new HttpError(403, "FORBIDDEN", "Você não altera o próprio perfil de acesso.");
+    }
+    if (self && input.permissions && !isManager(actor.role)) {
       throw new HttpError(403, "FORBIDDEN", "Você não altera o próprio perfil de acesso.");
     }
     if (!self && !isManager(actor.role)) {
@@ -471,7 +474,7 @@ export function createApp(options: AppOptions): Express {
     }
     const nextRole = input.role ?? target.role;
     if (!self && input.role !== undefined) patch.role = input.role;
-    if (!self && (input.permissions !== undefined || input.role !== undefined)) {
+    if ((!self && (input.permissions !== undefined || input.role !== undefined)) || (self && input.permissions !== undefined && isManager(actor.role))) {
       patch.permissions = sanitizePermissions(nextRole, input.permissions ?? target.permissions);
     }
     if (!self) {
@@ -543,7 +546,7 @@ export function createApp(options: AppOptions): Express {
   app.post("/api/production/sync", auth, asyncHandler(async (req, res) => {
     const actor = await actorFrom(req);
     assertPasswordReady(actor);
-    if (actor.role === "visualizador") {
+    if (actor.role === "visualizador" && !(actor.permissions.edit || []).length) {
       throw new HttpError(403, "FORBIDDEN", "O visualizador não altera a produção.");
     }
     const company = await resolveCompanyId(actor, companyHeader(req));

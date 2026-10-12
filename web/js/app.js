@@ -496,7 +496,7 @@ const NAV = [
 const ROLE_LABELS = {
   visualizador:'Visualizador',
   operador:'Operador',
-  administrador:'Administrador',
+  administrador:'ADM',
   administrador_suporte:'Administrador suporte'
 };
 const SESSION_KEY = 'prodfy_session';
@@ -520,12 +520,14 @@ function moduleOf(id){
   return item ? item.module : id;
 }
 function permissionList(user){
-  const all = NAV.filter(function(entry){ return entry.module !== 'configuracoes'; }).map(function(entry){ return entry.module; });
+  const all = [];
+  NAV.filter(function(entry){ return entry.module !== 'configuracoes'; }).forEach(function(entry){
+    if(all.indexOf(entry.module) < 0) all.push(entry.module);
+  });
   if(!user) return { view: [], edit: [] };
-  if(user.role === 'administrador' || user.role === 'administrador_suporte') return { view: all, edit: all };
   const stored = user.permissions || {};
   const view = Array.isArray(stored.view) ? stored.view : all;
-  const edit = user.role === 'visualizador' ? [] : (Array.isArray(stored.edit) ? stored.edit : []);
+  const edit = Array.isArray(stored.edit) ? stored.edit : (user.role === 'visualizador' ? [] : all);
   return { view: view, edit: edit };
 }
 function canView(module){
@@ -533,7 +535,7 @@ function canView(module){
   return permissionList(sessionUser).view.indexOf(module) >= 0;
 }
 function canEdit(module){
-  if(!sessionUser || sessionUser.role === 'visualizador') return false;
+  if(!sessionUser) return false;
   return permissionList(sessionUser).edit.indexOf(module) >= 0;
 }
 function canManageUsers(){
@@ -627,7 +629,7 @@ function setTab(id, options){
   renderNav();
   const meta = NAV.find(n=>n.id===id);
   document.getElementById('topTitle').textContent = meta.label;
-  document.getElementById('topEyebrow').textContent = 'Prodfy · Chão de Fábrica';
+  document.getElementById('topEyebrow').textContent = 'SOSystem · Soluções Inteligentes';
   document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
   const panel = document.getElementById('panel-'+id);
   if(panel) panel.classList.add('active');
@@ -1455,7 +1457,7 @@ function printOrder(orderId){
     <div class="print-page">
       <div class="print-top-row">
         <div>
-          <div class="print-brand">PRODFY</div>
+          <div class="print-brand">SOSYSTEM</div>
           <div class="print-doc-title">Ordem de Produção</div>
           <div class="print-op-number">${orderLabel(order)}</div>
         </div>
@@ -1480,7 +1482,7 @@ function printOrder(orderId){
         <thead><tr><th>Funcionário</th><th>Recurso</th><th>Início</th><th>Fim</th><th>Qtd. Produzida</th><th>Qtd. Refugada</th></tr></thead>
         <tbody>${blankRows}</tbody>
       </table>
-      <div class="print-footer">Documento gerado pelo sistema Prodfy em ${fmtDateTime(nowISO())}</div>
+      <div class="print-footer">Documento gerado pelo sistema SOSystem em ${fmtDateTime(nowISO())}</div>
     </div>
   `;
   if(window.QRCode){
@@ -2518,24 +2520,57 @@ async function accountApi(path, options){
   }
   return payload;
 }
-function selectedPermissions(role){
-  const boxes = Array.prototype.slice.call(document.querySelectorAll('#userPerms input:checked'));
-  const chosen = boxes.map(function(box){ return box.value; }).filter(function(value, index, list){ return list.indexOf(value) === index; });
-  if(role === 'visualizador') return { view: chosen, edit: [] };
-  if(role === 'operador') return { view: chosen, edit: chosen };
-  return undefined;
+function checkedModules(containerId){
+  const boxes = document.querySelectorAll('#' + containerId + ' input:checked');
+  const chosen = [];
+  Array.prototype.forEach.call(boxes, function(box){
+    if(chosen.indexOf(box.value) < 0) chosen.push(box.value);
+  });
+  return chosen;
 }
-function permissionChecks(role, current){
-  if(role !== 'visualizador' && role !== 'operador') {
-    return '<div class="section-sub">Este perfil cobre a produção inteira. O administrador suporte também cria outros administradores suporte.</div>';
-  }
-  const key = role === 'visualizador' ? 'view' : 'edit';
-  const selected = current && current[key] ? current[key] : MODULE_OPTIONS.map(function(item){ return item.module; });
-  const title = role === 'visualizador' ? 'Pode ver' : 'Pode alterar';
-  return `<div class="section-sub">${title}</div><div class="perm-grid" id="userPerms">${MODULE_OPTIONS.map(function(item){
+function syncSameModule(input){
+  const grid = input.closest('.perm-grid');
+  if(!grid) return;
+  grid.querySelectorAll('input[value="' + input.value + '"]').forEach(function(box){ box.checked = input.checked; });
+}
+function permissionGrid(id, selected){
+  return `<div class="perm-grid" id="${id}">${MODULE_OPTIONS.map(function(item){
     const checked = selected.indexOf(item.module) >= 0 ? 'checked' : '';
-    return `<label class="perm-item"><input type="checkbox" value="${item.module}" ${checked}> ${item.label}</label>`;
+    return `<label class="perm-item"><input type="checkbox" value="${item.module}" ${checked} onchange="syncSameModule(this)"> ${item.label}</label>`;
   }).join('')}</div>`;
+}
+const ROLE_PROFILE_KEY = 'sosystem_role_profiles';
+let accessUserCache = null;
+let profileRole = 'visualizador';
+function profileRoles(){
+  if(sessionUser && sessionUser.role === 'administrador_suporte') return ['visualizador','operador','administrador','administrador_suporte'];
+  return ['visualizador','operador','administrador'];
+}
+function readRoleProfiles(){
+  try{ return JSON.parse(localStorage.getItem(ROLE_PROFILE_KEY) || '{}'); }catch(e){ return {}; }
+}
+function writeRoleProfile(role, permissions){
+  const all = readRoleProfiles();
+  all[role] = permissions;
+  localStorage.setItem(ROLE_PROFILE_KEY, JSON.stringify(all));
+}
+function defaultRolePermissions(role){
+  const all = [];
+  MODULE_OPTIONS.forEach(function(item){ if(all.indexOf(item.module) < 0) all.push(item.module); });
+  if(role === 'visualizador') return { view: all.slice(), edit: [] };
+  return { view: all.slice(), edit: all.slice() };
+}
+function rolePermissions(role){
+  const saved = readRoleProfiles()[role];
+  if(saved && Array.isArray(saved.view) && Array.isArray(saved.edit)) return saved;
+  const sample = (accessUserCache || []).find(function(user){ return user.role === role && user.permissions && Array.isArray(user.permissions.view); });
+  if(sample) return { view: sample.permissions.view || [], edit: sample.permissions.edit || [] };
+  return defaultRolePermissions(role);
+}
+function roleCheckMarkup(role){
+  const current = rolePermissions(role);
+  return `<div class="section-sub">Pode ver</div>${permissionGrid('profileView', current.view || [])}
+    <div class="section-sub">Pode editar</div>${permissionGrid('profileEdit', current.edit || [])}`;
 }
 let settingsChoice = 'empresa';
 function renderConfiguracoes(){
@@ -2544,7 +2579,7 @@ function renderConfiguracoes(){
   const choices = [
     ['empresa', 'Empresa', 'Nome, limites e bloqueio da empresa.'],
     ['usuario', 'Usuário', 'Contas que entram no sistema.'],
-    ['perfil', 'Perfil de Usuário', 'Seu nome, e-mail e senha.']
+    ['perfil', 'Perfil de Usuário', 'Visualizador, operador, ADM e administrador suporte.']
   ];
   el.innerHTML = `
     <div class="section-title">${icon('sliders',19)} Configurações</div>
@@ -2563,10 +2598,23 @@ function renderSettingsPanel(){
   const panel = document.getElementById('settingsPanel');
   if(!panel || !sessionUser) return;
   if(settingsChoice === 'perfil'){
+    const roles = profileRoles();
+    if(roles.indexOf(profileRole) < 0) profileRole = roles[0];
     panel.innerHTML = `
+      ${canManageUsers() ? `<form class="card" style="margin-bottom:14px;" onsubmit="saveRoleProfile(event)">
+        <div class="section-title" style="font-size:16px;">Perfil de usuário</div>
+        <div class="section-sub">O que cada perfil pode ver e editar. Vale para as contas desse perfil.</div>
+        <div class="field"><label>Perfil</label>
+          <select id="roleProfile" onchange="showProfileRole(this.value)">${roles.map(function(role){
+            return `<option value="${role}" ${role===profileRole?'selected':''}>${ROLE_LABELS[role]}</option>`;
+          }).join('')}</select>
+        </div>
+        <div id="profileChecks">${roleCheckMarkup(profileRole)}</div>
+        <button class="btn btn-primary" type="submit">Salvar perfil</button>
+      </form>` : `<div class="card" style="margin-bottom:14px;">Os perfis de acesso são definidos por um administrador.</div>`}
       <form id="profileForm" class="card" onsubmit="saveProfile(event)">
         <div class="section-title" style="font-size:16px;">Seus dados</div>
-        <div class="section-sub">${escapeHtml(ROLE_LABELS[sessionUser.role] || sessionUser.role)}. Esta tela altera só a sua conta.</div>
+        <div class="section-sub">${escapeHtml(ROLE_LABELS[sessionUser.role] || sessionUser.role)}. Esta parte altera só a sua conta.</div>
         <div class="field-row">
           <div class="field"><label>Nome</label><input id="cfgName" required minlength="2" maxlength="80" value="${escapeHtml(sessionUser.name)}"></div>
           <div class="field"><label>E-mail</label><input id="cfgEmail" type="email" required value="${escapeHtml(sessionUser.email)}"></div>
@@ -2577,8 +2625,9 @@ function renderSettingsPanel(){
             <button class="eye-btn" type="button" onclick="togglePassword('cfgPassword', this)">mostrar</button>
           </div>
         </div>
-        <button class="btn btn-primary" type="submit">Salvar perfil</button>
+        <button class="btn btn-primary" type="submit">Salvar dados</button>
       </form>`;
+    if(canManageUsers()) ensureAccessUsers();
     return;
   }
   if(settingsChoice === 'usuario'){
@@ -2588,7 +2637,7 @@ function renderSettingsPanel(){
     panel.innerHTML = canManageUsers() ? `
       <form id="accessUserForm" class="card" style="margin-bottom:14px;" onsubmit="saveAccessUser(event)">
         <div class="section-title" style="font-size:16px;">Contas de acesso</div>
-        <div class="section-sub">Quem entra no sistema, em qual empresa, e o que pode ver ou alterar.</div>
+        <div class="section-sub">Quem entra no sistema e em qual empresa. O que pode ver ou editar fica em Perfil de Usuário.</div>
         <input type="hidden" id="editingUserId" value="">
         <div class="field-row">
           <div class="field"><label>Nome</label><input id="userName" required minlength="2"></div>
@@ -2602,14 +2651,13 @@ function renderSettingsPanel(){
             </div>
           </div>
           <div class="field"><label>Perfil de acesso</label>
-            <select id="userRole" onchange="renderPermissionChoices()">${roles.map(function(role){ return `<option value="${role}">${ROLE_LABELS[role]}</option>`; }).join('')}</select>
+            <select id="userRole" onchange="fillUserCompanySelect()">${roles.map(function(role){ return `<option value="${role}">${ROLE_LABELS[role]}</option>`; }).join('')}</select>
           </div>
         </div>
         <div class="field" id="userCompanyField">
           <label>Empresa</label>
           <select id="userCompany"><option value="">Escolha a empresa</option></select>
         </div>
-        <div id="permissionChoices"></div>
         <button class="btn btn-primary" type="submit">Salvar usuário</button>
       </form>
       <div class="card"><div class="table-wrap"><table>
@@ -2618,7 +2666,7 @@ function renderSettingsPanel(){
       </table></div></div>
       <div class="card" style="margin-top:14px;" id="passwordRequestList">Carregando pedidos de senha…</div>` : `<div class="card">Contas novas são criadas por um administrador. Os seus dados ficam em Perfil de Usuário.</div>`;
     if(canManageUsers()){
-      renderPermissionChoices();
+      fillUserCompanySelect();
       loadAccessUsers();
       loadPasswordRequests();
     }
@@ -2645,13 +2693,6 @@ function fillUserCompanySelect(selectedId){
     return `<option value="${company.id}" ${company.id===current?'selected':''}>${escapeHtml(company.name)}</option>`;
   }).join('');
 }
-function renderPermissionChoices(current){
-  const holder = document.getElementById('permissionChoices');
-  const role = document.getElementById('userRole');
-  if(!holder || !role) return;
-  holder.innerHTML = permissionChecks(role.value, current);
-  fillUserCompanySelect();
-}
 async function loadAccessUsers(){
   const body = document.getElementById('accessUsersBody');
   if(!body) return;
@@ -2659,7 +2700,8 @@ async function loadAccessUsers(){
     try{ accessCompanies = (await accountApi('/api/companies')).data || []; }catch(e){ accessCompanies = []; }
     fillUserCompanySelect();
     const result = await accountApi('/api/users');
-    body.innerHTML = result.data.map(function(user){
+    accessUserCache = result.data || [];
+    body.innerHTML = accessUserCache.map(function(user){
       const mine = sessionUser && sessionUser.id === user.id;
       const missing = user.role !== 'administrador_suporte' && !user.companyId;
       return `<tr>
@@ -2687,8 +2729,39 @@ async function editAccessUser(id){
     document.getElementById('userEmail').value = user.email;
     document.getElementById('userPassword').value = '';
     document.getElementById('userRole').value = user.role;
-    renderPermissionChoices(user.permissions);
     fillUserCompanySelect(user.companyId || '');
+  }catch(error){
+    toast(error.message, 'error');
+  }
+}
+function showProfileRole(role){
+  profileRole = role;
+  const box = document.getElementById('profileChecks');
+  if(box) box.innerHTML = roleCheckMarkup(role);
+}
+async function ensureAccessUsers(){
+  try{ accessUserCache = (await accountApi('/api/users')).data || []; }
+  catch(e){ accessUserCache = accessUserCache || []; }
+  const select = document.getElementById('roleProfile');
+  const box = document.getElementById('profileChecks');
+  if(select && box && !readRoleProfiles()[select.value]) box.innerHTML = roleCheckMarkup(select.value);
+}
+async function saveRoleProfile(event){
+  event.preventDefault();
+  if(!canManageUsers()) return;
+  const role = document.getElementById('roleProfile').value;
+  const permissions = { view: checkedModules('profileView'), edit: checkedModules('profileEdit') };
+  writeRoleProfile(role, permissions);
+  try{
+    const result = await accountApi('/api/users');
+    const targets = (result.data || []).filter(function(user){ return user.role === role; });
+    for(let index = 0; index < targets.length; index++){
+      const updated = await accountApi('/api/users/' + targets[index].id, { method:'PUT', body:{ permissions: permissions } });
+      if(sessionUser && sessionUser.id === targets[index].id) rememberSession(Object.assign({}, sessionUser, updated.data));
+    }
+    accessUserCache = (await accountApi('/api/users')).data || [];
+    renderNav();
+    toast(targets.length ? 'Perfil salvo nas contas desse perfil.' : 'Perfil salvo. As próximas contas já nascem com ele.', 'success');
   }catch(error){
     toast(error.message, 'error');
   }
@@ -2705,7 +2778,7 @@ async function saveProfile(event){
     const updated = await accountApi('/api/users/' + sessionUser.id, { method:'PUT', body: body });
     rememberSession(Object.assign({}, sessionUser, updated.data));
     document.getElementById('cfgPassword').value = '';
-    toast('Perfil salvo.', 'success');
+    toast('Dados salvos.', 'success');
     renderNav();
   }catch(error){
     toast(error.message, 'error');
@@ -2725,8 +2798,7 @@ async function saveAccessUser(event){
     toast('A senha precisa ter 8 caracteres, uma maiúscula, um número e um caractere especial.', 'error');
     return;
   }
-  const permissions = selectedPermissions(role);
-  if(permissions) body.permissions = permissions;
+  body.permissions = rolePermissions(role);
   try{
     if(sessionUser.role === 'administrador_suporte' && role !== 'administrador_suporte'){
       body.companyId = document.getElementById('userCompany').value;
@@ -2748,7 +2820,7 @@ async function saveAccessUser(event){
     }
     event.target.reset();
     document.getElementById('editingUserId').value = '';
-    renderPermissionChoices();
+    fillUserCompanySelect();
     await loadAccessUsers();
   }catch(error){
     toast(error.message, 'error');
@@ -3127,7 +3199,7 @@ function printTasks(){
   const board = document.getElementById('taskBoard');
   const printArea = document.getElementById('printArea');
   if(!board || !printArea) return;
-  printArea.innerHTML = `<div class="print-page"><div class="print-brand">PRODFY</div><div class="print-doc-title">Lista de tarefas PPCP</div>${board.innerHTML}</div>`;
+  printArea.innerHTML = `<div class="print-page"><div class="print-brand">SOSYSTEM</div><div class="print-doc-title">Lista de tarefas PPCP</div>${board.innerHTML}</div>`;
   setTimeout(function(){ window.print(); }, 100);
 }
 let pendingStudy = null;
@@ -3401,12 +3473,15 @@ window.toggleCompanyBlock = toggleCompanyBlock;
 window.resolvePasswordRequest = resolvePasswordRequest;
 window.toggleUserBlock = toggleUserBlock;
 window.logout = logout;
+window.syncSameModule = syncSameModule;
+window.showProfileRole = showProfileRole;
+window.saveRoleProfile = saveRoleProfile;
 window.setSettingsChoice = setSettingsChoice;
 window.saveProfile = saveProfile;
 window.saveAccessUser = saveAccessUser;
 window.deleteAccessUser = deleteAccessUser;
 window.editAccessUser = editAccessUser;
-window.renderPermissionChoices = renderPermissionChoices;
+window.fillUserCompanySelect = fillUserCompanySelect;
 
 init();
 })();

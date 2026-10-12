@@ -44,12 +44,11 @@ export function defaultPermissions(role: UserRole): UserPermissions {
 
 export function sanitizePermissions(role: UserRole, input?: Partial<UserPermissions> | null): UserPermissions {
   const fallback = defaultPermissions(role);
-  if (role === "administrador" || role === "administrador_suporte") return fallback;
-  const view = uniqueModules(input?.view);
-  const edit = role === "visualizador" ? [] : uniqueModules(input?.edit);
-  const visible = uniqueModules([...view, ...edit]);
+  if (!input) return fallback;
+  const view = uniqueModules(input.view);
+  const edit = uniqueModules(input.edit);
   return {
-    view: visible.length ? visible : fallback.view,
+    view: view.length ? view : fallback.view,
     edit
   };
 }
