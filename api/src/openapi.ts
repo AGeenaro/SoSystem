@@ -45,7 +45,7 @@ export const openApiSpec = {
           id: { type: "string", format: "uuid" },
           name: { type: "string", example: "Ana Souza" },
           email: { type: "string", format: "email" },
-          role: { type: "string", enum: ["admin", "user"] },
+          role: { type: "string", enum: ["visualizador", "operador", "administrador", "administrador_suporte"] },
           createdAt: { type: "string", format: "date-time" },
           updatedAt: { type: "string", format: "date-time" }
         }
@@ -87,7 +87,7 @@ export const openApiSpec = {
           {
             type: "object",
             properties: {
-              role: { type: "string", enum: ["admin", "user"] }
+              role: { type: "string", enum: ["visualizador", "operador", "administrador", "administrador_suporte"] }
             }
           }
         ]
@@ -98,7 +98,7 @@ export const openApiSpec = {
           name: { type: "string", minLength: 2, maxLength: 80 },
           email: { type: "string", format: "email" },
           password: { type: "string", minLength: 8, maxLength: 72 },
-          role: { type: "string", enum: ["admin", "user"] }
+          role: { type: "string", enum: ["visualizador", "operador", "administrador", "administrador_suporte"] }
         }
       }
     }

@@ -11,7 +11,11 @@ describe("frontend separado", () => {
     const css = readFileSync(path.join(web, "css/app.css"), "utf8");
     const js = readFileSync(path.join(web, "js/app.js"), "utf8");
     expect(html).toContain('href="css/app.css"');
+    expect(html).toContain('id="loginGate"');
     expect(html).toContain('src="js/app.js"');
+    expect(js).toContain("/monitoramento");
+    expect(js).toContain("/ordens_producao");
+    expect(js).toContain("administrador_suporte");
     expect(html).toContain("serviceWorker.register('sw.js')");
     expect(existsSync(path.join(web, "sw.js"))).toBe(true);
     expect(html).not.toContain("<style>");

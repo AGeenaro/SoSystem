@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { defaultPermissions } from "../access.js";
 import type { NewUser, UserPatch, UserRecord, UserRepository } from "./userRepository.js";
 
 export function createMemoryUserRepository(): UserRepository {
@@ -26,6 +27,7 @@ export function createMemoryUserRepository(): UserRepository {
         email: input.email.toLowerCase(),
         passwordHash: input.passwordHash,
         role: input.role,
+        permissions: input.permissions ?? defaultPermissions(input.role),
         createdAt: now,
         updatedAt: now
       };

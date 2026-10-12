@@ -1,7 +1,7 @@
 import type { RequestHandler } from "express";
 import jwt from "jsonwebtoken";
 import { HttpError } from "./http.js";
-import type { UserRole } from "./repositories/userRepository.js";
+import { isUserRole, type UserRole } from "./access.js";
 
 export type AuthToken = {
   sub: string;
@@ -23,7 +23,7 @@ export function requireAuth(secret: string): RequestHandler {
     }
     try {
       const decoded = jwt.verify(token, secret) as jwt.JwtPayload;
-      if (!decoded.sub || (decoded.role !== "admin" && decoded.role !== "user")) {
+      if (!decoded.sub || typeof decoded.role !== "string" || !isUserRole(decoded.role)) {
         next(new HttpError(401, "UNAUTHORIZED", "Token ausente ou inválido."));
         return;
       }
@@ -45,7 +45,7 @@ export function requireAdmin(): RequestHandler {
       next(new HttpError(401, "UNAUTHORIZED", "Token ausente ou inválido."));
       return;
     }
-    if (req.auth.role !== "admin") {
+    if (req.auth.role !== "administrador" && req.auth.role !== "administrador_suporte") {
       next(new HttpError(403, "FORBIDDEN", "Apenas administradores podem fazer esta operação."));
       return;
     }

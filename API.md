@@ -16,7 +16,7 @@ Authorization: Bearer <accessToken>
 
 O token é emitido em `POST /api/auth/register` e `POST /api/auth/login`. O payload contém `sub` (id do usuário), `email` e `role` (`admin` ou `user`). A validade padrão é `8h` (`JWT_EXPIRES_IN`).
 
-A primeira conta criada por `/api/auth/register` recebe `role: admin`. As seguintes recebem `role: user`. Um administrador pode criar outros usuários e promover papéis.
+A primeira conta criada por `/api/auth/register` recebe `role: administrador_suporte` e o cadastro público fecha. Os perfis seguintes são `visualizador`, `operador`, `administrador` e `administrador_suporte`. O administrador suporte cria qualquer perfil. O administrador cria os demais e não altera contas de suporte. O visualizador não grava produção. `GET /api/auth/status` responde `{ "data": { "needsSetup": true } }` quando ainda não existe conta.
 
 A senha nunca volta nas respostas. Ela é guardada como hash bcrypt.
 

@@ -9,7 +9,26 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.js"></script>
 </head>
 <body>
-<div id="prodfy-app">
+<div id="loginGate" class="login-gate">
+  <div class="login-card card">
+    <div class="brand-mark" style="margin-bottom:14px;">P</div>
+    <div class="section-title">Entrar no Prodfy</div>
+    <div class="section-sub" id="loginHint">Use o e-mail e a senha da sua conta para abrir o chão de fábrica.</div>
+    <div id="loginMessage" class="login-message" hidden></div>
+    <form id="loginForm">
+      <div class="field"><label>E-mail</label><input id="loginEmail" type="email" required autocomplete="username"></div>
+      <div class="field"><label>Senha</label><input id="loginPassword" type="password" required autocomplete="current-password"></div>
+      <button class="btn btn-primary" type="submit">Entrar</button>
+    </form>
+    <form id="setupForm" hidden>
+      <div class="field"><label>Nome</label><input id="setupName" required minlength="2" maxlength="80" autocomplete="name"></div>
+      <div class="field"><label>E-mail</label><input id="setupEmail" type="email" required autocomplete="username"></div>
+      <div class="field"><label>Senha</label><input id="setupPassword" type="password" required minlength="8" maxlength="72" autocomplete="new-password"></div>
+      <button class="btn btn-primary" type="submit">Criar administrador suporte</button>
+    </form>
+  </div>
+</div>
+<div id="prodfy-app" class="is-locked">
   <div class="modal-overlay" id="sidebarScrim" onclick="closeSidebar()"></div>
   <aside class="sidebar" id="sidebar">
     <div class="brand">
@@ -21,7 +40,7 @@
     </div>
     <nav class="nav" id="navList"></nav>
     <div class="sidebar-foot">
-      <a class="nav-item" href="conta.html" style="margin-bottom:8px;">Conta e API</a>
+      <div id="sessionFoot" style="margin-bottom:8px;"></div>
       <div><b>Fábrica:</b> Chão de Fábrica 01</div>
       <div id="footClock" style="margin-top:4px;"></div>
     </div>

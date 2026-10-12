@@ -5,7 +5,7 @@ declare module "express-serve-static-core" {
     auth?: {
       sub: string;
       email: string;
-      role: "admin" | "user";
+      role: "visualizador" | "operador" | "administrador" | "administrador_suporte";
     };
   }
 }

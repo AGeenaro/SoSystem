@@ -61,7 +61,7 @@
       document.getElementById("profileName").value = me.data.name;
       document.getElementById("profileEmail").value = me.data.email;
       var admin = document.getElementById("adminPanel");
-      if (me.data.role === "admin") {
+      if (me.data.role === "administrador" || me.data.role === "administrador_suporte") {
         admin.style.display = "block";
         await loadUsers();
       } else {

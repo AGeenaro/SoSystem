@@ -1,4 +1,6 @@
-export type UserRole = "admin" | "user";
+import type { UserPermissions, UserRole } from "../access.js";
+
+export type { UserRole };
 
 export type UserRecord = {
   id: string;
@@ -6,6 +8,7 @@ export type UserRecord = {
   email: string;
   passwordHash: string;
   role: UserRole;
+  permissions: UserPermissions;
   createdAt: string;
   updatedAt: string;
 };
@@ -16,9 +19,10 @@ export type NewUser = {
   email: string;
   passwordHash: string;
   role: UserRole;
+  permissions?: UserPermissions;
 };
 
-export type UserPatch = Partial<Pick<UserRecord, "name" | "email" | "passwordHash" | "role">>;
+export type UserPatch = Partial<Pick<UserRecord, "name" | "email" | "passwordHash" | "role" | "permissions">>;
 
 export interface UserRepository {
   count(): Promise<number>;
@@ -38,6 +42,7 @@ export function toPublicUser(user: UserRecord): PublicUser {
     name: user.name,
     email: user.email,
     role: user.role,
+    permissions: user.permissions,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt
   };

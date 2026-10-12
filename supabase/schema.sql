@@ -9,7 +9,8 @@ create table if not exists public.users (
   name text not null,
   email text not null unique,
   password_hash text not null,
-  role text not null default 'user' check (role in ('admin', 'user')),
+  role text not null default 'operador',
+  permissions jsonb not null default '{"view":["monitoramento","ordens","apontamento","recursos","engenharia","funcionarios","acompanhamento"],"edit":["monitoramento","ordens","apontamento","recursos","engenharia","funcionarios","acompanhamento"]}'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -63,3 +64,27 @@ alter table public.production_meta enable row level security;
 
 revoke all on table public.production_records from anon, authenticated;
 revoke all on table public.production_meta from anon, authenticated;
+
+alter table public.users add column if not exists permissions jsonb not null default '{"view":["monitoramento","ordens","apontamento","recursos","engenharia","funcionarios","acompanhamento"],"edit":["monitoramento","ordens","apontamento","recursos","engenharia","funcionarios","acompanhamento"]}'::jsonb;
+
+do $$
+declare constraint_name text;
+begin
+  for constraint_name in
+    select con.conname
+    from pg_constraint con
+    join pg_class rel on rel.oid = con.conrelid
+    join pg_namespace nsp on nsp.oid = rel.relnamespace
+    where nsp.nspname = 'public'
+      and rel.relname = 'users'
+      and con.contype = 'c'
+      and pg_get_constraintdef(con.oid) ilike '%role%'
+  loop
+    execute format('alter table public.users drop constraint %I', constraint_name);
+  end loop;
+end $$;
+
+alter table public.users drop constraint if exists users_role_check;
+update public.users set role = 'administrador_suporte' where role = 'admin';
+update public.users set role = 'operador' where role = 'user';
+alter table public.users add constraint users_role_check check (role in ('visualizador', 'operador', 'administrador', 'administrador_suporte'));

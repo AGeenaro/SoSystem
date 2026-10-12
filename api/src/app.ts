@@ -3,14 +3,15 @@ import cors from "cors";
 import express, { type Express } from "express";
 import helmet from "helmet";
 import swaggerUi from "swagger-ui-express";
-import { requireAdmin, requireAuth, signToken } from "./auth.js";
+import { defaultPermissions, isManager, sanitizePermissions, type UserRole } from "./access.js";
+import { requireAuth, signToken } from "./auth.js";
 import { HttpError, asyncHandler, errorHandler } from "./http.js";
 import { openApiSpec } from "./openapi.js";
 import { buildLimiter } from "./rateLimit.js";
 import type { ProductionRecord } from "./production/merge.js";
 import type { ProductionRepository } from "./repositories/productionRepository.js";
 import { createMemoryProductionRepository } from "./repositories/memoryProductionRepository.js";
-import { toPublicUser, type UserPatch, type UserRepository, type UserRole } from "./repositories/userRepository.js";
+import { toPublicUser, type UserPatch, type UserRecord, type UserRepository } from "./repositories/userRepository.js";
 import { createUserSchema, idParamSchema, loginSchema, productionSyncSchema, registerSchema, updateUserSchema } from "./schemas.js";
 
 export type AppOptions = {
@@ -71,7 +72,7 @@ export function createApp(options: AppOptions): Express {
 
   const auth = requireAuth(options.jwtSecret);
 
-  async function issueSession(user: { id: string; email: string; role: UserRole; name: string; createdAt: string; updatedAt: string }) {
+  async function issueSession(user: UserRecord) {
     const accessToken = signToken(
       { sub: user.id, email: user.email, role: user.role },
       options.jwtSecret,
@@ -85,17 +86,27 @@ export function createApp(options: AppOptions): Express {
     };
   }
 
+  app.get("/api/auth/status", asyncHandler(async (_req, res) => {
+    const count = await options.users.count();
+    res.json({ data: { needsSetup: count === 0 } });
+  }));
+
   app.post("/api/auth/register", authLimiter, asyncHandler(async (req, res) => {
     const input = parseBody(registerSchema, req.body);
     const email = input.email.toLowerCase();
     const existing = await options.users.findByEmail(email);
     if (existing) throw new HttpError(409, "EMAIL_IN_USE", "Já existe um usuário com este e-mail.");
     const count = await options.users.count();
+    if (count > 0) {
+      throw new HttpError(403, "REGISTRATION_CLOSED", "O cadastro público está fechado. Peça a um administrador.");
+    }
+    const role: UserRole = "administrador_suporte";
     const user = await options.users.create({
       name: input.name,
       email,
       passwordHash: await bcrypt.hash(input.password, bcryptRounds),
-      role: count === 0 ? "admin" : "user"
+      role,
+      permissions: defaultPermissions(role)
     });
     res.status(201).json({ data: await issueSession(user) });
   }));
@@ -114,13 +125,39 @@ export function createApp(options: AppOptions): Express {
     res.json({ data: toPublicUser(user) });
   }));
 
-  app.get("/api/users", auth, requireAdmin(), asyncHandler(async (_req, res) => {
+  async function actorFrom(req: { auth?: { sub: string } }) {
+    const user = await options.users.findById(req.auth!.sub);
+    if (!user) throw new HttpError(401, "UNAUTHORIZED", "Usuário do token não existe mais.");
+    return user;
+  }
+
+  function assertCanManage(actor: UserRecord, target: UserRecord | null, nextRole?: UserRole) {
+    if (!isManager(actor.role)) {
+      throw new HttpError(403, "FORBIDDEN", "Seu perfil não gerencia usuários.");
+    }
+    if (target?.role === "administrador_suporte" && actor.role !== "administrador_suporte") {
+      throw new HttpError(403, "FORBIDDEN", "Somente o administrador suporte altera esta conta.");
+    }
+    if (nextRole === "administrador_suporte" && actor.role !== "administrador_suporte") {
+      throw new HttpError(403, "FORBIDDEN", "Somente o administrador suporte cria este perfil.");
+    }
+  }
+
+  app.get("/api/users", auth, asyncHandler(async (req, res) => {
+    const actor = await actorFrom(req);
+    if (!isManager(actor.role)) throw new HttpError(403, "FORBIDDEN", "Seu perfil não gerencia usuários.");
     const users = await options.users.list();
-    res.json({ data: users.map(toPublicUser) });
+    const visible = actor.role === "administrador_suporte"
+      ? users
+      : users.filter((user) => user.role !== "administrador_suporte");
+    res.json({ data: visible.map(toPublicUser) });
   }));
 
-  app.post("/api/users", auth, requireAdmin(), asyncHandler(async (req, res) => {
+  app.post("/api/users", auth, asyncHandler(async (req, res) => {
+    const actor = await actorFrom(req);
     const input = parseBody(createUserSchema, req.body);
+    const role = input.role ?? "operador";
+    assertCanManage(actor, null, role);
     const email = input.email.toLowerCase();
     if (await options.users.findByEmail(email)) {
       throw new HttpError(409, "EMAIL_IN_USE", "Já existe um usuário com este e-mail.");
@@ -129,29 +166,37 @@ export function createApp(options: AppOptions): Express {
       name: input.name,
       email,
       passwordHash: await bcrypt.hash(input.password, bcryptRounds),
-      role: input.role ?? "user"
+      role,
+      permissions: sanitizePermissions(role, input.permissions)
     });
     res.status(201).json({ data: toPublicUser(user) });
   }));
 
   app.get("/api/users/:id", auth, asyncHandler(async (req, res) => {
+    const actor = await actorFrom(req);
     const { id } = parseBody(idParamSchema, req.params);
-    if (req.auth!.role !== "admin" && req.auth!.sub !== id) {
+    if (!isManager(actor.role) && actor.id !== id) {
       throw new HttpError(403, "FORBIDDEN", "Você só pode consultar a própria conta.");
     }
     const user = await options.users.findById(id);
     if (!user) throw new HttpError(404, "NOT_FOUND", "Usuário não encontrado.");
+    if (actor.id !== id) assertCanManage(actor, user);
     res.json({ data: toPublicUser(user) });
   }));
 
   app.put("/api/users/:id", auth, asyncHandler(async (req, res) => {
+    const actor = await actorFrom(req);
     const { id } = parseBody(idParamSchema, req.params);
     const input = parseBody(updateUserSchema, req.body);
-    if (req.auth!.role !== "admin" && req.auth!.sub !== id) {
-      throw new HttpError(403, "FORBIDDEN", "Você só pode atualizar a própria conta.");
+    const target = await options.users.findById(id);
+    if (!target) throw new HttpError(404, "NOT_FOUND", "Usuário não encontrado.");
+    const self = actor.id === id;
+    if (!self) assertCanManage(actor, target, input.role);
+    if (self && (input.role || input.permissions)) {
+      throw new HttpError(403, "FORBIDDEN", "Você não altera o próprio perfil de acesso.");
     }
-    if (input.role && req.auth!.role !== "admin") {
-      throw new HttpError(403, "FORBIDDEN", "Você não pode alterar papéis.");
+    if (!self && !isManager(actor.role)) {
+      throw new HttpError(403, "FORBIDDEN", "Você só pode atualizar a própria conta.");
     }
     if (input.email) {
       const existing = await options.users.findByEmail(input.email);
@@ -162,8 +207,12 @@ export function createApp(options: AppOptions): Express {
     const patch: UserPatch = {};
     if (input.name !== undefined) patch.name = input.name;
     if (input.email !== undefined) patch.email = input.email.toLowerCase();
-    if (input.role !== undefined) patch.role = input.role;
     if (input.password) patch.passwordHash = await bcrypt.hash(input.password, bcryptRounds);
+    const nextRole = input.role ?? target.role;
+    if (!self && input.role !== undefined) patch.role = input.role;
+    if (!self && (input.permissions !== undefined || input.role !== undefined)) {
+      patch.permissions = sanitizePermissions(nextRole, input.permissions ?? target.permissions);
+    }
     const updated = await options.users.update(id, patch);
     if (!updated) throw new HttpError(404, "NOT_FOUND", "Usuário não encontrado.");
     res.json({ data: toPublicUser(updated) });
@@ -174,6 +223,10 @@ export function createApp(options: AppOptions): Express {
   }));
 
   app.post("/api/production/sync", auth, asyncHandler(async (req, res) => {
+    const actor = await actorFrom(req);
+    if (actor.role === "visualizador") {
+      throw new HttpError(403, "FORBIDDEN", "O visualizador não altera a produção.");
+    }
     const input = parseBody(productionSyncSchema, req.body);
     const records: ProductionRecord[] = input.records.map((record) => ({
       kind: record.kind,
@@ -190,11 +243,15 @@ export function createApp(options: AppOptions): Express {
     res.json({ data: snapshot });
   }));
 
-  app.delete("/api/users/:id", auth, requireAdmin(), asyncHandler(async (req, res) => {
+  app.delete("/api/users/:id", auth, asyncHandler(async (req, res) => {
+    const actor = await actorFrom(req);
     const { id } = parseBody(idParamSchema, req.params);
-    if (req.auth!.sub === id) {
+    if (actor.id === id) {
       throw new HttpError(403, "FORBIDDEN", "Você não pode excluir a própria conta.");
     }
+    const target = await options.users.findById(id);
+    if (!target) throw new HttpError(404, "NOT_FOUND", "Usuário não encontrado.");
+    assertCanManage(actor, target);
     const removed = await options.users.delete(id);
     if (!removed) throw new HttpError(404, "NOT_FOUND", "Usuário não encontrado.");
     res.status(204).send();

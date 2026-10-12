@@ -25,6 +25,7 @@ const ICONS = {
   gear: '<circle cx="12" cy="12" r="3.2"/><path d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.5-2-3.4-2.4 1a7.6 7.6 0 0 0-1.7-1L15 3h-4l-.3 2.1a7.6 7.6 0 0 0-1.7 1l-2.4-1-2 3.4L6.6 11a7.6 7.6 0 0 0 0 2l-2 1.5 2 3.4 2.4-1a7.6 7.6 0 0 0 1.7 1L11 21h4l.3-2.1a7.6 7.6 0 0 0 1.7-1l2.4 1 2-3.4z"/>',
   users: '<circle cx="8.5" cy="8" r="3.2"/><path d="M2.5 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.6"/><path d="M15.5 14.2c2.6.3 4.5 2.5 4.5 5.2"/>',
   search: '<circle cx="10.5" cy="10.5" r="6.5"/><line x1="20" y1="20" x2="15.3" y2="15.3"/>',
+  sliders: '<line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/><circle cx="8" cy="6" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="10" cy="18" r="2"/>',
   play: '<circle cx="12" cy="12" r="9"/><polygon points="10 8 16 12 10 16"/>',
   plus: '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
   edit: '<path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3z"/><line x1="14" y1="7" x2="17" y2="10"/>',
@@ -286,10 +287,11 @@ async function syncNow(){
   syncing = true;
   setSyncPill('Sincronizando…');
   try{
-    const response = await fetch(apiBase() + '/api/production/sync', {
-      method: 'POST',
+    const viewing = sessionUser && sessionUser.role === 'visualizador';
+    const response = await fetch(apiBase() + (viewing ? '/api/production' : '/api/production/sync'), {
+      method: viewing ? 'GET' : 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-      body: JSON.stringify(buildChanges())
+      body: viewing ? undefined : JSON.stringify(buildChanges())
     });
     if(response.status === 401){
       setSyncPill('Entre de novo para sincronizar', true);
@@ -376,6 +378,7 @@ function startClock(){
     if(pc) pc.innerHTML = fmtTime(d) + '<small>' + fmtDate(d) + '</small>';
   }
   tick();
+  if(clockTimer) clearInterval(clockTimer);
   clockTimer = setInterval(tick, 1000);
 }
 
@@ -442,14 +445,83 @@ function renderTopbarPills(){
 
 /* ===================== NAV ===================== */
 const NAV = [
-  {id:'dashboard', label:'Monitoramento', icn:'grid'},
-  {id:'ordens', label:'Ordens de Produção', icn:'clipboard'},
-  {id:'apontamento', label:'Apontamento', icn:'clock'},
-  {id:'recursos', label:'Recursos', icn:'wrench'},
-  {id:'engenharia', label:'Engenharia de Produto', icn:'gear'},
-  {id:'funcionarios', label:'Funcionários', icn:'users'},
-  {id:'acompanhamento', label:'Acompanhamento', icn:'search'}
+  {id:'dashboard', module:'monitoramento', path:'/monitoramento', label:'Monitoramento', icn:'grid'},
+  {id:'ordens', module:'ordens', path:'/ordens_producao', label:'Ordens de Produção', icn:'clipboard'},
+  {id:'apontamento', module:'apontamento', path:'/apontamento', label:'Apontamento', icn:'clock'},
+  {id:'recursos', module:'recursos', path:'/recursos', label:'Recursos', icn:'wrench'},
+  {id:'engenharia', module:'engenharia', path:'/engenharia', label:'Engenharia de Produto', icn:'gear'},
+  {id:'funcionarios', module:'funcionarios', path:'/funcionarios', label:'Funcionários', icn:'users'},
+  {id:'acompanhamento', module:'acompanhamento', path:'/acompanhamento', label:'Acompanhamento', icn:'search'},
+  {id:'configuracoes', module:'configuracoes', path:'/configuracoes', label:'Configurações', icn:'sliders'}
 ];
+const ROLE_LABELS = {
+  visualizador:'Visualizador',
+  operador:'Operador',
+  administrador:'Administrador',
+  administrador_suporte:'Administrador suporte'
+};
+const SESSION_KEY = 'prodfy_session';
+let sessionUser = null;
+let returnPath = '';
+function escapeHtml(value){
+  return String(value == null ? '' : value).replace(/[&<>"']/g, function(char){
+    return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[char];
+  });
+}
+function readSessionCache(){
+  try{ return JSON.parse(localStorage.getItem(SESSION_KEY) || 'null'); }catch(e){ return null; }
+}
+function rememberSession(user){
+  sessionUser = user;
+  if(user) localStorage.setItem(SESSION_KEY, JSON.stringify(user));
+  else localStorage.removeItem(SESSION_KEY);
+}
+function moduleOf(id){
+  const item = NAV.find(function(entry){ return entry.id === id; });
+  return item ? item.module : id;
+}
+function permissionList(user){
+  const all = NAV.filter(function(entry){ return entry.module !== 'configuracoes'; }).map(function(entry){ return entry.module; });
+  if(!user) return { view: [], edit: [] };
+  if(user.role === 'administrador' || user.role === 'administrador_suporte') return { view: all, edit: all };
+  const stored = user.permissions || {};
+  const view = Array.isArray(stored.view) ? stored.view : all;
+  const edit = user.role === 'visualizador' ? [] : (Array.isArray(stored.edit) ? stored.edit : []);
+  return { view: view, edit: edit };
+}
+function canView(module){
+  if(module === 'configuracoes') return true;
+  return permissionList(sessionUser).view.indexOf(module) >= 0;
+}
+function canEdit(module){
+  if(!sessionUser || sessionUser.role === 'visualizador') return false;
+  return permissionList(sessionUser).edit.indexOf(module) >= 0;
+}
+function canManageUsers(){
+  return !!sessionUser && (sessionUser.role === 'administrador' || sessionUser.role === 'administrador_suporte');
+}
+function deny(module){
+  if(canEdit(module)) return false;
+  toast('Seu perfil não altera esta área.', 'error');
+  return true;
+}
+function firstVisibleTab(){
+  const found = NAV.find(function(entry){ return entry.module !== 'configuracoes' && canView(entry.module); });
+  return found ? found.id : 'configuracoes';
+}
+function tabFromPath(pathname){
+  const path = (pathname || '/').replace(/\/index\.html$/, '').replace(/\/$/, '') || '/';
+  if(path === '/' || path === '/login') return null;
+  const item = NAV.find(function(entry){ return entry.path === path; });
+  return item ? item.id : null;
+}
+function applyAccess(){
+  document.querySelectorAll('[data-edit]').forEach(function(el){
+    const allowed = canEdit(el.getAttribute('data-edit'));
+    if(el.tagName === 'INPUT' || el.tagName === 'SELECT' || el.tagName === 'TEXTAREA') el.disabled = !allowed;
+    else el.style.display = allowed ? '' : 'none';
+  });
+}
 function navBadge(id){
   if(id==='ordens') return state.orders.filter(o=>o.status!=='Concluída').length;
   if(id==='apontamento') return state.punches.filter(p=>p.status==='Aberto').length;
@@ -459,24 +531,35 @@ function navBadge(id){
 }
 function renderNav(){
   const nav = document.getElementById('navList');
-  nav.innerHTML = NAV.map(n=>{
+  nav.innerHTML = NAV.filter(function(n){ return canView(n.module); }).map(n=>{
     const badge = navBadge(n.id);
     return `<div class="nav-item ${n.id===activeTab?'active':''}" onclick="setTab('${n.id}')">
       <span class="ic">${icon(n.icn,16)}</span><span class="nlabel">${n.label}</span>
       ${badge>0?`<span class="nav-badge">${badge}</span>`:''}
     </div>`;
   }).join('');
+  const foot = document.getElementById('sessionFoot');
+  if(foot && sessionUser){
+    foot.innerHTML = `<div style="color:#fff; font-weight:700;">${escapeHtml(sessionUser.name)}</div><div>${escapeHtml(ROLE_LABELS[sessionUser.role] || sessionUser.role)}</div><button class="btn btn-sm" style="margin-top:8px;" type="button" onclick="logout()">Sair</button>`;
+  }
 }
-function setTab(id){
+function setTab(id, options){
+  options = options || {};
+  if(!canView(moduleOf(id))) id = firstVisibleTab();
   activeTab = id;
   renderNav();
   const meta = NAV.find(n=>n.id===id);
   document.getElementById('topTitle').textContent = meta.label;
   document.getElementById('topEyebrow').textContent = 'Prodfy · Chão de Fábrica';
   document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
-  document.getElementById('panel-'+id).classList.add('active');
+  const panel = document.getElementById('panel-'+id);
+  if(panel) panel.classList.add('active');
   closeSidebar();
   renderActiveTab();
+  applyAccess();
+  if(!options.quiet && meta && location.pathname !== meta.path){
+    history[options.replace ? 'replaceState' : 'pushState']({ tab:id }, '', meta.path);
+  }
 }
 function renderActiveTab(){
   renderTopbarPills();
@@ -487,6 +570,7 @@ function renderActiveTab(){
   else if(activeTab==='engenharia') renderEngenharia();
   else if(activeTab==='funcionarios') renderFuncionarios();
   else if(activeTab==='acompanhamento') renderAcompanhamento();
+  else if(activeTab==='configuracoes') renderConfiguracoes();
 }
 function openSidebar(){ document.getElementById('sidebar').classList.add('open'); document.getElementById('sidebarScrim').classList.add('open'); }
 function closeSidebar(){ document.getElementById('sidebar').classList.remove('open'); document.getElementById('sidebarScrim').classList.remove('open'); }
@@ -534,6 +618,7 @@ function renderShell(){
     <div class="tab-panel" id="panel-engenharia"></div>
     <div class="tab-panel" id="panel-funcionarios"></div>
     <div class="tab-panel" id="panel-acompanhamento"></div>
+    <div class="tab-panel" id="panel-configuracoes"></div>
   `;
   document.getElementById('panel-'+activeTab).classList.add('active');
 }
@@ -572,7 +657,7 @@ function renderDashboard(){
           <select id="dashSetorSelect" onchange="dashSetor=this.value; renderDashLists();"></select>
         </div>
         <button class="btn btn-ghost" onclick="clearDashFilters()">Limpar filtros</button>
-        <button class="btn btn-danger" onclick="zerarAlocacoes()">Zerar</button>
+        <button class="btn btn-danger" data-edit="monitoramento" onclick="zerarAlocacoes()">Zerar</button>
       </div>
     </div>
 
@@ -582,14 +667,14 @@ function renderDashboard(){
           <div class="section-title" style="font-size:15px; margin-bottom:2px;">${icon('users',17)} Funcionários</div>
           <div class="section-sub" style="margin-bottom:0;" id="empCountLabel"></div>
         </div>
-        <button class="btn btn-primary btn-sm" onclick="openEmployeeModal()">${icon('plus',13)} Adicionar Funcionário</button>
+        <button class="btn btn-primary btn-sm" data-edit="funcionarios" onclick="openEmployeeModal()">${icon('plus',13)} Adicionar Funcionário</button>
       </div>
       <div class="emp-scroll" id="empScrollList"></div>
     </div>
 
     <div class="toolbar">
       <div class="section-title" style="font-size:15px; margin-bottom:0;">${icon('building',17)} Células de Produção</div>
-      <button class="btn btn-primary btn-sm" onclick="openResourceModal()">${icon('plus',13)} Nova Célula</button>
+      <button class="btn btn-primary btn-sm" data-edit="recursos" onclick="openResourceModal()">${icon('plus',13)} Nova Célula</button>
     </div>
     <div class="grid grid-3" id="resourceGrid" style="margin-bottom:20px;"></div>
 
@@ -643,13 +728,14 @@ function clearDashFilters(){
   renderDashLists();
 }
 async function zerarAlocacoes(){
+  if(deny('monitoramento')) return;
   if(!confirm('Isso vai remover todos os funcionários alocados de todas as células. Confirmar?')) return;
   state.resources.forEach(r=>r.funcionarios=[]);
   await persist();
   renderDashLists();
   toast('Alocações zeradas.', 'success');
 }
-function renderDashLists(){ renderEmpScroll(); renderResourceGrid(); }
+function renderDashLists(){ renderEmpScroll(); renderResourceGrid(); applyAccess(); }
 function renderEmpScroll(){
   const holder = document.getElementById('empScrollList');
   if(!holder) return;
@@ -691,14 +777,14 @@ function renderResourceGrid(){
     const chips = r.funcionarios.map(empId=>{
       const e = state.employees.find(x=>x.id===empId);
       if(!e) return '';
-      return `<div class="chip">${employeeAvatarHTML(e,'chip-avatar')}${e.nome}<span class="chip-x" onclick="unassignEmployee('${r.id}','${empId}')">×</span></div>`;
+      return `<div class="chip">${employeeAvatarHTML(e,'chip-avatar')}${e.nome}<span class="chip-x" data-edit="recursos" onclick="unassignEmployee('${r.id}','${empId}')">×</span></div>`;
     }).join('');
     return `<div class="res-card" id="rescard-${r.id}" ondragover="event.preventDefault(); this.classList.add('drop-hover');" ondragleave="this.classList.remove('drop-hover');" ondrop="onResourceDrop(event,'${r.id}')">
       <div class="res-head">
         <div class="res-code">${r.nome}</div>
         <div style="display:flex; align-items:center; gap:2px;">
-          <button class="res-icon-btn" title="Editar célula" onclick="openResourceModal('${r.id}')">${icon('edit',14)}</button>
-          <button class="res-icon-btn danger" title="Remover célula" onclick="removeResource('${r.id}')">${icon('trash',14)}</button>
+          <button class="res-icon-btn" data-edit="recursos" title="Editar célula" onclick="openResourceModal('${r.id}')">${icon('edit',14)}</button>
+          <button class="res-icon-btn danger" data-edit="recursos" title="Remover célula" onclick="removeResource('${r.id}')">${icon('trash',14)}</button>
         </div>
       </div>
       <div class="res-desc">${r.descricao}</div>
@@ -706,7 +792,7 @@ function renderResourceGrid(){
         <span class="badge badge-gray">${r.setor}</span>
         <span class="badge badge-gray">${r.funcionarios.length} funcionário(s)</span>
       </div>
-      <select class="status-select st-${r.status}" onchange="changeResourceStatus('${r.id}', this.value)">
+      <select class="status-select st-${r.status}" data-edit="recursos" onchange="changeResourceStatus('${r.id}', this.value)">
         <option ${r.status==='Produzindo'?'selected':''}>Produzindo</option>
         <option ${r.status==='Parada'?'selected':''}>Parada</option>
         <option ${r.status==='Manutenção'?'selected':''}>Manutenção</option>
@@ -715,7 +801,7 @@ function renderResourceGrid(){
       <div class="dropzone ${chips?'has-people':''}">
         ${chips || '<span class="dropzone-hint">Arraste funcionários para esta célula</span>'}
       </div>
-      <button class="btn btn-ghost btn-block btn-sm" onclick="openAssignModal('${r.id}')">${icon('plus',13)} Adicionar funcionário</button>
+      <button class="btn btn-ghost btn-block btn-sm" data-edit="recursos" onclick="openAssignModal('${r.id}')">${icon('plus',13)} Adicionar funcionário</button>
     </div>`;
   }).join('') : `<div class="empty-state" style="grid-column:1/-1;"><div class="ic">${icon('building',30)}</div>Nenhuma célula encontrada. Clique em "Nova Célula" para começar.</div>`;
 }
@@ -823,6 +909,7 @@ function donutSVG(abertas, andamento, concluidas){
 
 /* --- resource CRUD & assignment --- */
 function openResourceModal(id){
+  if(deny('recursos')) return;
   document.getElementById('resId').value = id || '';
   if(id){
     const r = resourceById(id);
@@ -839,6 +926,7 @@ function openResourceModal(id){
   openModal('modalResource');
 }
 async function saveResource(){
+  if(deny('recursos')) return;
   const id = document.getElementById('resId').value;
   const nome = document.getElementById('resNome').value.trim();
   const descricao = document.getElementById('resDescricao').value.trim();
@@ -854,6 +942,7 @@ async function saveResource(){
   toast('Célula salva com sucesso.', 'success');
 }
 async function removeResource(id){
+  if(deny('recursos')) return;
   if(!confirm('Remover esta célula? Os funcionários alocados serão liberados.')) return;
   state.resources = state.resources.filter(r=>r.id!==id);
   await persist();
@@ -862,6 +951,7 @@ async function removeResource(id){
   renderRecursosTable();
 }
 async function changeResourceStatus(id, status){
+  if(deny('recursos')) return;
   resourceById(id).status = status;
   await persist();
   renderResourceGrid();
@@ -869,6 +959,7 @@ async function changeResourceStatus(id, status){
 }
 function onEmpDragStart(ev, empId){ ev.dataTransfer.setData('text/plain', empId); }
 async function onResourceDrop(ev, resId){
+  if(deny('recursos')) return;
   ev.preventDefault();
   ev.currentTarget.classList.remove('drop-hover');
   const empId = ev.dataTransfer.getData('text/plain');
@@ -876,6 +967,7 @@ async function onResourceDrop(ev, resId){
   await assignEmployeeToResource(resId, empId);
 }
 async function assignEmployeeToResource(resId, empId){
+  if(deny('recursos')) return;
   const emp = state.employees.find(e=>e.id===empId);
   if(!emp){ return; }
   if(isOnVacation(emp)){ toast('Este funcionário está de férias.', 'error'); return; }
@@ -887,12 +979,14 @@ async function assignEmployeeToResource(resId, empId){
   toast(emp.nome + ' alocado em ' + target.nome + '.', 'success');
 }
 async function unassignEmployee(resId, empId){
+  if(deny('recursos')) return;
   const r = resourceById(resId);
   r.funcionarios = r.funcionarios.filter(id=>id!==empId);
   await persist();
   renderDashLists();
 }
 function openAssignModal(resId){
+  if(deny('recursos')) return;
   document.getElementById('assignResId').value = resId;
   const sel = document.getElementById('assignEmpSelect');
   const available = state.employees.filter(e=>!isOnVacation(e));
@@ -916,7 +1010,7 @@ function renderRecursos(){
     <div class="section-sub">Cadastro das máquinas, células e recursos utilizados no apontamento de produção e no monitoramento.</div>
     <div class="toolbar">
       <div class="search-box"><span class="search-ic">${icon('search',15)}</span><input placeholder="Buscar código, descrição ou setor..." oninput="recSearch=this.value; renderRecursosTable();"></div>
-      <button class="btn btn-primary" onclick="openResourceModal()">${icon('plus',14)} Novo Recurso</button>
+      <button class="btn btn-primary" data-edit="recursos" onclick="openResourceModal()">${icon('plus',14)} Novo Recurso</button>
     </div>
     <div class="table-wrap">
       <table>
@@ -942,11 +1036,12 @@ function renderRecursosTable(){
       <td><span class="badge ${statusBadgeClass}"><span class="dot"></span>${r.status}</span></td>
       <td>${nomes.length ? nomes.join(', ') : '<span style="color:var(--text-faint);">Nenhum</span>'}</td>
       <td>
-        <button class="icon-btn" onclick="openResourceModal('${r.id}')" title="Editar">${icon('edit',14)}</button>
-        <button class="icon-btn danger" onclick="removeResourceFromRecursos('${r.id}')" title="Remover">${icon('trash',14)}</button>
+        <button class="icon-btn" data-edit="recursos" onclick="openResourceModal('${r.id}')" title="Editar">${icon('edit',14)}</button>
+        <button class="icon-btn danger" data-edit="recursos" onclick="removeResourceFromRecursos('${r.id}')" title="Remover">${icon('trash',14)}</button>
       </td>
     </tr>`;
   }).join('') : `<tr class="empty-row"><td colspan="6">Nenhum recurso cadastrado. Clique em "Novo Recurso" para começar.</td></tr>`;
+  applyAccess();
 }
 async function removeResourceFromRecursos(id){
   await removeResource(id);
@@ -963,7 +1058,7 @@ function renderOrdens(){
     <div class="section-sub">Gere ordens com base nos códigos cadastrados na Engenharia de Produto e seus tempos de fabricação.</div>
     <div class="toolbar">
       <div class="search-box"><span class="search-ic">${icon('search',15)}</span><input placeholder="Buscar por OP ou código..." oninput="ordensSearch=this.value; renderOrdensTable();"></div>
-      <button class="btn btn-primary" onclick="openOrderModal()">${icon('plus',14)} Nova Ordem de Produção</button>
+      <button class="btn btn-primary" data-edit="ordens" onclick="openOrderModal()">${icon('plus',14)} Nova Ordem de Produção</button>
     </div>
     <div class="table-wrap">
       <table>
@@ -997,6 +1092,7 @@ function renderOrdensTable(){
   }).join('') : `<tr class="empty-row"><td colspan="8">Nenhuma ordem de produção encontrada. Clique em "Nova Ordem de Produção" para começar.</td></tr>`;
 }
 function openOrderModal(){
+  if(deny('ordens')) return;
   const sel = document.getElementById('ordProduto');
   if(!state.products.length){ toast('Cadastre ao menos um código na Engenharia de Produto primeiro.', 'error'); return; }
   sel.innerHTML = state.products.map(p=>`<option value="${p.codigo}">${p.codigo} — ${p.descricao} (${p.classificacao})</option>`).join('');
@@ -1018,6 +1114,7 @@ function renderOrderPreview(){
     <div style="color:var(--blue); font-weight:700;">Tempo total estimado: ${total.toFixed(0)} min (${(total/60).toFixed(1)} h)</div>`;
 }
 async function saveOrder(shouldPrint){
+  if(deny('ordens')) return;
   const codigo = document.getElementById('ordProduto').value;
   const qtd = Number(document.getElementById('ordQtd').value);
   const prod = productByCode(codigo);
@@ -1122,7 +1219,7 @@ function renderEngenharia(){
     <div class="section-sub">Cadastro de códigos ERP, descrições, classificação e tempos de fabricação utilizados para gerar as ordens de produção. Padrão de código: <b>30.2000.XXXX</b> para PI (produto intermediário) e <b>30.3000.XXXX</b> para PF (produto final).</div>
     <div class="toolbar">
       <div class="search-box"><span class="search-ic">${icon('search',15)}</span><input placeholder="Buscar código ou descrição..." oninput="engSearch=this.value; renderEngenhariaTable();"></div>
-      <button class="btn btn-primary" onclick="addProductRow()">${icon('plus',14)} Novo Código</button>
+      <button class="btn btn-primary" data-edit="engenharia" onclick="addProductRow()">${icon('plus',14)} Novo Código</button>
     </div>
     <div class="table-wrap">
       <table>
@@ -1141,23 +1238,26 @@ function renderEngenhariaTable(){
   tbody.innerHTML = list.length ? list.map((p)=>{
     const realIdx = state.products.indexOf(p);
     return `<tr>
-      <td class="editable-td mono"><input value="${p.codigo}" onchange="updateProduct(${realIdx},'codigo',this.value)"></td>
-      <td><select class="class-select class-${p.classificacao}" onchange="updateClassificacao(${realIdx}, this.value)">
+      <td class="editable-td mono"><input data-edit="engenharia" value="${p.codigo}" onchange="updateProduct(${realIdx},'codigo',this.value)"></td>
+      <td><select data-edit="engenharia" class="class-select class-${p.classificacao}" onchange="updateClassificacao(${realIdx}, this.value)">
         <option value="PI" ${p.classificacao==='PI'?'selected':''}>PI</option>
         <option value="PF" ${p.classificacao==='PF'?'selected':''}>PF</option>
       </select></td>
-      <td class="editable-td"><input value="${p.descricao}" onchange="updateProduct(${realIdx},'descricao',this.value)"></td>
-      <td class="editable-td"><input type="number" step="0.1" min="0" value="${p.tempoFabricacaoMin}" onchange="updateProduct(${realIdx},'tempoFabricacaoMin',this.value)"></td>
-      <td><button class="icon-btn danger" onclick="removeProduct(${realIdx})" title="Remover">${icon('trash',14)}</button></td>
+      <td class="editable-td"><input data-edit="engenharia" value="${p.descricao}" onchange="updateProduct(${realIdx},'descricao',this.value)"></td>
+      <td class="editable-td"><input data-edit="engenharia" type="number" step="0.1" min="0" value="${p.tempoFabricacaoMin}" onchange="updateProduct(${realIdx},'tempoFabricacaoMin',this.value)"></td>
+      <td><button class="icon-btn danger" data-edit="engenharia" onclick="removeProduct(${realIdx})" title="Remover">${icon('trash',14)}</button></td>
     </tr>`;
   }).join('') : `<tr class="empty-row"><td colspan="5">Nenhum código cadastrado. Clique em "Novo Código" para começar.</td></tr>`;
+  applyAccess();
 }
 async function addProductRow(){
+  if(deny('engenharia')) return;
   state.products.push({codigo: genErpCode('PF'), descricao:'Nova peça', tempoFabricacaoMin:1, classificacao:'PF'});
   await persist();
   renderEngenhariaTable();
 }
 async function updateProduct(idx, field, value){
+  if(deny('engenharia')) return;
   const p = state.products[idx]; if(!p) return;
   if(field==='tempoFabricacaoMin') value = Math.max(0, Number(value)||0);
   p[field] = value;
@@ -1165,6 +1265,7 @@ async function updateProduct(idx, field, value){
   toast('Código atualizado.', 'success');
 }
 async function updateClassificacao(idx, newClass){
+  if(deny('engenharia')) return;
   const p = state.products[idx]; if(!p) return;
   p.classificacao = newClass;
   const parts = (p.codigo||'').split('.');
@@ -1175,6 +1276,7 @@ async function updateClassificacao(idx, newClass){
   toast('Classificação atualizada — código ' + p.codigo, 'success');
 }
 async function removeProduct(idx){
+  if(deny('engenharia')) return;
   if(!confirm('Remover este código da Engenharia de Produto?')) return;
   state.products.splice(idx,1);
   await persist();
@@ -1190,7 +1292,7 @@ function renderFuncionarios(){
     <div class="section-sub">Cadastro de colaboradores do chão de fábrica com identificação visual, função, turno, vínculo e férias.</div>
     <div class="toolbar">
       <div class="search-box"><span class="search-ic">${icon('search',15)}</span><input placeholder="Buscar por número ou nome..." oninput="funcSearch=this.value; renderFuncionariosTable();"></div>
-      <button class="btn btn-primary" onclick="openEmployeeModal()">${icon('plus',14)} Adicionar Funcionário</button>
+      <button class="btn btn-primary" data-edit="funcionarios" onclick="openEmployeeModal()">${icon('plus',14)} Adicionar Funcionário</button>
     </div>
     <div class="table-wrap">
       <table>
@@ -1222,16 +1324,18 @@ function renderFuncionariosTable(){
       <td><span class="badge badge-gray">${e.vinculo}</span></td>
       <td>${vac ? '<span class="badge badge-red">Férias</span>' : (loc ? `<span class="badge badge-green">Em ${loc}</span>` : '<span class="badge badge-gray">Disponível</span>')}</td>
       <td>
-        <button class="icon-btn" onclick="openEmployeeModal('${e.id}')" title="Editar">${icon('edit',14)}</button>
-        <button class="icon-btn danger" onclick="removeEmployee('${e.id}')" title="Remover">${icon('trash',14)}</button>
+        <button class="icon-btn" data-edit="funcionarios" onclick="openEmployeeModal('${e.id}')" title="Editar">${icon('edit',14)}</button>
+        <button class="icon-btn danger" data-edit="funcionarios" onclick="removeEmployee('${e.id}')" title="Remover">${icon('trash',14)}</button>
       </td>
     </tr>`;
   }).join('') : `<tr class="empty-row"><td colspan="6">Nenhum funcionário cadastrado ainda.</td></tr>`;
+  applyAccess();
 }
 function toggleFeriasFields(){
   document.getElementById('feriasFields').style.display = document.getElementById('empFeriasToggle').checked ? 'flex' : 'none';
 }
 function openEmployeeModal(id){
+  if(deny('funcionarios')) return;
   document.getElementById('empId').value = id || '';
   if(id){
     const e = state.employees.find(x=>x.id===id);
@@ -1262,6 +1366,7 @@ function openEmployeeModal(id){
   openModal('modalEmployee');
 }
 async function saveEmployee(){
+  if(deny('funcionarios')) return;
   const id = document.getElementById('empId').value;
   const nome = document.getElementById('empNome').value.trim();
   const sobrenome = document.getElementById('empSobrenome').value.trim();
@@ -1291,6 +1396,7 @@ async function saveEmployee(){
   toast(novoNumero ? `Funcionário salvo — número ${novoNumero}.` : 'Funcionário salvo com sucesso.', 'success');
 }
 async function removeEmployee(id){
+  if(deny('funcionarios')) return;
   if(!confirm('Remover este funcionário?')) return;
   state.employees = state.employees.filter(e=>e.id!==id);
   state.resources.forEach(r=>{ r.funcionarios = r.funcionarios.filter(eid=>eid!==id); });
@@ -1316,12 +1422,12 @@ function renderApontamento(){
       <div class="ap-clock" id="apClockDisplay">--:--:--</div>
     </div>
     <div class="ap-main-actions">
-      <button type="button" class="ap-big-btn ap-btn-green" onclick="openIniciarModal()">
+      <button type="button" class="ap-big-btn ap-btn-green" data-edit="apontamento" onclick="openIniciarModal()">
         <div class="ap-big-icon">${icon('play',36)}</div>
         <div>INICIAR</div>
         <div class="ap-big-sub">Começar a produção em uma máquina</div>
       </button>
-      <button type="button" class="ap-big-btn ap-btn-red" onclick="openFinalizarModal()">
+      <button type="button" class="ap-big-btn ap-btn-red" data-edit="apontamento" onclick="openFinalizarModal()">
         <span class="ap-big-badge" id="apOpenBadge" style="${openCount>0?'':'display:none;'}">${openCount}</span>
         <div class="ap-big-icon">${icon('stop',36)}</div>
         <div>FINALIZAR</div>
@@ -1333,6 +1439,7 @@ function renderApontamento(){
 
 /* --- Iniciar (modal) --- */
 function openIniciarModal(){
+  if(deny('apontamento')) return;
   apFuncionarioId=''; apRecurso=''; apRecursoCustom=''; apEmpFilterQuery='';
   renderIniciarModalBody();
   openModal('modalIniciar');
@@ -1446,6 +1553,7 @@ function punchQtyBlockHTML(p){
     </div>`;
 }
 async function startPunch(){
+  if(deny('apontamento')) return;
   const funcionarioId = apFuncionarioId;
   const recurso = (apRecursoCustom||'').trim() || apRecurso;
   const ordemId = document.getElementById('pOrdem').value.trim().toUpperCase();
@@ -1465,6 +1573,7 @@ async function startPunch(){
   renderNav();
 }
 async function endPunch(punchId){
+  if(deny('apontamento')) return;
   const p = state.punches.find(x=>x.id===punchId);
   if(!p) return;
   const prod = Number(document.getElementById('qtd-prod-'+punchId).value) || 0;
@@ -1484,6 +1593,7 @@ async function endPunch(punchId){
 /* --- Finalizar (modal: operador -> recurso -> quantidades) --- */
 function openPunchesForFuncionario(empId){ return state.punches.filter(p=>p.status==='Aberto' && p.funcionarioId===empId); }
 function openFinalizarModal(){
+  if(deny('apontamento')) return;
   finFuncionarioId=''; finPunchId=''; finEmpFilterQuery='';
   renderFinalizarStep1();
   openModal('modalFinalizar');
@@ -1562,6 +1672,7 @@ function renderFinalizarStep3(){
   `;
 }
 async function confirmFinalize(punchId){
+  if(deny('apontamento')) return;
   await endPunch(punchId);
   closeFinalizarModal();
   renderApontamento();
@@ -1689,18 +1800,323 @@ function showAcompDetail(orderId){
   `;
 }
 
-/* ===================== INIT ===================== */
-async function init(){
+/* ===================== CONFIGURAÇÕES E LOGIN ===================== */
+const MODULE_OPTIONS = NAV.filter(function(entry){ return entry.module !== 'configuracoes'; });
+function showLoginMessage(text){
+  const box = document.getElementById('loginMessage');
+  if(!box) return;
+  box.hidden = !text;
+  box.textContent = text || '';
+}
+function showLogin(needsSetup){
+  const gate = document.getElementById('loginGate');
+  const app = document.getElementById('prodfy-app');
+  if(gate) gate.hidden = false;
+  if(app) app.classList.add('is-locked');
+  const setup = document.getElementById('setupForm');
+  const login = document.getElementById('loginForm');
+  if(setup) setup.hidden = !needsSetup;
+  if(login) login.hidden = !!needsSetup;
+  const hint = document.getElementById('loginHint');
+  if(hint) hint.textContent = needsSetup
+    ? 'Ainda não existe conta. A primeira pessoa vira administrador suporte e tem acesso completo.'
+    : 'Use o e-mail e a senha da sua conta para abrir o chão de fábrica.';
+  if(location.pathname !== '/login'){
+    returnPath = location.pathname;
+    history.replaceState({}, '', '/login');
+  }
+}
+function hideLogin(){
+  const gate = document.getElementById('loginGate');
+  const app = document.getElementById('prodfy-app');
+  if(gate) gate.hidden = true;
+  if(app) app.classList.remove('is-locked');
+}
+async function accountApi(path, options){
+  options = options || {};
+  const headers = Object.assign({ 'Content-Type': 'application/json' }, options.headers || {});
+  if(authToken()) headers.Authorization = 'Bearer ' + authToken();
+  const response = await fetch(apiBase() + path, {
+    method: options.method || 'GET',
+    headers: headers,
+    body: options.body ? JSON.stringify(options.body) : undefined
+  });
+  const text = await response.text();
+  const payload = text ? JSON.parse(text) : null;
+  if(!response.ok){
+    const error = new Error(payload && payload.error ? payload.error.message : 'Falha na API.');
+    error.status = response.status;
+    throw error;
+  }
+  return payload;
+}
+function selectedPermissions(role){
+  const boxes = Array.prototype.slice.call(document.querySelectorAll('#userPerms input:checked'));
+  const chosen = boxes.map(function(box){ return box.value; });
+  if(role === 'visualizador') return { view: chosen, edit: [] };
+  if(role === 'operador') return { view: chosen, edit: chosen };
+  return undefined;
+}
+function permissionChecks(role, current){
+  if(role !== 'visualizador' && role !== 'operador') {
+    return '<div class="section-sub">Este perfil cobre a produção inteira. O administrador suporte também cria outros administradores suporte.</div>';
+  }
+  const key = role === 'visualizador' ? 'view' : 'edit';
+  const selected = current && current[key] ? current[key] : MODULE_OPTIONS.map(function(item){ return item.module; });
+  const title = role === 'visualizador' ? 'Pode ver' : 'Pode alterar';
+  return `<div class="section-sub">${title}</div><div class="perm-grid" id="userPerms">${MODULE_OPTIONS.map(function(item){
+    const checked = selected.indexOf(item.module) >= 0 ? 'checked' : '';
+    return `<label class="perm-item"><input type="checkbox" value="${item.module}" ${checked}> ${item.label}</label>`;
+  }).join('')}</div>`;
+}
+function renderConfiguracoes(){
+  const el = document.getElementById('panel-configuracoes');
+  if(!el || !sessionUser) return;
+  const roles = sessionUser.role === 'administrador_suporte'
+    ? ['visualizador','operador','administrador','administrador_suporte']
+    : ['visualizador','operador','administrador'];
+  el.innerHTML = `
+    <div class="section-title">${icon('sliders',19)} Configurações</div>
+    <div class="section-sub">Perfil de acesso e contas que entram no sistema.</div>
+    <form id="profileForm" class="card" style="margin-bottom:14px;" onsubmit="saveProfile(event)">
+      <div class="section-title" style="font-size:16px;">Meu perfil</div>
+      <div class="section-sub">${escapeHtml(ROLE_LABELS[sessionUser.role] || sessionUser.role)}</div>
+      <div class="field-row">
+        <div class="field"><label>Nome</label><input id="cfgName" required minlength="2" maxlength="80" value="${escapeHtml(sessionUser.name)}"></div>
+        <div class="field"><label>E-mail</label><input id="cfgEmail" type="email" required value="${escapeHtml(sessionUser.email)}"></div>
+      </div>
+      <div class="field"><label>Nova senha</label><input id="cfgPassword" type="password" minlength="8" maxlength="72" autocomplete="new-password" placeholder="Deixe em branco para manter"></div>
+      <button class="btn btn-primary" type="submit">Salvar perfil</button>
+    </form>
+    ${canManageUsers() ? `
+    <form id="accessUserForm" class="card" style="margin-bottom:14px;" onsubmit="saveAccessUser(event)">
+      <div class="section-title" style="font-size:16px;">Usuários do sistema</div>
+      <div class="section-sub">Visualizador só consulta o que for marcado. Operador altera as áreas marcadas e não mexe em contas. Administrador conduz o sistema, sem o acesso de suporte.</div>
+      <input type="hidden" id="editingUserId" value="">
+      <div class="field-row">
+        <div class="field"><label>Nome</label><input id="userName" required minlength="2"></div>
+        <div class="field"><label>E-mail</label><input id="userEmail" type="email" required></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Senha</label><input id="userPassword" type="password" minlength="8" maxlength="72"></div>
+        <div class="field"><label>Perfil</label>
+          <select id="userRole" onchange="renderPermissionChoices()">${roles.map(function(role){ return `<option value="${role}">${ROLE_LABELS[role]}</option>`; }).join('')}</select>
+        </div>
+      </div>
+      <div id="permissionChoices"></div>
+      <button class="btn btn-primary" type="submit">Salvar usuário</button>
+    </form>
+    <div class="card"><div class="table-wrap"><table>
+      <thead><tr><th>Nome</th><th>E-mail</th><th>Perfil</th><th style="width:140px;"></th></tr></thead>
+      <tbody id="accessUsersBody"><tr class="empty-row"><td colspan="4">Carregando contas…</td></tr></tbody>
+    </table></div></div>` : `<div class="card">Seu perfil consulta e, quando permitido, altera a produção. Contas novas são criadas por um administrador.</div>`}
+  `;
+  if(canManageUsers()){
+    renderPermissionChoices();
+    loadAccessUsers();
+  }
+}
+function renderPermissionChoices(current){
+  const holder = document.getElementById('permissionChoices');
+  const role = document.getElementById('userRole');
+  if(!holder || !role) return;
+  holder.innerHTML = permissionChecks(role.value, current);
+}
+async function loadAccessUsers(){
+  const body = document.getElementById('accessUsersBody');
+  if(!body) return;
+  try{
+    const result = await accountApi('/api/users');
+    body.innerHTML = result.data.map(function(user){
+      const mine = sessionUser && sessionUser.id === user.id;
+      return `<tr>
+        <td>${escapeHtml(user.name)}</td>
+        <td>${escapeHtml(user.email)}</td>
+        <td>${escapeHtml(ROLE_LABELS[user.role] || user.role)}</td>
+        <td>
+          <button class="icon-btn" type="button" onclick="editAccessUser('${user.id}')" title="Editar">${icon('edit',14)}</button>
+          <button class="icon-btn danger" type="button" onclick="deleteAccessUser('${user.id}')" ${mine ? 'disabled' : ''} title="Excluir">${icon('trash',14)}</button>
+        </td>
+      </tr>`;
+    }).join('') || `<tr class="empty-row"><td colspan="4">Nenhuma conta.</td></tr>`;
+  }catch(error){
+    body.innerHTML = `<tr class="empty-row"><td colspan="4">${escapeHtml(error.message)}</td></tr>`;
+  }
+}
+async function editAccessUser(id){
+  try{
+    const result = await accountApi('/api/users/' + id);
+    const user = result.data;
+    document.getElementById('editingUserId').value = user.id;
+    document.getElementById('userName').value = user.name;
+    document.getElementById('userEmail').value = user.email;
+    document.getElementById('userPassword').value = '';
+    document.getElementById('userRole').value = user.role;
+    renderPermissionChoices(user.permissions);
+  }catch(error){
+    toast(error.message, 'error');
+  }
+}
+async function saveProfile(event){
+  event.preventDefault();
+  try{
+    const body = {
+      name: document.getElementById('cfgName').value,
+      email: document.getElementById('cfgEmail').value
+    };
+    const password = document.getElementById('cfgPassword').value;
+    if(password) body.password = password;
+    const updated = await accountApi('/api/users/' + sessionUser.id, { method:'PUT', body: body });
+    rememberSession(Object.assign({}, sessionUser, updated.data));
+    document.getElementById('cfgPassword').value = '';
+    toast('Perfil salvo.', 'success');
+    renderNav();
+  }catch(error){
+    toast(error.message, 'error');
+  }
+}
+async function saveAccessUser(event){
+  event.preventDefault();
+  const id = document.getElementById('editingUserId').value;
+  const role = document.getElementById('userRole').value;
+  const body = {
+    name: document.getElementById('userName').value,
+    email: document.getElementById('userEmail').value,
+    role: role
+  };
+  const password = document.getElementById('userPassword').value;
+  const permissions = selectedPermissions(role);
+  if(permissions) body.permissions = permissions;
+  try{
+    if(id){
+      if(password) body.password = password;
+      await accountApi('/api/users/' + id, { method:'PUT', body: body });
+    }else{
+      if(!password){ toast('Informe uma senha para a conta nova.', 'error'); return; }
+      body.password = password;
+      await accountApi('/api/users', { method:'POST', body: body });
+    }
+    event.target.reset();
+    document.getElementById('editingUserId').value = '';
+    renderPermissionChoices();
+    toast('Usuário salvo.', 'success');
+    await loadAccessUsers();
+  }catch(error){
+    toast(error.message, 'error');
+  }
+}
+async function deleteAccessUser(id){
+  if(!confirm('Excluir esta conta?')) return;
+  try{
+    await accountApi('/api/users/' + id, { method:'DELETE' });
+    toast('Conta excluída.', 'success');
+    await loadAccessUsers();
+  }catch(error){
+    toast(error.message, 'error');
+  }
+}
+async function logout(){
+  localStorage.removeItem('prodfy_jwt');
+  rememberSession(null);
+  showLogin(false);
+}
+async function enterApp(){
+  hideLogin();
   renderShell();
   renderNav();
   await loadData();
   startClock();
-  setTab('dashboard');
+  const requested = tabFromPath(returnPath || location.pathname) || firstVisibleTab();
+  returnPath = '';
+  setTab(requested, { replace:true });
   if(!navigator.onLine) toast('Sem internet. Dá para continuar; as alterações sobem quando a conexão voltar.', 'success');
-  else if(!authToken()) toast('Entre em Conta e API para gravar a produção no banco.', 'error');
+  else if(sessionUser.role === 'visualizador') toast('Perfil visualizador. As áreas liberadas ficam só para consulta.', 'success');
   else if(syncError) toast('As alterações ficaram neste aparelho e sobem quando a API responder.', 'error');
   else toast('Produção ligada ao banco. O mesmo conteúdo aparece nos outros aparelhos.', 'success');
-  setInterval(()=>{ if(activeTab==='dashboard') renderRankingAndCharts(); if(activeTab==='apontamento') renderApontamento(); }, 15000);
+}
+async function boot(){
+  window.addEventListener('popstate', function(){
+    if(!sessionUser){ showLogin(false); return; }
+    const tab = tabFromPath(location.pathname) || firstVisibleTab();
+    setTab(tab, { quiet:true });
+  });
+  const cached = readSessionCache();
+  if(!authToken()){
+    let needsSetup = false;
+    if(navigator.onLine){
+      try{
+        const status = await accountApi('/api/auth/status');
+        needsSetup = !!(status.data && status.data.needsSetup);
+      }catch(e){}
+    }
+    showLogin(needsSetup);
+    return;
+  }
+  if(!navigator.onLine && cached){
+    rememberSession(cached);
+    await enterApp();
+    return;
+  }
+  try{
+    const me = await accountApi('/api/auth/me');
+    rememberSession(me.data);
+    await enterApp();
+  }catch(error){
+    if(!navigator.onLine && cached){
+      rememberSession(cached);
+      await enterApp();
+      return;
+    }
+    localStorage.removeItem('prodfy_jwt');
+    rememberSession(null);
+    showLoginMessage(error.message);
+    showLogin(false);
+  }
+}
+function bindLoginForms(){
+  const login = document.getElementById('loginForm');
+  const setup = document.getElementById('setupForm');
+  if(login) login.addEventListener('submit', async function(event){
+    event.preventDefault();
+    showLoginMessage('');
+    try{
+      const result = await accountApi('/api/auth/login', {
+        method:'POST',
+        body:{ email: document.getElementById('loginEmail').value, password: document.getElementById('loginPassword').value }
+      });
+      localStorage.setItem('prodfy_jwt', result.data.accessToken);
+      rememberSession(result.data.user);
+      await enterApp();
+    }catch(error){
+      showLoginMessage(error.message);
+    }
+  });
+  if(setup) setup.addEventListener('submit', async function(event){
+    event.preventDefault();
+    showLoginMessage('');
+    try{
+      const result = await accountApi('/api/auth/register', {
+        method:'POST',
+        body:{
+          name: document.getElementById('setupName').value,
+          email: document.getElementById('setupEmail').value,
+          password: document.getElementById('setupPassword').value
+        }
+      });
+      localStorage.setItem('prodfy_jwt', result.data.accessToken);
+      rememberSession(result.data.user);
+      await enterApp();
+    }catch(error){
+      showLoginMessage(error.message);
+    }
+  });
+}
+
+/* ===================== INIT ===================== */
+async function init(){
+  bindLoginForms();
+  await boot();
+  setInterval(()=>{ if(activeTab==='dashboard') renderRankingAndCharts(); if(activeTab==='apontamento'){ renderApontamento(); applyAccess(); } }, 15000);
 }
 
 window.setTab = setTab;
@@ -1758,6 +2174,12 @@ window.openAssignModal = openAssignModal;
 window.confirmAssign = confirmAssign;
 window.openEmployeePhoto = openEmployeePhoto;
 window.closeEmployeePhoto = closeEmployeePhoto;
+window.logout = logout;
+window.saveProfile = saveProfile;
+window.saveAccessUser = saveAccessUser;
+window.deleteAccessUser = deleteAccessUser;
+window.editAccessUser = editAccessUser;
+window.renderPermissionChoices = renderPermissionChoices;
 
 init();
 })();

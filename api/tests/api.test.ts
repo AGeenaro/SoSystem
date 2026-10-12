@@ -76,7 +76,7 @@ describe("API de usuários", () => {
     const created = await register(app);
     expect(created.status).toBe(201);
     expect(created.body.data.tokenType).toBe("Bearer");
-    expect(created.body.data.user.role).toBe("admin");
+    expect(created.body.data.user.role).toBe("administrador_suporte");
     expect(created.body.data.user.passwordHash).toBeUndefined();
     expect(created.body.data.accessToken.split(".").length).toBe(3);
 
@@ -114,10 +114,22 @@ describe("API de usuários", () => {
     const adminToken = adminResponse.body.data.accessToken;
     const adminId = adminResponse.body.data.user.id;
 
-    const second = await register(app, "bruno@fabrica.com", "Bruno Lima");
-    expect(second.body.data.user.role).toBe("user");
-    const userToken = second.body.data.accessToken;
-    const userId = second.body.data.user.id;
+    const closed = await register(app, "bruno@fabrica.com", "Bruno Lima");
+    expect(closed.status).toBe(403);
+    expect(closed.body.error.code).toBe("REGISTRATION_CLOSED");
+
+    const second = await request(app)
+      .post("/api/users")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ name: "Bruno Lima", email: "bruno@fabrica.com", password: "senha-segura", role: "operador" });
+    expect(second.status).toBe(201);
+    expect(second.body.data.role).toBe("operador");
+    const loginSecond = await request(app).post("/api/auth/login").send({
+      email: "bruno@fabrica.com",
+      password: "senha-segura"
+    });
+    const userToken = loginSecond.body.data.accessToken;
+    const userId = second.body.data.id;
 
     const forbiddenList = await request(app).get("/api/users").set("Authorization", `Bearer ${userToken}`);
     expect(forbiddenList.status).toBe(403);
@@ -129,7 +141,7 @@ describe("API de usuários", () => {
     const created = await request(app)
       .post("/api/users")
       .set("Authorization", `Bearer ${adminToken}`)
-      .send({ name: "Carla Dias", email: "carla@fabrica.com", password: "senha-segura", role: "user" });
+      .send({ name: "Carla Dias", email: "carla@fabrica.com", password: "senha-segura", role: "visualizador" });
     expect(created.status).toBe(201);
     expect(created.body.data.password).toBeUndefined();
 
@@ -143,7 +155,7 @@ describe("API de usuários", () => {
     const roleDenied = await request(app)
       .put(`/api/users/${userId}`)
       .set("Authorization", `Bearer ${userToken}`)
-      .send({ role: "admin" });
+      .send({ role: "administrador" });
     expect(roleDenied.status).toBe(403);
 
     const otherDenied = await request(app)
@@ -154,8 +166,14 @@ describe("API de usuários", () => {
     const promoted = await request(app)
       .put(`/api/users/${userId}`)
       .set("Authorization", `Bearer ${adminToken}`)
-      .send({ role: "admin" });
-    expect(promoted.body.data.role).toBe("admin");
+      .send({ role: "administrador" });
+    expect(promoted.body.data.role).toBe("administrador");
+
+    const supportDenied = await request(app)
+      .post("/api/users")
+      .set("Authorization", `Bearer ${promoted.body.data.role === "administrador" ? (await request(app).post("/api/auth/login").send({ email: "bruno@fabrica.com", password: "senha-segura" })).body.data.accessToken : adminToken}`)
+      .send({ name: "Suporte Extra", email: "suporte-extra@fabrica.com", password: "senha-segura", role: "administrador_suporte" });
+    expect(supportDenied.status).toBe(403);
 
     const missingUser = await request(app)
       .get("/api/users/00000000-0000-4000-8000-000000000000")

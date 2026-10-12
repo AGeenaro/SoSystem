@@ -1,4 +1,11 @@
 import { z } from "zod";
+import { PRODUCTION_MODULES, USER_ROLES } from "./access.js";
+
+const roleSchema = z.enum(USER_ROLES);
+const permissionsSchema = z.object({
+  view: z.array(z.enum(PRODUCTION_MODULES)).max(PRODUCTION_MODULES.length),
+  edit: z.array(z.enum(PRODUCTION_MODULES)).max(PRODUCTION_MODULES.length)
+}).strict();
 
 const passwordSchema = z.string().min(8, "A senha precisa ter pelo menos 8 caracteres.").max(72);
 const emailSchema = z.string().trim().email("E-mail inválido.").max(160);
@@ -16,14 +23,16 @@ export const loginSchema = z.object({
 }).strict();
 
 export const createUserSchema = registerSchema.extend({
-  role: z.enum(["admin", "user"]).optional()
+  role: roleSchema.optional(),
+  permissions: permissionsSchema.optional()
 }).strict();
 
 export const updateUserSchema = z.object({
   name: nameSchema.optional(),
   email: emailSchema.optional(),
   password: passwordSchema.optional(),
-  role: z.enum(["admin", "user"]).optional()
+  role: roleSchema.optional(),
+  permissions: permissionsSchema.optional()
 }).strict().refine((value) => Object.keys(value).length > 0, {
   message: "Informe ao menos um campo para atualizar."
 });
