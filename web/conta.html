@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Prodfy — Conta e API</title>
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<div id="prodfy-app" style="display:block;">
+  <div style="max-width:920px; margin:0 auto; padding:28px 18px 48px;">
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:18px;">
+      <div>
+        <div class="section-title">Conta e API</div>
+        <div class="section-sub" id="apiUrlLabel" style="margin-bottom:0;"></div>
+      </div>
+      <a class="btn" href="index.html">Voltar ao chão de fábrica</a>
+    </div>
+
+    <div id="message" class="card" style="display:none; margin-bottom:14px;"></div>
+
+    <div id="guestPanel" class="field-row" style="align-items:flex-start;">
+      <form id="loginForm" class="card">
+        <div class="section-title">Entrar</div>
+        <div class="section-sub">Autenticação JWT da API de usuários.</div>
+        <div class="field"><label>E-mail</label><input id="loginEmail" type="email" required autocomplete="username"></div>
+        <div class="field"><label>Senha</label><input id="loginPassword" type="password" required autocomplete="current-password"></div>
+        <button class="btn btn-primary" type="submit">Entrar</button>
+      </form>
+      <form id="registerForm" class="card">
+        <div class="section-title">Criar conta</div>
+        <div class="section-sub">A primeira conta do sistema vira administradora.</div>
+        <div class="field"><label>Nome</label><input id="registerName" required minlength="2" maxlength="80"></div>
+        <div class="field"><label>E-mail</label><input id="registerEmail" type="email" required autocomplete="username"></div>
+        <div class="field"><label>Senha</label><input id="registerPassword" type="password" required minlength="8" maxlength="72" autocomplete="new-password"></div>
+        <button class="btn btn-primary" type="submit">Cadastrar</button>
+      </form>
+    </div>
+
+    <div id="sessionPanel" style="display:none;">
+      <div class="card" style="margin-bottom:14px;">
+        <div style="display:flex; justify-content:space-between; gap:12px; align-items:center;">
+          <div>
+            <div class="section-title" id="sessionName"></div>
+            <div class="section-sub" id="sessionMeta" style="margin-bottom:0;"></div>
+          </div>
+          <button class="btn" id="logoutButton" type="button">Sair</button>
+        </div>
+      </div>
+
+      <form id="profileForm" class="card" style="margin-bottom:14px;">
+        <div class="section-title">Meu perfil</div>
+        <div class="field-row">
+          <div class="field"><label>Nome</label><input id="profileName" required minlength="2" maxlength="80"></div>
+          <div class="field"><label>E-mail</label><input id="profileEmail" type="email" required></div>
+        </div>
+        <div class="field"><label>Nova senha (opcional)</label><input id="profilePassword" type="password" minlength="8" maxlength="72" autocomplete="new-password"></div>
+        <button class="btn btn-primary" type="submit">Salvar perfil</button>
+      </form>
+
+      <div id="adminPanel" style="display:none;">
+        <form id="createUserForm" class="card" style="margin-bottom:14px;">
+          <div class="section-title">Novo usuário</div>
+          <div class="field-row">
+            <div class="field"><label>Nome</label><input id="newName" required minlength="2"></div>
+            <div class="field"><label>E-mail</label><input id="newEmail" type="email" required></div>
+          </div>
+          <div class="field-row">
+            <div class="field"><label>Senha</label><input id="newPassword" type="password" required minlength="8"></div>
+            <div class="field"><label>Papel</label>
+              <select id="newRole">
+                <option value="user">user</option>
+                <option value="admin">admin</option>
+              </select>
+            </div>
+          </div>
+          <button class="btn btn-primary" type="submit">Criar usuário</button>
+        </form>
+        <div class="card">
+          <div class="section-title">Usuários</div>
+          <div style="overflow:auto;">
+            <table>
+              <thead><tr><th>Nome</th><th>E-mail</th><th>Papel</th><th></th></tr></thead>
+              <tbody id="usersBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="js/config.js"></script>
+<script src="js/conta.js"></script>
+</body>
+</html>

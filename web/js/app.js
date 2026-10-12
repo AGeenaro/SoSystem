@@ -1,0 +1,1673 @@
+(function(){
+if(!window.storage){
+  window.storage = {
+    async get(key){
+      try{
+        const value = localStorage.getItem(key);
+        return value == null ? null : { key: key, value: value };
+      }catch(e){
+        return null;
+      }
+    },
+    async set(key, value){
+      localStorage.setItem(key, value);
+      return { key: key, value: value };
+    }
+  };
+}
+
+
+/* ===================== ICONS ===================== */
+const ICONS = {
+  grid: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+  clipboard: '<rect x="6" y="4" width="12" height="17" rx="2"/><rect x="9" y="2" width="6" height="4" rx="1"/><line x1="9" y1="11" x2="15" y2="11"/><line x1="9" y1="15" x2="15" y2="15"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/>',
+  gear: '<circle cx="12" cy="12" r="3.2"/><path d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.5-2-3.4-2.4 1a7.6 7.6 0 0 0-1.7-1L15 3h-4l-.3 2.1a7.6 7.6 0 0 0-1.7 1l-2.4-1-2 3.4L6.6 11a7.6 7.6 0 0 0 0 2l-2 1.5 2 3.4 2.4-1a7.6 7.6 0 0 0 1.7 1L11 21h4l.3-2.1a7.6 7.6 0 0 0 1.7-1l2.4 1 2-3.4z"/>',
+  users: '<circle cx="8.5" cy="8" r="3.2"/><path d="M2.5 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.6"/><path d="M15.5 14.2c2.6.3 4.5 2.5 4.5 5.2"/>',
+  search: '<circle cx="10.5" cy="10.5" r="6.5"/><line x1="20" y1="20" x2="15.3" y2="15.3"/>',
+  play: '<circle cx="12" cy="12" r="9"/><polygon points="10 8 16 12 10 16"/>',
+  plus: '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
+  edit: '<path d="M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3z"/><line x1="14" y1="7" x2="17" y2="10"/>',
+  trash: '<polyline points="4 7 20 7"/><path d="M6 7v13a1 1 0 0 0 1 1h10a1 1 0 0 0 1-1V7"/><path d="M9 7V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3"/>',
+  camera: '<path d="M4 8h3l2-2h6l2 2h3v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V8z"/><circle cx="12" cy="13.5" r="3.3"/>',
+  volume: '<polygon points="4 9 8 9 12 5 12 19 8 15 4 15"/><path d="M16 8.5a5 5 0 0 1 0 7"/>',
+  volumeMute: '<polygon points="4 9 8 9 12 5 12 19 8 15 4 15"/><line x1="16" y1="9" x2="21" y2="14"/><line x1="21" y1="9" x2="16" y2="14"/>',
+  sync: '<path d="M4 12a8 8 0 0 1 14-5.3L20 8"/><polyline points="20 3 20 8 15 8"/><path d="M20 12a8 8 0 0 1-14 5.3L4 16"/><polyline points="4 21 4 16 9 16"/>',
+  stop: '<rect x="6" y="6" width="12" height="12" rx="2"/>',
+  qrscan: '<path d="M4 8V5a1 1 0 0 1 1-1h3"/><path d="M20 8V5a1 1 0 0 0-1-1h-3"/><path d="M4 16v3a1 1 0 0 0 1 1h3"/><path d="M20 16v3a1 1 0 0 1-1 1h-3"/><rect x="9" y="9" width="6" height="6"/>',
+  building: '<rect x="4" y="3" width="16" height="18" rx="1.5"/><line x1="8" y1="7.5" x2="8" y2="7.51"/><line x1="12" y1="7.5" x2="12" y2="7.51"/><line x1="16" y1="7.5" x2="16" y2="7.51"/><line x1="8" y1="11.5" x2="8" y2="11.51"/><line x1="12" y1="11.5" x2="12" y2="11.51"/><line x1="16" y1="11.5" x2="16" y2="11.51"/><line x1="9" y1="21" x2="9" y2="15"/><line x1="15" y1="21" x2="15" y2="15"/>',
+  checkCircle: '<circle cx="12" cy="12" r="9"/><polyline points="8 12.5 11 15.5 16 9"/>',
+  alertTriangle: '<path d="M12 3 2 21h20L12 3z"/><line x1="12" y1="9.5" x2="12" y2="14"/><line x1="12" y1="17" x2="12" y2="17.01"/>',
+  helmet: '<path d="M4 15a8 8 0 0 1 16 0v1H4v-1z"/><path d="M11 3.2A8 8 0 0 0 4.3 12"/><line x1="2" y1="16" x2="22" y2="16"/>',
+  wrench: '<path d="M14.7 6.3a4 4 0 0 0-5.5 4.9L3 17.5 5.5 20l6.3-6.2a4 4 0 0 0 4.9-5.5l-2.7 2.7-2-2z"/>',
+  info: '<circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16"/><line x1="12" y1="7.5" x2="12" y2="7.51"/>',
+  printer: '<path d="M7 8V3h10v5"/><rect x="4" y="8" width="16" height="9" rx="1.5"/><path d="M7 13h10v8H7z"/><line x1="8" y1="17" x2="16" y2="17"/>'
+};
+function icon(name, size, extraClass){
+  size = size || 18;
+  return '<svg class="icon ' + (extraClass||'') + '" width="'+size+'" height="'+size+'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">' + (ICONS[name]||'') + '</svg>';
+}
+
+/* ===================== STATE & STORAGE ===================== */
+const STORAGE_KEY = 'prodfy_data_v7_cracha';
+let state = {
+  employees: [], products: [], orders: [], punches: [], resources: [],
+  nextOrderNum: 1, nextEmployeeNum: 1
+};
+let activeTab = 'dashboard';
+let clockTimer = null;
+let soundEnabled = true;
+let lastSyncAt = null;
+let dashSearch = '';
+let dashSetor = 'Todos';
+let apFuncionarioId = '';
+let apRecurso = '';
+let apRecursoCustom = '';
+let apEmpFilterQuery = '';
+let finEmpFilterQuery = '';
+
+const AVATAR_COLORS = ['#2F6FED','#17A056','#F5A524','#8B5CF6','#EF4444','#0EA5B7','#D6409F'];
+const EMPLOYEE_PHOTOS = [
+  "assets/photos/01.jpg",
+  "assets/photos/02.jpg",
+  "assets/photos/03.jpg",
+  "assets/photos/04.jpg",
+  "assets/photos/05.jpg",
+  "assets/photos/06.jpg",
+  "assets/photos/07.jpg",
+  "assets/photos/08.jpg",
+  "assets/photos/09.jpg",
+  "assets/photos/10.jpg",
+  "assets/photos/11.jpg",
+  "assets/photos/12.jpg",
+  "assets/photos/13.jpg",
+  "assets/photos/14.jpg",
+  "assets/photos/15.jpg"
+];
+const EMPLOYEE_PHOTO_FALLBACKS = EMPLOYEE_PHOTOS;
+function colorForName(name){ let h=0; for(let i=0;i<name.length;i++){ h = name.charCodeAt(i) + ((h<<5)-h); } return AVATAR_COLORS[Math.abs(h) % AVATAR_COLORS.length]; }
+function initials(nome, sobrenome){ return ((nome[0]||'')+(sobrenome[0]||'')).toUpperCase(); }
+function genErpCode(classificacao){
+  const mid = classificacao==='PI' ? '2000' : '3000';
+  const last4 = String(Math.floor(1000 + Math.random()*9000));
+  return '30.' + mid + '.' + last4;
+}
+function formatOrderNumber(n){ const s = String(n).padStart(6,'0'); return s.slice(0,3) + '.' + s.slice(3); }
+function formatEmployeeNumber(n){ return String(n).padStart(4,'0'); }
+
+function photoIndexForEmployee(e){
+  if(!EMPLOYEE_PHOTOS.length) return 0;
+  const stored = Number(e && e.fotoIndex);
+  if(Number.isInteger(stored) && stored >= 0) return stored % EMPLOYEE_PHOTOS.length;
+  const byNumber = parseInt((e && e.numero) || '', 10);
+  if(Number.isFinite(byNumber) && byNumber > 0) return (byNumber - 1) % EMPLOYEE_PHOTOS.length;
+  const key = ((e && e.nome) || '') + ((e && e.sobrenome) || '');
+  let h = 0;
+  for(let i=0;i<key.length;i++) h = key.charCodeAt(i) + ((h<<5)-h);
+  return Math.abs(h) % EMPLOYEE_PHOTOS.length;
+}
+function employeePhoto(e){ return EMPLOYEE_PHOTOS[photoIndexForEmployee(e)]; }
+function employeePhotoFallback(e){ return EMPLOYEE_PHOTO_FALLBACKS[photoIndexForEmployee(e) % EMPLOYEE_PHOTO_FALLBACKS.length]; }
+function openEmployeePhoto(employeeId, evt){
+  if(evt){ evt.preventDefault(); evt.stopPropagation(); }
+  const e = state.employees.find(x=>x.id===employeeId);
+  if(!e) return;
+  const overlay = document.getElementById('employeePhotoZoom');
+  const image = document.getElementById('employeePhotoLarge');
+  image.onerror = function(){ this.onerror=null; this.src=employeePhotoFallback(e); };
+  image.src = employeePhoto(e);
+  image.alt = `Foto ampliada de ${e.nome} ${e.sobrenome}`;
+  document.getElementById('employeePhotoName').textContent = `${e.nome} ${e.sobrenome}`;
+  document.getElementById('employeePhotoRole').textContent = `${e.funcao} • ${e.turno}`;
+  document.getElementById('employeePhotoMeta').textContent = `Funcionário ${e.numero}`;
+  overlay.classList.add('open');
+  document.body.style.overflow='hidden';
+}
+function closeEmployeePhoto(evt){
+  if(evt && evt.target && evt.target.id !== 'employeePhotoZoom') return;
+  const overlay = document.getElementById('employeePhotoZoom');
+  if(overlay) overlay.classList.remove('open');
+  document.body.style.overflow='';
+}
+document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeEmployeePhoto(); });
+function employeeAvatarHTML(e, className){
+  if(!e) return '';
+  const photo = employeePhoto(e);
+  const fallback = employeePhotoFallback(e);
+  return `<span class="${className} worker-avatar" role="button" tabindex="0" title="Clique para ampliar a foto de ${e.nome}" aria-label="Ampliar foto de ${e.nome} ${e.sobrenome}" onclick="openEmployeePhoto('${e.id}', event)" onkeydown="if(event.key==='Enter'||event.key===' '){openEmployeePhoto('${e.id}',event)}" style="background-image:url('${photo}'),url('${fallback}');"></span>`;
+}
+function employeeIdentityHTML(id, compact){
+  const e = state.employees.find(x=>x.id===id);
+  if(!e) return '—';
+  return `<span class="employee-inline">${employeeAvatarHTML(e, compact ? 'inline-avatar-small' : 'inline-avatar')}<span>${e.nome} ${e.sobrenome}</span></span>`;
+}
+function employeeMiniChipHTML(id){
+  const e = state.employees.find(x=>x.id===id);
+  if(!e) return '';
+  return `<span class="employee-mini-chip">${employeeAvatarHTML(e,'inline-avatar-small')}<span>${e.nome} ${e.sobrenome}</span></span>`;
+}
+function ensureEmployeePhotos(){
+  let changed = false;
+  state.employees.forEach((e,i)=>{
+    if(!Number.isInteger(Number(e.fotoIndex)) || Number(e.fotoIndex) < 0){
+      e.fotoIndex = i % EMPLOYEE_PHOTOS.length;
+      changed = true;
+    } else {
+      e.fotoIndex = Number(e.fotoIndex) % EMPLOYEE_PHOTOS.length;
+    }
+  });
+  return changed;
+}
+
+function defaultData(){
+  return {
+    employees: (function(){
+      const base = [
+        {nome:'Carlos', sobrenome:'Almeida', funcao:'Operador CNC', turno:'1º Turno', vinculo:'Efetivo'},
+        {nome:'Eduardo', sobrenome:'Lima', funcao:'Operador de Montagem', turno:'1º Turno', vinculo:'Efetivo'},
+        {nome:'João', sobrenome:'Pereira', funcao:'Operador de Prensa', turno:'2º Turno', vinculo:'Terceiro'},
+        {nome:'Rafael', sobrenome:'Costa', funcao:'Inspetor de Qualidade', turno:'2º Turno', vinculo:'Efetivo'},
+        {nome:'Marcos', sobrenome:'Vinícius', funcao:'Soldador', turno:'1º Turno', vinculo:'Efetivo'},
+        {nome:'Bruno', sobrenome:'Ferreira', funcao:'Operador de Dobra', turno:'1º Turno', vinculo:'Efetivo'},
+        {nome:'Diego', sobrenome:'Martins', funcao:'Operador de Acabamento', turno:'2º Turno', vinculo:'Terceiro'},
+        {nome:'Thiago', sobrenome:'Rocha', funcao:'Operador CNC', turno:'3º Turno', vinculo:'Efetivo'},
+        {nome:'Felipe', sobrenome:'Andrade', funcao:'Auxiliar de Produção', turno:'1º Turno', vinculo:'Efetivo'},
+        {nome:'Gustavo', sobrenome:'Ramos', funcao:'Operador de Montagem', turno:'2º Turno', vinculo:'Efetivo'},
+        {nome:'Leonardo', sobrenome:'Barbosa', funcao:'Soldador', turno:'3º Turno', vinculo:'Terceiro'},
+        {nome:'Rodrigo', sobrenome:'Nunes', funcao:'Operador de Prensa', turno:'1º Turno', vinculo:'Efetivo'},
+        {nome:'André', sobrenome:'Cardoso', funcao:'Inspetor de Qualidade', turno:'1º Turno', vinculo:'Efetivo'},
+        {nome:'Vinícius', sobrenome:'Teixeira', funcao:'Operador de Dobra', turno:'2º Turno', vinculo:'Efetivo'},
+        {nome:'Paulo', sobrenome:'Henrique', funcao:'Supervisor de Produção', turno:'Administrativo', vinculo:'Efetivo'}
+      ];
+      return base.map((e,i) => ({ id: uid(), numero: formatEmployeeNumber(i+1), nome:e.nome, sobrenome:e.sobrenome, funcao:e.funcao, turno:e.turno, vinculo:e.vinculo, ferias:null, fotoIndex:i % EMPLOYEE_PHOTOS.length }));
+    })(),
+    products: (function(){
+      const base = [
+        {descricao:'Eixo Pinhão 20mm', tempoFabricacaoMin:6, classificacao:'PI'},
+        {descricao:'Suporte Chapa L', tempoFabricacaoMin:3.5, classificacao:'PI'},
+        {descricao:'Flange Sextavado', tempoFabricacaoMin:9, classificacao:'PF'},
+        {descricao:'Bucha de Nylon', tempoFabricacaoMin:1.5, classificacao:'PF'},
+        {descricao:'Parafuso Sextavado M10', tempoFabricacaoMin:1.2, classificacao:'PI'},
+        {descricao:'Porca Flangeada', tempoFabricacaoMin:0.8, classificacao:'PI'},
+        {descricao:'Arruela de Pressão', tempoFabricacaoMin:0.6, classificacao:'PI'},
+        {descricao:'Eixo Escalonado', tempoFabricacaoMin:7.5, classificacao:'PI'},
+        {descricao:'Engrenagem Reta Z20', tempoFabricacaoMin:11, classificacao:'PI'},
+        {descricao:'Correia Dentada', tempoFabricacaoMin:2.4, classificacao:'PF'},
+        {descricao:'Rolamento Blindado', tempoFabricacaoMin:1.8, classificacao:'PI'},
+        {descricao:'Suporte de Fixação', tempoFabricacaoMin:4.2, classificacao:'PI'},
+        {descricao:'Placa Base Retangular', tempoFabricacaoMin:5.6, classificacao:'PI'},
+        {descricao:'Tubo Redondo 25mm', tempoFabricacaoMin:2.1, classificacao:'PI'},
+        {descricao:'Chapa Perfurada', tempoFabricacaoMin:3.9, classificacao:'PI'},
+        {descricao:'Bucha de Bronze', tempoFabricacaoMin:2.7, classificacao:'PI'},
+        {descricao:'Pino Guia', tempoFabricacaoMin:1.0, classificacao:'PI'},
+        {descricao:'Anel de Vedação', tempoFabricacaoMin:0.9, classificacao:'PF'},
+        {descricao:'Mancal de Deslizamento', tempoFabricacaoMin:6.8, classificacao:'PI'},
+        {descricao:'Base para Motor', tempoFabricacaoMin:8.4, classificacao:'PF'},
+        {descricao:'Coluna de Sustentação', tempoFabricacaoMin:7.1, classificacao:'PI'},
+        {descricao:'Guia Linear', tempoFabricacaoMin:5.3, classificacao:'PI'},
+        {descricao:'Came de Acionamento', tempoFabricacaoMin:4.6, classificacao:'PI'},
+        {descricao:'Trava de Segurança', tempoFabricacaoMin:2.0, classificacao:'PF'},
+        {descricao:'Suporte em L', tempoFabricacaoMin:3.0, classificacao:'PI'},
+        {descricao:'Grampo de Fixação', tempoFabricacaoMin:1.4, classificacao:'PI'},
+        {descricao:'Espaçador Cilíndrico', tempoFabricacaoMin:0.7, classificacao:'PI'},
+        {descricao:'Disco de Corte', tempoFabricacaoMin:3.3, classificacao:'PF'},
+        {descricao:'Haste Roscada', tempoFabricacaoMin:2.6, classificacao:'PI'},
+        {descricao:'Junta de Vedação', tempoFabricacaoMin:1.1, classificacao:'PF'},
+        {descricao:'Cantoneira de Aço', tempoFabricacaoMin:3.7, classificacao:'PI'},
+        {descricao:'Perfil U 40mm', tempoFabricacaoMin:4.0, classificacao:'PI'},
+        {descricao:'Tampa de Proteção', tempoFabricacaoMin:2.3, classificacao:'PF'},
+        {descricao:'Caixa de Redução', tempoFabricacaoMin:12.5, classificacao:'PF'}
+      ];
+      return base.map(p => ({ codigo: genErpCode(p.classificacao), descricao: p.descricao, tempoFabricacaoMin: p.tempoFabricacaoMin, classificacao: p.classificacao }));
+    })(),
+    orders: [],
+    punches: [],
+    resources: [
+      {id: uid(), nome:'CA01', descricao:'Cabine de Pintura', setor:'Pintura', status:'Produzindo', funcionarios:[]},
+      {id: uid(), nome:'ES01', descricao:'Estufa de Secagem', setor:'Pintura', status:'Produzindo', funcionarios:[]},
+      {id: uid(), nome:'JA01', descricao:'Cabine de Jato 1', setor:'Preparação', status:'Parada', funcionarios:[]},
+      {id: uid(), nome:'MO01', descricao:'Bancada de Montagem 1', setor:'Montagem', status:'Produzindo', funcionarios:[]},
+      {id: uid(), nome:'MO02', descricao:'Bancada de Montagem 2', setor:'Montagem', status:'Parada', funcionarios:[]},
+      {id: uid(), nome:'SO01', descricao:'Estação de Solda MIG', setor:'Solda', status:'Produzindo', funcionarios:[]},
+      {id: uid(), nome:'SO02', descricao:'Estação de Solda TIG', setor:'Solda', status:'Manutenção', funcionarios:[]},
+      {id: uid(), nome:'DO01', descricao:'Dobradeira Hidráulica 1', setor:'Dobra', status:'Produzindo', funcionarios:[]},
+      {id: uid(), nome:'DO02', descricao:'Dobradeira CNC 2', setor:'Dobra', status:'Parada', funcionarios:[]},
+      {id: uid(), nome:'AC01', descricao:'Linha de Acabamento', setor:'Acabamento', status:'Produzindo', funcionarios:[]}
+    ],
+    nextOrderNum: 1,
+    nextEmployeeNum: 16
+  };
+}
+
+async function loadData(){
+  let loaded = false;
+  try{
+    const r = await window.storage.get(STORAGE_KEY, true);
+    if(r && r.value){
+      state = Object.assign(defaultData(), JSON.parse(r.value));
+      loaded = true;
+    }
+  }catch(e){}
+  if(!loaded) state = defaultData();
+  const photosUpdated = ensureEmployeePhotos();
+  if(!loaded || photosUpdated) await persist();
+}
+async function persist(){
+  setSyncPill('Sincronizando…');
+  try{
+    await window.storage.set(STORAGE_KEY, JSON.stringify(state), true);
+    lastSyncAt = nowBR();
+    setSyncPill('Sincronizado');
+  }catch(e){
+    console.error('Erro ao salvar dados', e);
+    setSyncPill('Falha ao salvar', true);
+    toast('Não foi possível salvar os dados agora.', 'error');
+  }
+}
+function uid(){ return 'id-' + Math.random().toString(36).slice(2,10) + Date.now().toString(36); }
+
+/* ===================== TIME (Brasil) ===================== */
+function nowBR(){ return new Date(new Date().toLocaleString('en-US', {timeZone:'America/Sao_Paulo'})); }
+function fmtTime(d){ return d.toLocaleTimeString('pt-BR', {timeZone:'America/Sao_Paulo', hour:'2-digit', minute:'2-digit', second:'2-digit'}); }
+function fmtDate(d){ return d.toLocaleDateString('pt-BR', {timeZone:'America/Sao_Paulo', weekday:'short', day:'2-digit', month:'short', year:'numeric'}); }
+function fmtDateShort(d){ return d.toLocaleDateString('pt-BR', {timeZone:'America/Sao_Paulo'}); }
+function fmtDateTime(iso){ if(!iso) return '—'; return new Date(iso).toLocaleString('pt-BR', {timeZone:'America/Sao_Paulo', day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit'}); }
+function todayISODate(){ return new Date().toLocaleDateString('en-CA', {timeZone:'America/Sao_Paulo'}); }
+function isTodayBR(iso){ if(!iso) return false; return new Date(iso).toLocaleDateString('en-CA', {timeZone:'America/Sao_Paulo'}) === todayISODate(); }
+function nowISO(){ return new Date().toISOString(); }
+function minutesBetween(iso1, iso2){ return (new Date(iso2) - new Date(iso1)) / 60000; }
+function brDate(iso){ if(!iso) return ''; const p=iso.split('-'); return p[2]+'/'+p[1]+'/'+p[0]; }
+function elapsedLabel(iso){
+  const mins = Math.max(0, Math.round(minutesBetween(iso, nowISO())));
+  if(mins < 60) return 'há ' + mins + ' min';
+  const h = Math.floor(mins/60), m = mins%60;
+  return 'há ' + h + 'h ' + m + 'min';
+}
+
+function startClock(){
+  function tick(){
+    const d = nowBR();
+    const foot = document.getElementById('footClock');
+    if(foot) foot.innerHTML = '<b>Horário:</b> ' + fmtTime(d).slice(0,5) + ' (BR)';
+    const pc = document.getElementById('apClockDisplay');
+    if(pc) pc.innerHTML = fmtTime(d) + '<small>' + fmtDate(d) + '</small>';
+  }
+  tick();
+  clockTimer = setInterval(tick, 1000);
+}
+
+/* ===================== SOUND SIGNALS ===================== */
+let audioCtx = null;
+function getAudioCtx(){ if(!audioCtx){ audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } return audioCtx; }
+function beep(freq, duration, delay, type){
+  if(!soundEnabled) return;
+  try{
+    const ctx = getAudioCtx();
+    const t0 = ctx.currentTime + (delay||0);
+    const osc = ctx.createOscillator(); const gain = ctx.createGain();
+    osc.type = type || 'sine';
+    osc.frequency.setValueAtTime(freq, t0);
+    gain.gain.setValueAtTime(0.0001, t0);
+    gain.gain.exponentialRampToValueAtTime(0.28, t0 + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + duration);
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.start(t0); osc.stop(t0 + duration + 0.02);
+  }catch(e){}
+}
+function beepStart(){ beep(880, 0.16, 0, 'square'); beep(1180, 0.18, 0.14, 'square'); }
+function beepEnd(){ beep(700, 0.16, 0, 'square'); beep(420, 0.22, 0.15, 'square'); }
+function beepError(){ beep(220, 0.3, 0, 'sawtooth'); }
+function toggleSound(){ soundEnabled = !soundEnabled; renderTopbarPills(); if(soundEnabled) beepStart(); }
+
+/* ===================== TOASTS ===================== */
+function toast(msg, kind){
+  const wrap = document.getElementById('toastWrap');
+  const el = document.createElement('div');
+  el.className = 'toast' + (kind ? ' '+kind : '');
+  el.textContent = msg;
+  wrap.appendChild(el);
+  setTimeout(()=>{ el.style.opacity='0'; el.style.transition='opacity .3s'; setTimeout(()=>el.remove(), 300); }, 3200);
+}
+
+/* ===================== TOPBAR PILLS ===================== */
+function setSyncPill(text, isError){
+  const el = document.getElementById('pillSync');
+  if(!el) return;
+  el.innerHTML = icon('sync',13) + ' ' + text;
+  el.className = 'pill ' + (isError ? 'pill-red' : 'pill-green');
+}
+function renderTopbarPills(){
+  const holder = document.getElementById('topbarPills');
+  if(!holder) return;
+  const produzindo = state.resources.filter(r=>r.status==='Produzindo').length;
+  const parada = state.resources.filter(r=>r.status!=='Produzindo').length;
+  let statusLabel = 'Sem células';
+  if(state.resources.length){
+    if(produzindo && parada) statusLabel = 'Produzindo / Parada';
+    else if(produzindo) statusLabel = 'Produzindo';
+    else statusLabel = 'Parada';
+  }
+  holder.innerHTML = `
+    <div class="pill clickable" onclick="toggleSound()">${icon(soundEnabled?'volume':'volumeMute',14)} ${soundEnabled?'Som ativado':'Som desativado'}</div>
+    <div class="pill pill-green" id="pillSync">${icon('sync',13)} Sincronizado</div>
+    <div class="pill pill-blue"><span class="pill-dot"></span>Status: ${statusLabel}</div>
+    <div class="pill">${icon('clock',13)} Atualizado: ${fmtDateShort(lastSyncAt || nowBR())}</div>
+  `;
+}
+
+/* ===================== NAV ===================== */
+const NAV = [
+  {id:'dashboard', label:'Monitoramento', icn:'grid'},
+  {id:'ordens', label:'Ordens de Produção', icn:'clipboard'},
+  {id:'apontamento', label:'Apontamento', icn:'clock'},
+  {id:'recursos', label:'Recursos', icn:'wrench'},
+  {id:'engenharia', label:'Engenharia de Produto', icn:'gear'},
+  {id:'funcionarios', label:'Funcionários', icn:'users'},
+  {id:'acompanhamento', label:'Acompanhamento', icn:'search'}
+];
+function navBadge(id){
+  if(id==='ordens') return state.orders.filter(o=>o.status!=='Concluída').length;
+  if(id==='apontamento') return state.punches.filter(p=>p.status==='Aberto').length;
+  if(id==='funcionarios') return state.employees.length;
+  if(id==='recursos') return state.resources.length;
+  return 0;
+}
+function renderNav(){
+  const nav = document.getElementById('navList');
+  nav.innerHTML = NAV.map(n=>{
+    const badge = navBadge(n.id);
+    return `<div class="nav-item ${n.id===activeTab?'active':''}" onclick="setTab('${n.id}')">
+      <span class="ic">${icon(n.icn,16)}</span><span class="nlabel">${n.label}</span>
+      ${badge>0?`<span class="nav-badge">${badge}</span>`:''}
+    </div>`;
+  }).join('');
+}
+function setTab(id){
+  activeTab = id;
+  renderNav();
+  const meta = NAV.find(n=>n.id===id);
+  document.getElementById('topTitle').textContent = meta.label;
+  document.getElementById('topEyebrow').textContent = 'Prodfy · Chão de Fábrica';
+  document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
+  document.getElementById('panel-'+id).classList.add('active');
+  closeSidebar();
+  renderActiveTab();
+}
+function renderActiveTab(){
+  renderTopbarPills();
+  if(activeTab==='dashboard') renderDashboard();
+  else if(activeTab==='ordens') renderOrdens();
+  else if(activeTab==='apontamento') renderApontamento();
+  else if(activeTab==='recursos') renderRecursos();
+  else if(activeTab==='engenharia') renderEngenharia();
+  else if(activeTab==='funcionarios') renderFuncionarios();
+  else if(activeTab==='acompanhamento') renderAcompanhamento();
+}
+function openSidebar(){ document.getElementById('sidebar').classList.add('open'); document.getElementById('sidebarScrim').classList.add('open'); }
+function closeSidebar(){ document.getElementById('sidebar').classList.remove('open'); document.getElementById('sidebarScrim').classList.remove('open'); }
+function openModal(id){ document.getElementById(id).classList.add('open'); }
+function closeModal(id){ document.getElementById(id).classList.remove('open'); }
+
+/* ===================== HELPERS ===================== */
+function employeeName(id){ const e = state.employees.find(x=>x.id===id); return e ? (e.nome+' '+e.sobrenome) : '—'; }
+function productByCode(codigo){ return state.products.find(p=>p.codigo===codigo); }
+function orderById(id){ return state.orders.find(o=>o.id===id); }
+function resourceById(id){ return state.resources.find(r=>r.id===id); }
+function orderProducedQty(orderId){ return state.punches.filter(p=>p.ordemId===orderId).reduce((s,p)=>s+(Number(p.quantidadeProduzida)||0), 0); }
+function orderScrapQty(orderId){ return state.punches.filter(p=>p.ordemId===orderId).reduce((s,p)=>s+(Number(p.quantidadeRefugada)||0), 0); }
+function orderStatusBadge(status){
+  if(status==='Aberta') return '<span class="badge badge-gray"><span class="dot"></span>Aberta</span>';
+  if(status==='Em Produção') return '<span class="badge badge-amber"><span class="dot"></span>Em Produção</span>';
+  return '<span class="badge badge-green"><span class="dot"></span>Concluída</span>';
+}
+function recalcOrderStatus(order){
+  const produced = orderProducedQty(order.id);
+  const hasOpen = state.punches.some(p=>p.ordemId===order.id && p.status==='Aberto');
+  if(produced >= order.quantidadePlanejada) order.status = 'Concluída';
+  else if(hasOpen || produced > 0) order.status = 'Em Produção';
+  else order.status = 'Aberta';
+}
+function recalcAllOrderStatuses(){ state.orders.forEach(recalcOrderStatus); }
+function isOnVacation(emp){
+  if(!emp.ferias || !emp.ferias.inicio) return false;
+  const today = todayISODate();
+  if(today < emp.ferias.inicio) return false;
+  if(emp.ferias.fim && today > emp.ferias.fim) return false;
+  return true;
+}
+function employeeLocation(empId){ const r = state.resources.find(r=>r.funcionarios.includes(empId)); return r ? r.nome : null; }
+
+/* ===================== RENDER SHELL ===================== */
+function renderShell(){
+  document.getElementById('content').innerHTML = `
+    <div class="tab-panel" id="panel-dashboard"></div>
+    <div class="tab-panel" id="panel-ordens"></div>
+    <div class="tab-panel" id="panel-apontamento"></div>
+    <div class="tab-panel" id="panel-recursos"></div>
+    <div class="tab-panel" id="panel-engenharia"></div>
+    <div class="tab-panel" id="panel-funcionarios"></div>
+    <div class="tab-panel" id="panel-acompanhamento"></div>
+  `;
+  document.getElementById('panel-'+activeTab).classList.add('active');
+}
+
+/* ===================== DASHBOARD (Monitoramento) ===================== */
+function renderDashboard(){
+  recalcAllOrderStatuses();
+  const el = document.getElementById('panel-dashboard');
+  const totalCelulas = state.resources.length;
+  const produzindo = state.resources.filter(r=>r.status==='Produzindo').length;
+  const emAndamento = state.orders.filter(o=>o.status==='Em Produção').length;
+  const todaysPunchesKpi = state.punches.filter(p=>isTodayBR(p.inicio));
+  const producedKpi = todaysPunchesKpi.reduce((s,p)=>s+(Number(p.quantidadeProduzida)||0),0);
+  const scrapKpi = todaysPunchesKpi.reduce((s,p)=>s+(Number(p.quantidadeRefugada)||0),0);
+  const scrapRateKpi = (producedKpi+scrapKpi) > 0 ? (scrapKpi/(producedKpi+scrapKpi)*100) : 0;
+
+  el.innerHTML = `
+    <div class="section-title">Monitoramento da Produção</div>
+    <div class="section-sub">Visão geral das células, funcionários alocados e indicadores — ${fmtDateShort(nowBR())}</div>
+
+    <div class="kpi-row">
+      <div class="kpi-card kpi-blue"><div class="kpi-icon">${icon('building',19)}</div><div class="kpi-label">Células</div><div class="kpi-value">${totalCelulas}</div><div class="kpi-note">recursos monitorados</div></div>
+      <div class="kpi-card kpi-green"><div class="kpi-icon">${icon('play',19)}</div><div class="kpi-label">Produzindo</div><div class="kpi-value">${produzindo}</div><div class="kpi-note">células em produção</div></div>
+      <div class="kpi-card kpi-purple"><div class="kpi-icon">${icon('clipboard',19)}</div><div class="kpi-label">Em Andamento</div><div class="kpi-value">${emAndamento}</div><div class="kpi-note">ordens em produção</div></div>
+      <div class="kpi-card kpi-pink"><div class="kpi-icon">${icon('alertTriangle',19)}</div><div class="kpi-label">Taxa de Refugo</div><div class="kpi-value">${scrapRateKpi.toFixed(1)}<span style="font-size:16px;">%</span></div><div class="kpi-note">${scrapKpi} peças hoje</div></div>
+    </div>
+
+    <div class="card" style="margin-bottom:18px;">
+      <div class="filter-bar">
+        <div class="field grow">
+          <label>Buscar célula / funcionário</label>
+          <input id="dashSearchInput" placeholder="Ex.: CA01, montagem, João..." value="${dashSearch}" oninput="dashSearch=this.value; renderDashLists();">
+        </div>
+        <div class="field fixed">
+          <label>Setor monitorado</label>
+          <select id="dashSetorSelect" onchange="dashSetor=this.value; renderDashLists();"></select>
+        </div>
+        <button class="btn btn-ghost" onclick="clearDashFilters()">Limpar filtros</button>
+        <button class="btn btn-danger" onclick="zerarAlocacoes()">Zerar</button>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:18px;">
+      <div class="toolbar" style="margin-bottom:10px;">
+        <div>
+          <div class="section-title" style="font-size:15px; margin-bottom:2px;">${icon('users',17)} Funcionários</div>
+          <div class="section-sub" style="margin-bottom:0;" id="empCountLabel"></div>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="openEmployeeModal()">${icon('plus',13)} Adicionar Funcionário</button>
+      </div>
+      <div class="emp-scroll" id="empScrollList"></div>
+    </div>
+
+    <div class="toolbar">
+      <div class="section-title" style="font-size:15px; margin-bottom:0;">${icon('building',17)} Células de Produção</div>
+      <button class="btn btn-primary btn-sm" onclick="openResourceModal()">${icon('plus',13)} Nova Célula</button>
+    </div>
+    <div class="grid grid-3" id="resourceGrid" style="margin-bottom:20px;"></div>
+
+    <div class="grid grid-2" style="align-items:stretch;">
+      <div class="card">
+        <div class="section-title" style="font-size:14px;">Ranking de Recursos por Tempo Apontado</div>
+        <div class="section-sub">Máquinas/recursos com mais tempo total registrado</div>
+        <div id="rankingHolder"></div>
+      </div>
+      <div class="card">
+        <div class="section-title" style="font-size:14px;">Produção por Hora (hoje)</div>
+        <div class="section-sub">Peças concluídas, por hora do dia (BR)</div>
+        <div class="hbar-chart" id="hbarHolder"></div>
+      </div>
+    </div>
+
+    <div class="grid grid-3" style="align-items:stretch; margin-top:18px;">
+      <div class="card">
+        <div class="section-title" style="font-size:14px;">Aderência ao Plano</div>
+        <div class="section-sub">Tempo padrão ÷ tempo real apontado (hoje)</div>
+        <div id="aderenciaHolder"></div>
+      </div>
+      <div class="card">
+        <div class="section-title" style="font-size:14px;">Ordens por Status</div>
+        <div class="section-sub">Distribuição geral das ordens</div>
+        <div id="statusDonutHolder"></div>
+      </div>
+      <div class="card">
+        <div class="section-title" style="font-size:14px;">Máquina Parada (hoje)</div>
+        <div class="section-sub">Sem apontamento aberto desde o 1º registro</div>
+        <div id="paradaHolder"></div>
+      </div>
+    </div>
+  `;
+
+  populateSetorSelect();
+  renderDashLists();
+  renderRankingAndCharts();
+}
+
+function populateSetorSelect(){
+  const sel = document.getElementById('dashSetorSelect');
+  if(!sel) return;
+  const setores = Array.from(new Set(state.resources.map(r=>r.setor))).sort();
+  sel.innerHTML = ['Todos', ...setores].map(s=>`<option value="${s}" ${s===dashSetor?'selected':''}>${s}</option>`).join('');
+}
+function clearDashFilters(){
+  dashSearch=''; dashSetor='Todos';
+  document.getElementById('dashSearchInput').value='';
+  document.getElementById('dashSetorSelect').value='Todos';
+  renderDashLists();
+}
+async function zerarAlocacoes(){
+  if(!confirm('Isso vai remover todos os funcionários alocados de todas as células. Confirmar?')) return;
+  state.resources.forEach(r=>r.funcionarios=[]);
+  await persist();
+  renderDashLists();
+  toast('Alocações zeradas.', 'success');
+}
+function renderDashLists(){ renderEmpScroll(); renderResourceGrid(); }
+function renderEmpScroll(){
+  const holder = document.getElementById('empScrollList');
+  if(!holder) return;
+  const q = dashSearch.trim().toLowerCase();
+  const list = state.employees.filter(e => !q || (e.nome+' '+e.sobrenome).toLowerCase().includes(q) || e.funcao.toLowerCase().includes(q) || (e.numero||'').includes(q));
+  const onVacationCount = state.employees.filter(isOnVacation).length;
+  document.getElementById('empCountLabel').textContent = `${state.employees.length - onVacationCount} disponíveis · ${onVacationCount} férias`;
+  holder.innerHTML = list.length ? list.map(e=>{
+    const vac = isOnVacation(e);
+    const color = colorForName(e.nome+e.sobrenome);
+    if(vac){
+      return `<div class="emp-card vacation">
+        <div class="emp-tag" style="background:#FBDCDB; color:var(--red-dark);">Férias</div>
+        ${employeeAvatarHTML(e,'emp-avatar')}
+        <div class="emp-name">${e.nome.toUpperCase()} ${e.sobrenome.toUpperCase()}</div>
+        <div class="emp-vac-dates">Nº ${e.numero||'—'} · ${e.ferias.fim ? (brDate(e.ferias.inicio)+' a '+brDate(e.ferias.fim)) : ('a partir de '+brDate(e.ferias.inicio))}</div>
+      </div>`;
+    }
+    const loc = employeeLocation(e.id);
+    return `<div class="emp-card" draggable="true" ondragstart="onEmpDragStart(event,'${e.id}')" title="Arraste para uma célula">
+      <div class="emp-tag" style="background:${e.vinculo==='Terceiro'?'#FEF3E0':'#EAF1FE'}; color:${e.vinculo==='Terceiro'?'var(--amber-dark)':'var(--blue-dark)'};">${e.vinculo}</div>
+      ${employeeAvatarHTML(e,'emp-avatar')}
+      <div class="emp-name">${e.nome.toUpperCase()} ${e.sobrenome.toUpperCase()}</div>
+      <div class="emp-turno">Nº ${e.numero||'—'} · ${e.turno}</div>
+      ${loc?`<div class="emp-vac-dates" style="color:var(--blue-dark);">em ${loc}</div>`:''}
+    </div>`;
+  }).join('') : `<div class="empty-state" style="padding:20px;">Nenhum funcionário encontrado.</div>`;
+}
+function renderResourceGrid(){
+  const holder = document.getElementById('resourceGrid');
+  if(!holder) return;
+  const q = dashSearch.trim().toLowerCase();
+  const list = state.resources.filter(r=>{
+    const matchesSearch = !q || r.nome.toLowerCase().includes(q) || r.descricao.toLowerCase().includes(q);
+    const matchesSetor = dashSetor==='Todos' || r.setor===dashSetor;
+    return matchesSearch && matchesSetor;
+  });
+  holder.innerHTML = list.length ? list.map(r=>{
+    const chips = r.funcionarios.map(empId=>{
+      const e = state.employees.find(x=>x.id===empId);
+      if(!e) return '';
+      return `<div class="chip">${employeeAvatarHTML(e,'chip-avatar')}${e.nome}<span class="chip-x" onclick="unassignEmployee('${r.id}','${empId}')">×</span></div>`;
+    }).join('');
+    return `<div class="res-card" id="rescard-${r.id}" ondragover="event.preventDefault(); this.classList.add('drop-hover');" ondragleave="this.classList.remove('drop-hover');" ondrop="onResourceDrop(event,'${r.id}')">
+      <div class="res-head">
+        <div class="res-code">${r.nome}</div>
+        <div style="display:flex; align-items:center; gap:2px;">
+          <button class="res-icon-btn" title="Editar célula" onclick="openResourceModal('${r.id}')">${icon('edit',14)}</button>
+          <button class="res-icon-btn danger" title="Remover célula" onclick="removeResource('${r.id}')">${icon('trash',14)}</button>
+        </div>
+      </div>
+      <div class="res-desc">${r.descricao}</div>
+      <div class="res-tags">
+        <span class="badge badge-gray">${r.setor}</span>
+        <span class="badge badge-gray">${r.funcionarios.length} funcionário(s)</span>
+      </div>
+      <select class="status-select st-${r.status}" onchange="changeResourceStatus('${r.id}', this.value)">
+        <option ${r.status==='Produzindo'?'selected':''}>Produzindo</option>
+        <option ${r.status==='Parada'?'selected':''}>Parada</option>
+        <option ${r.status==='Manutenção'?'selected':''}>Manutenção</option>
+      </select>
+      <div style="height:10px;"></div>
+      <div class="dropzone ${chips?'has-people':''}">
+        ${chips || '<span class="dropzone-hint">Arraste funcionários para esta célula</span>'}
+      </div>
+      <button class="btn btn-ghost btn-block btn-sm" onclick="openAssignModal('${r.id}')">${icon('plus',13)} Adicionar funcionário</button>
+    </div>`;
+  }).join('') : `<div class="empty-state" style="grid-column:1/-1;"><div class="ic">${icon('building',30)}</div>Nenhuma célula encontrada. Clique em "Nova Célula" para começar.</div>`;
+}
+
+function renderRankingAndCharts(){
+  const recMap = {};
+  state.punches.forEach(p=>{
+    const end = p.fim ? p.fim : nowISO();
+    recMap[p.recurso] = (recMap[p.recurso]||0) + minutesBetween(p.inicio, end);
+  });
+  const recRanking = Object.entries(recMap).sort((a,b)=>b[1]-a[1]);
+  const rHolder = document.getElementById('rankingHolder');
+  const maxRec = recRanking.length ? recRanking[0][1] : 1;
+  if(rHolder) rHolder.innerHTML = recRanking.length ? recRanking.slice(0,6).map((r,i)=>`
+    <div class="rank-row">
+      <div class="rank-num">${i+1}</div>
+      <div class="rank-name">${r[0]}</div>
+      <div class="rank-val">${r[1].toFixed(0)} min</div>
+      <div class="rank-bar-track"><div class="rank-bar-fill" style="width:${Math.max(4,(r[1]/maxRec)*100)}%;"></div></div>
+    </div>`).join('')
+    : '<div class="empty-state" style="padding:24px;">Nenhum apontamento registrado ainda.</div>';
+
+  const todaysPunches = state.punches.filter(p=>isTodayBR(p.inicio));
+  const closedToday = todaysPunches.filter(p=>p.status==='Fechado');
+  const hourBuckets = new Array(24).fill(0);
+  closedToday.forEach(p=>{
+    const h = new Date(new Date(p.fim).toLocaleString('en-US',{timeZone:'America/Sao_Paulo'})).getHours();
+    hourBuckets[h] += Number(p.quantidadeProduzida)||0;
+  });
+  const maxBucket = Math.max(1, ...hourBuckets);
+  const activeHours = hourBuckets.map((v,i)=>({h:i,v})).filter(x=>x.v>0);
+  const hoursToShow = activeHours.length ? activeHours : hourBuckets.map((v,i)=>({h:i,v})).slice(6,19);
+  const hb = document.getElementById('hbarHolder');
+  if(hb) hb.innerHTML = hoursToShow.map(x=>`<div class="hbar-col"><div class="hbar" style="height:${Math.max(3,(x.v/maxBucket)*120)}px;" title="${x.v} peças"></div><div class="hbar-label">${String(x.h).padStart(2,'0')}h</div></div>`).join('');
+
+  const tempoRealizadoHoje = closedToday.reduce((s,p)=>s+minutesBetween(p.inicio,p.fim),0);
+  const tempoEstimadoProduzidoHoje = closedToday.reduce((s,p)=>{
+    const order = orderById(p.ordemId);
+    const prod = order ? productByCode(order.codigo) : null;
+    return s + ((prod?prod.tempoFabricacaoMin:0) * (Number(p.quantidadeProduzida)||0));
+  },0);
+  const aderencia = tempoRealizadoHoje > 0 ? Math.min(100, (tempoEstimadoProduzidoHoje/tempoRealizadoHoje)*100) : 0;
+  const ah = document.getElementById('aderenciaHolder');
+  if(ah) ah.innerHTML = `
+    <div class="gauge-wrap">${gaugeSVG(aderencia, 'gaugeAderencia')}</div>
+    <div class="kpi-note" style="color:var(--text-faint); text-align:center; margin-top:6px;">Padrão: ${tempoEstimadoProduzidoHoje.toFixed(0)} min · Real: ${tempoRealizadoHoje.toFixed(0)} min</div>`;
+
+  const allResources = Array.from(new Set(state.punches.map(p=>p.recurso)));
+  let paradaMin = 0;
+  allResources.forEach(r=>{
+    const rp = todaysPunches.filter(p=>p.recurso===r);
+    if(!rp.length) return;
+    const firstStart = rp.reduce((min,p)=> new Date(p.inicio) < new Date(min) ? p.inicio : min, rp[0].inicio);
+    const windowMin = minutesBetween(firstStart, nowISO());
+    const busyMin = rp.reduce((s,p)=> s + minutesBetween(p.inicio, p.fim || nowISO()), 0);
+    paradaMin += Math.max(0, windowMin - busyMin);
+  });
+  const ph = document.getElementById('paradaHolder');
+  if(ph) ph.innerHTML = `<div style="font-size:32px; font-weight:800; color:#FF4D6A;">${paradaMin.toFixed(0)}<span style="font-size:13px; color:var(--text-muted); font-weight:600; margin-left:4px;">min acumulados</span></div>
+    <div class="kpi-note" style="color:var(--text-faint); margin-top:6px;">somado entre ${allResources.length} recurso(s) monitorado(s)</div>`;
+
+  const dh = document.getElementById('statusDonutHolder');
+  if(dh){
+    const abertas = state.orders.filter(o=>o.status==='Aberta').length;
+    const andamento = state.orders.filter(o=>o.status==='Em Produção').length;
+    const concluidas = state.orders.filter(o=>o.status==='Concluída').length;
+    dh.innerHTML = donutSVG(abertas, andamento, concluidas);
+  }
+}
+function gaugeSVG(pct, gradId){
+  const r = 52, cx=64, cy=64, c = 2*Math.PI*r;
+  const offset = c - (Math.max(0,Math.min(100,pct))/100)*c;
+  return `<svg width="150" height="150" viewBox="0 0 128 128">
+    <defs><linearGradient id="${gradId}" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4F8CFF"/><stop offset="55%" stop-color="#8B5CF6"/><stop offset="100%" stop-color="#FF4D9E"/>
+    </linearGradient></defs>
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--surface-3)" stroke-width="13"/>
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="url(#${gradId})" stroke-width="13" stroke-linecap="round" stroke-dasharray="${c}" stroke-dashoffset="${offset}" transform="rotate(-90 ${cx} ${cy})"/>
+    <text x="${cx}" y="${cy+9}" text-anchor="middle" font-size="27" font-weight="800" fill="var(--text)" font-family="inherit">${pct.toFixed(0)}%</text>
+  </svg>`;
+}
+function donutSVG(abertas, andamento, concluidas){
+  const total = abertas+andamento+concluidas;
+  const colors = { aberta:'#818CF8', andamento:'#FFB020', concluida:'#22C168' };
+  let seg = '';
+  if(total>0){
+    const p1 = abertas/total*100;
+    const p2 = andamento/total*100;
+    seg = `conic-gradient(${colors.aberta} 0% ${p1}%, ${colors.andamento} ${p1}% ${p1+p2}%, ${colors.concluida} ${p1+p2}% 100%)`;
+  } else {
+    seg = `conic-gradient(var(--surface-3) 0% 100%)`;
+  }
+  return `
+    <div class="donut-row">
+      <div class="donut-outer" style="background:${seg};">
+        <div class="donut-inner"><div class="donut-total">${total}</div><div class="donut-sub">ordens</div></div>
+      </div>
+      <div class="donut-legend">
+        <div class="donut-legend-row"><span class="donut-legend-dot" style="background:${colors.aberta};"></span>Aberta<span class="donut-legend-val">${abertas}</span></div>
+        <div class="donut-legend-row"><span class="donut-legend-dot" style="background:${colors.andamento};"></span>Em Produção<span class="donut-legend-val">${andamento}</span></div>
+        <div class="donut-legend-row"><span class="donut-legend-dot" style="background:${colors.concluida};"></span>Concluída<span class="donut-legend-val">${concluidas}</span></div>
+      </div>
+    </div>`;
+}
+
+/* --- resource CRUD & assignment --- */
+function openResourceModal(id){
+  document.getElementById('resId').value = id || '';
+  if(id){
+    const r = resourceById(id);
+    document.getElementById('resModalTitle').textContent = 'Editar Célula';
+    document.getElementById('resNome').value = r.nome;
+    document.getElementById('resDescricao').value = r.descricao;
+    document.getElementById('resSetor').value = r.setor;
+  } else {
+    document.getElementById('resModalTitle').textContent = 'Nova Célula / Recurso';
+    document.getElementById('resNome').value = '';
+    document.getElementById('resDescricao').value = '';
+    document.getElementById('resSetor').value = '';
+  }
+  openModal('modalResource');
+}
+async function saveResource(){
+  const id = document.getElementById('resId').value;
+  const nome = document.getElementById('resNome').value.trim();
+  const descricao = document.getElementById('resDescricao').value.trim();
+  const setor = document.getElementById('resSetor').value.trim() || 'Geral';
+  if(!nome || !descricao){ toast('Preencha código e descrição.', 'error'); return; }
+  if(id){ Object.assign(resourceById(id), {nome,descricao,setor}); }
+  else{ state.resources.push({id:uid(), nome, descricao, setor, status:'Parada', funcionarios:[]}); }
+  await persist();
+  closeModal('modalResource');
+  populateSetorSelect();
+  renderDashLists();
+  renderRecursosTable();
+  toast('Célula salva com sucesso.', 'success');
+}
+async function removeResource(id){
+  if(!confirm('Remover esta célula? Os funcionários alocados serão liberados.')) return;
+  state.resources = state.resources.filter(r=>r.id!==id);
+  await persist();
+  populateSetorSelect();
+  renderDashLists();
+  renderRecursosTable();
+}
+async function changeResourceStatus(id, status){
+  resourceById(id).status = status;
+  await persist();
+  renderResourceGrid();
+  renderTopbarPills();
+}
+function onEmpDragStart(ev, empId){ ev.dataTransfer.setData('text/plain', empId); }
+async function onResourceDrop(ev, resId){
+  ev.preventDefault();
+  ev.currentTarget.classList.remove('drop-hover');
+  const empId = ev.dataTransfer.getData('text/plain');
+  if(!empId) return;
+  await assignEmployeeToResource(resId, empId);
+}
+async function assignEmployeeToResource(resId, empId){
+  const emp = state.employees.find(e=>e.id===empId);
+  if(!emp){ return; }
+  if(isOnVacation(emp)){ toast('Este funcionário está de férias.', 'error'); return; }
+  state.resources.forEach(r=>{ r.funcionarios = r.funcionarios.filter(id=>id!==empId); });
+  const target = resourceById(resId);
+  target.funcionarios.push(empId);
+  await persist();
+  renderDashLists();
+  toast(emp.nome + ' alocado em ' + target.nome + '.', 'success');
+}
+async function unassignEmployee(resId, empId){
+  const r = resourceById(resId);
+  r.funcionarios = r.funcionarios.filter(id=>id!==empId);
+  await persist();
+  renderDashLists();
+}
+function openAssignModal(resId){
+  document.getElementById('assignResId').value = resId;
+  const sel = document.getElementById('assignEmpSelect');
+  const available = state.employees.filter(e=>!isOnVacation(e));
+  if(!available.length){ toast('Nenhum funcionário disponível para alocar.', 'error'); return; }
+  sel.innerHTML = available.map(e=>`<option value="${e.id}">${e.nome} ${e.sobrenome}${employeeLocation(e.id)?' (em '+employeeLocation(e.id)+')':''}</option>`).join('');
+  openModal('modalAssign');
+}
+async function confirmAssign(){
+  const resId = document.getElementById('assignResId').value;
+  const empId = document.getElementById('assignEmpSelect').value;
+  closeModal('modalAssign');
+  await assignEmployeeToResource(resId, empId);
+}
+
+/* ===================== RECURSOS (cadastro) ===================== */
+let recSearch = '';
+function renderRecursos(){
+  const el = document.getElementById('panel-recursos');
+  el.innerHTML = `
+    <div class="section-title">${icon('wrench',19)} Recursos</div>
+    <div class="section-sub">Cadastro das máquinas, células e recursos utilizados no apontamento de produção e no monitoramento.</div>
+    <div class="toolbar">
+      <div class="search-box"><span class="search-ic">${icon('search',15)}</span><input placeholder="Buscar código, descrição ou setor..." oninput="recSearch=this.value; renderRecursosTable();"></div>
+      <button class="btn btn-primary" onclick="openResourceModal()">${icon('plus',14)} Novo Recurso</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Código</th><th>Descrição</th><th>Setor</th><th>Status</th><th>Funcionários</th><th style="width:110px;"></th></tr></thead>
+        <tbody id="recTbody"></tbody>
+      </table>
+    </div>
+  `;
+  renderRecursosTable();
+}
+function renderRecursosTable(){
+  const tbody = document.getElementById('recTbody');
+  if(!tbody) return;
+  const q = recSearch.trim().toLowerCase();
+  const list = state.resources.filter(r => !q || r.nome.toLowerCase().includes(q) || r.descricao.toLowerCase().includes(q) || r.setor.toLowerCase().includes(q));
+  tbody.innerHTML = list.length ? list.map(r=>{
+    const statusBadgeClass = r.status==='Produzindo' ? 'badge-green' : (r.status==='Manutenção' ? 'badge-amber' : 'badge-red');
+    const nomes = r.funcionarios.map(id=>{ const e=state.employees.find(x=>x.id===id); return e ? (e.nome+' '+e.sobrenome) : null; }).filter(Boolean);
+    return `<tr>
+      <td style="font-weight:700;">${r.nome}</td>
+      <td>${r.descricao}</td>
+      <td><span class="badge badge-gray">${r.setor}</span></td>
+      <td><span class="badge ${statusBadgeClass}"><span class="dot"></span>${r.status}</span></td>
+      <td>${nomes.length ? nomes.join(', ') : '<span style="color:var(--text-faint);">Nenhum</span>'}</td>
+      <td>
+        <button class="icon-btn" onclick="openResourceModal('${r.id}')" title="Editar">${icon('edit',14)}</button>
+        <button class="icon-btn danger" onclick="removeResourceFromRecursos('${r.id}')" title="Remover">${icon('trash',14)}</button>
+      </td>
+    </tr>`;
+  }).join('') : `<tr class="empty-row"><td colspan="6">Nenhum recurso cadastrado. Clique em "Novo Recurso" para começar.</td></tr>`;
+}
+async function removeResourceFromRecursos(id){
+  await removeResource(id);
+  renderRecursosTable();
+}
+
+/* ===================== ORDENS DE PRODUÇÃO ===================== */
+let ordensSearch = '';
+function renderOrdens(){
+  recalcAllOrderStatuses();
+  const el = document.getElementById('panel-ordens');
+  el.innerHTML = `
+    <div class="section-title">${icon('clipboard',19)} Ordens de Produção</div>
+    <div class="section-sub">Gere ordens com base nos códigos cadastrados na Engenharia de Produto e seus tempos de fabricação.</div>
+    <div class="toolbar">
+      <div class="search-box"><span class="search-ic">${icon('search',15)}</span><input placeholder="Buscar por OP ou código..." oninput="ordensSearch=this.value; renderOrdensTable();"></div>
+      <button class="btn btn-primary" onclick="openOrderModal()">${icon('plus',14)} Nova Ordem de Produção</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Ordem</th><th>Código</th><th>Descrição</th><th>Qtd. Planejada</th><th>Produzido</th><th>Tempo Estimado</th><th>Status</th><th></th></tr></thead>
+        <tbody id="ordensTbody"></tbody>
+      </table>
+    </div>
+  `;
+  renderOrdensTable();
+}
+function renderOrdensTable(){
+  const tbody = document.getElementById('ordensTbody');
+  if(!tbody) return;
+  const q = ordensSearch.trim().toLowerCase();
+  const list = state.orders.filter(o => !q || o.id.toLowerCase().includes(q) || o.codigo.toLowerCase().includes(q)).sort((a,b)=> b.criadoEm.localeCompare(a.criadoEm));
+  tbody.innerHTML = list.length ? list.map(o=>{
+    const produced = orderProducedQty(o.id);
+    return `<tr>
+      <td style="color:var(--blue); font-weight:700;">${o.id}</td>
+      <td>${o.codigo}</td>
+      <td>${o.descricao}</td>
+      <td class="mono">${o.quantidadePlanejada}</td>
+      <td class="mono">${produced}</td>
+      <td class="mono">${o.tempoEstimadoTotalMin.toFixed(0)} min</td>
+      <td>${orderStatusBadge(o.status)}</td>
+      <td style="white-space:nowrap;">
+        <button class="btn btn-sm btn-ghost" onclick="showOrderQR('${o.id}')">${icon('qrscan',13)} QR Code</button>
+        <button class="icon-btn" onclick="printOrder('${o.id}')" title="Imprimir Ordem">${icon('printer',15)}</button>
+      </td>
+    </tr>`;
+  }).join('') : `<tr class="empty-row"><td colspan="8">Nenhuma ordem de produção encontrada. Clique em "Nova Ordem de Produção" para começar.</td></tr>`;
+}
+function openOrderModal(){
+  const sel = document.getElementById('ordProduto');
+  if(!state.products.length){ toast('Cadastre ao menos um código na Engenharia de Produto primeiro.', 'error'); return; }
+  sel.innerHTML = state.products.map(p=>`<option value="${p.codigo}">${p.codigo} — ${p.descricao} (${p.classificacao})</option>`).join('');
+  const geradoSel = document.getElementById('ordGeradoPor');
+  geradoSel.innerHTML = state.employees.length ? state.employees.map(e=>`<option value="${e.nome} ${e.sobrenome}">${e.nome} ${e.sobrenome}</option>`).join('') : '<option value="">Nenhum funcionário cadastrado</option>';
+  document.getElementById('ordQtd').value = 100;
+  renderOrderPreview();
+  openModal('modalOrder');
+}
+function renderOrderPreview(){
+  const codigo = document.getElementById('ordProduto').value;
+  const qtd = Number(document.getElementById('ordQtd').value) || 0;
+  const prod = productByCode(codigo);
+  const prev = document.getElementById('ordPreview');
+  if(!prod){ prev.innerHTML=''; return; }
+  const total = prod.tempoFabricacaoMin * qtd;
+  prev.innerHTML = `<div><b>${prod.descricao}</b> <span class="badge ${prod.classificacao==='PI'?'badge-purple':'badge-green'}">${prod.classificacao}</span></div>
+    <div style="margin-top:6px; color:var(--text-muted);">Tempo unitário: ${prod.tempoFabricacaoMin} min/peça</div>
+    <div style="color:var(--blue); font-weight:700;">Tempo total estimado: ${total.toFixed(0)} min (${(total/60).toFixed(1)} h)</div>`;
+}
+async function saveOrder(shouldPrint){
+  const codigo = document.getElementById('ordProduto').value;
+  const qtd = Number(document.getElementById('ordQtd').value);
+  const prod = productByCode(codigo);
+  const geradoPor = document.getElementById('ordGeradoPor').value || 'Não informado';
+  if(!prod || !qtd || qtd<=0){ toast('Informe uma quantidade válida.', 'error'); return; }
+  const opId = formatOrderNumber(state.nextOrderNum);
+  state.nextOrderNum++;
+  state.orders.push({ id: opId, codigo: prod.codigo, descricao: prod.descricao, quantidadePlanejada: qtd, tempoEstimadoTotalMin: prod.tempoFabricacaoMin*qtd, status:'Aberta', criadoEm: nowISO(), geradoPor });
+  await persist();
+  closeModal('modalOrder');
+  toast('Ordem ' + opId + ' gerada com sucesso.', 'success');
+  renderOrdensTable();
+  refreshApontamentoDatalist();
+  if(shouldPrint) printOrder(opId);
+}
+function showOrderInfo(orderId){
+  const order = orderById(orderId);
+  if(!order) return;
+  const apontadores = Array.from(new Set(state.punches.filter(p=>p.ordemId===orderId).map(p=>p.funcionarioId)));
+  document.getElementById('orderInfoBody').innerHTML = `
+    <div style="margin-bottom:14px;">
+      <div style="font-size:20px; font-weight:800;">${order.id}</div>
+      <div style="color:var(--text-muted); font-size:13px;">${order.codigo} — ${order.descricao}</div>
+      <div style="margin-top:8px;">${orderStatusBadge(order.status)}</div>
+    </div>
+    <div class="card" style="box-shadow:none; background:var(--surface-2); margin-bottom:14px;">
+      <div class="grid grid-2" style="gap:14px;">
+        <div><label style="margin-bottom:3px;">Data de Geração</label><div style="font-weight:700; font-size:13.5px;">${fmtDateTime(order.criadoEm)}</div></div>
+        <div><label style="margin-bottom:3px;">Gerado por</label><div style="font-weight:700; font-size:13.5px;">${order.geradoPor || 'Não informado'}</div></div>
+      </div>
+    </div>
+    <div>
+      <label style="margin-bottom:7px;">Quem Apontou</label>
+      ${apontadores.length ? `<div style="display:flex; flex-wrap:wrap; gap:7px;">${apontadores.map(id=>employeeMiniChipHTML(id)).join('')}</div>` : '<div style="color:var(--text-faint); font-size:13px;">Nenhum apontamento registrado ainda.</div>'}
+    </div>
+  `;
+  openModal('modalOrderInfo');
+}
+function showOrderQR(orderId){
+  const order = orderById(orderId);
+  if(!order) return;
+  document.getElementById('qrOpLabel').textContent = order.id + '  ·  ' + order.codigo;
+  const holder = document.getElementById('qrCanvasHolder');
+  holder.innerHTML = '';
+  if(window.QRCode){ new QRCode(holder, { text: order.id, width:200, height:200, colorDark:'#111', colorLight:'#fff' }); }
+  else{ holder.innerHTML = `<div style="padding:40px; border:2px dashed #999; font-weight:700;">${order.id}</div>`; }
+  openModal('modalQR');
+}
+function printOrder(orderId){
+  const order = orderById(orderId);
+  if(!order) return;
+  const prod = productByCode(order.codigo);
+  const printArea = document.getElementById('printArea');
+  const qrHolderId = 'printQr_' + Date.now();
+  const blankRows = Array.from({length:5}).map(()=>'<tr><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td><td>&nbsp;</td></tr>').join('');
+  printArea.innerHTML = `
+    <div class="print-page">
+      <div class="print-top-row">
+        <div>
+          <div class="print-brand">PRODFY</div>
+          <div class="print-doc-title">Ordem de Produção</div>
+          <div class="print-op-number">${order.id}</div>
+        </div>
+        <div class="print-qr-block">
+          <div id="${qrHolderId}"></div>
+          <div class="print-qr-label">${order.id}</div>
+        </div>
+      </div>
+      <div class="print-info-grid">
+        <div><span class="print-label">Código da Peça</span><span class="print-value">${order.codigo}</span></div>
+        <div><span class="print-label">Classificação</span><span class="print-value">${prod?prod.classificacao:'—'}</span></div>
+        <div><span class="print-label">Nome / Descrição</span><span class="print-value">${order.descricao}</span></div>
+        <div><span class="print-label">Quantidade Planejada</span><span class="print-value">${order.quantidadePlanejada} peças</span></div>
+        <div><span class="print-label">Tempo Estimado Total</span><span class="print-value">${order.tempoEstimadoTotalMin.toFixed(0)} min</span></div>
+        <div><span class="print-label">Status</span><span class="print-value">${order.status}</span></div>
+        <div><span class="print-label">Gerado por</span><span class="print-value">${order.geradoPor||'—'}</span></div>
+        <div><span class="print-label">Data de Geração</span><span class="print-value">${fmtDateTime(order.criadoEm)}</span></div>
+        <div><span class="print-label">Data de Impressão</span><span class="print-value">${fmtDateTime(nowISO())}</span></div>
+      </div>
+      <div class="print-section-title">Apontamento de Produção — preenchimento manual</div>
+      <table class="print-table">
+        <thead><tr><th>Funcionário</th><th>Recurso</th><th>Início</th><th>Fim</th><th>Qtd. Produzida</th><th>Qtd. Refugada</th></tr></thead>
+        <tbody>${blankRows}</tbody>
+      </table>
+      <div class="print-footer">Documento gerado pelo sistema Prodfy em ${fmtDateTime(nowISO())}</div>
+    </div>
+  `;
+  if(window.QRCode){
+    const qrHolder = document.getElementById(qrHolderId);
+    if(qrHolder) new QRCode(qrHolder, { text: order.id, width:104, height:104, colorDark:'#111', colorLight:'#fff' });
+  }
+  setTimeout(()=>{ window.print(); }, 150);
+}
+
+/* ===================== ENGENHARIA DE PRODUTO ===================== */
+let engSearch = '';
+function renderEngenharia(){
+  const el = document.getElementById('panel-engenharia');
+  el.innerHTML = `
+    <div class="section-title">${icon('gear',19)} Engenharia de Produto</div>
+    <div class="section-sub">Cadastro de códigos ERP, descrições, classificação e tempos de fabricação utilizados para gerar as ordens de produção. Padrão de código: <b>30.2000.XXXX</b> para PI (produto intermediário) e <b>30.3000.XXXX</b> para PF (produto final).</div>
+    <div class="toolbar">
+      <div class="search-box"><span class="search-ic">${icon('search',15)}</span><input placeholder="Buscar código ou descrição..." oninput="engSearch=this.value; renderEngenhariaTable();"></div>
+      <button class="btn btn-primary" onclick="addProductRow()">${icon('plus',14)} Novo Código</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th style="width:17%;">Código ERP</th><th style="width:10%;">Classificação</th><th>Descrição</th><th style="width:20%;">Tempo Fabricação (min/peça)</th><th style="width:60px;"></th></tr></thead>
+        <tbody id="engTbody"></tbody>
+      </table>
+    </div>
+  `;
+  renderEngenhariaTable();
+}
+function renderEngenhariaTable(){
+  const tbody = document.getElementById('engTbody');
+  if(!tbody) return;
+  const q = engSearch.trim().toLowerCase();
+  const list = state.products.filter(p=> !q || p.codigo.toLowerCase().includes(q) || p.descricao.toLowerCase().includes(q));
+  tbody.innerHTML = list.length ? list.map((p)=>{
+    const realIdx = state.products.indexOf(p);
+    return `<tr>
+      <td class="editable-td mono"><input value="${p.codigo}" onchange="updateProduct(${realIdx},'codigo',this.value)"></td>
+      <td><select class="class-select class-${p.classificacao}" onchange="updateClassificacao(${realIdx}, this.value)">
+        <option value="PI" ${p.classificacao==='PI'?'selected':''}>PI</option>
+        <option value="PF" ${p.classificacao==='PF'?'selected':''}>PF</option>
+      </select></td>
+      <td class="editable-td"><input value="${p.descricao}" onchange="updateProduct(${realIdx},'descricao',this.value)"></td>
+      <td class="editable-td"><input type="number" step="0.1" min="0" value="${p.tempoFabricacaoMin}" onchange="updateProduct(${realIdx},'tempoFabricacaoMin',this.value)"></td>
+      <td><button class="icon-btn danger" onclick="removeProduct(${realIdx})" title="Remover">${icon('trash',14)}</button></td>
+    </tr>`;
+  }).join('') : `<tr class="empty-row"><td colspan="5">Nenhum código cadastrado. Clique em "Novo Código" para começar.</td></tr>`;
+}
+async function addProductRow(){
+  state.products.push({codigo: genErpCode('PF'), descricao:'Nova peça', tempoFabricacaoMin:1, classificacao:'PF'});
+  await persist();
+  renderEngenhariaTable();
+}
+async function updateProduct(idx, field, value){
+  const p = state.products[idx]; if(!p) return;
+  if(field==='tempoFabricacaoMin') value = Math.max(0, Number(value)||0);
+  p[field] = value;
+  await persist();
+  toast('Código atualizado.', 'success');
+}
+async function updateClassificacao(idx, newClass){
+  const p = state.products[idx]; if(!p) return;
+  p.classificacao = newClass;
+  const parts = (p.codigo||'').split('.');
+  const last4 = (parts[2] && /^\d{4}$/.test(parts[2])) ? parts[2] : String(Math.floor(1000+Math.random()*9000));
+  p.codigo = '30.' + (newClass==='PI'?'2000':'3000') + '.' + last4;
+  await persist();
+  renderEngenhariaTable();
+  toast('Classificação atualizada — código ' + p.codigo, 'success');
+}
+async function removeProduct(idx){
+  if(!confirm('Remover este código da Engenharia de Produto?')) return;
+  state.products.splice(idx,1);
+  await persist();
+  renderEngenhariaTable();
+}
+
+/* ===================== FUNCIONÁRIOS ===================== */
+let funcSearch = '';
+function renderFuncionarios(){
+  const el = document.getElementById('panel-funcionarios');
+  el.innerHTML = `
+    <div class="section-title">${icon('users',19)} Funcionários</div>
+    <div class="section-sub">Cadastro de colaboradores do chão de fábrica com identificação visual, função, turno, vínculo e férias.</div>
+    <div class="toolbar">
+      <div class="search-box"><span class="search-ic">${icon('search',15)}</span><input placeholder="Buscar por número ou nome..." oninput="funcSearch=this.value; renderFuncionariosTable();"></div>
+      <button class="btn btn-primary" onclick="openEmployeeModal()">${icon('plus',14)} Adicionar Funcionário</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th style="width:70px;">Nº</th><th>Nome</th><th>Função</th><th>Turno</th><th>Vínculo</th><th>Situação</th><th style="width:110px;"></th></tr></thead>
+        <tbody id="funcTbody"></tbody>
+      </table>
+    </div>
+  `;
+  renderFuncionariosTable();
+}
+function renderFuncionariosTable(){
+  const tbody = document.getElementById('funcTbody');
+  if(!tbody) return;
+  const q = funcSearch.trim().toLowerCase();
+  const list = state.employees.filter(e => !q || (e.nome+' '+e.sobrenome).toLowerCase().includes(q) || e.funcao.toLowerCase().includes(q) || (e.numero||'').includes(q));
+  tbody.innerHTML = list.length ? list.map(e=>{
+    const vac = isOnVacation(e);
+    const loc = employeeLocation(e.id);
+    return `<tr class="${vac?'row-vacation':''}">
+      <td class="mono" style="font-weight:800; color:${vac?'var(--red-dark)':'var(--blue)'};">${e.numero||'—'}</td>
+      <td>
+        <div style="display:flex; align-items:center; gap:11px;">
+          ${employeeAvatarHTML(e,'table-emp-avatar')}
+          <span>${e.nome} ${e.sobrenome}</span>
+        </div>
+      </td>
+      <td>${e.funcao}</td>
+      <td><span class="badge badge-blue">${e.turno}</span></td>
+      <td><span class="badge badge-gray">${e.vinculo}</span></td>
+      <td>${vac ? '<span class="badge badge-red">Férias</span>' : (loc ? `<span class="badge badge-green">Em ${loc}</span>` : '<span class="badge badge-gray">Disponível</span>')}</td>
+      <td>
+        <button class="icon-btn" onclick="openEmployeeModal('${e.id}')" title="Editar">${icon('edit',14)}</button>
+        <button class="icon-btn danger" onclick="removeEmployee('${e.id}')" title="Remover">${icon('trash',14)}</button>
+      </td>
+    </tr>`;
+  }).join('') : `<tr class="empty-row"><td colspan="6">Nenhum funcionário cadastrado ainda.</td></tr>`;
+}
+function toggleFeriasFields(){
+  document.getElementById('feriasFields').style.display = document.getElementById('empFeriasToggle').checked ? 'flex' : 'none';
+}
+function openEmployeeModal(id){
+  document.getElementById('empId').value = id || '';
+  if(id){
+    const e = state.employees.find(x=>x.id===id);
+    document.getElementById('empModalTitle').textContent = 'Editar Funcionário';
+    document.getElementById('empNumeroField').style.display = 'block';
+    document.getElementById('empNumeroDisplay').value = e.numero || '—';
+    document.getElementById('empNome').value = e.nome;
+    document.getElementById('empSobrenome').value = e.sobrenome;
+    document.getElementById('empFuncao').value = e.funcao;
+    document.getElementById('empTurno').value = e.turno;
+    document.getElementById('empVinculo').value = e.vinculo || 'Efetivo';
+    document.getElementById('empFeriasToggle').checked = !!e.ferias;
+    document.getElementById('empFeriasInicio').value = e.ferias ? e.ferias.inicio : '';
+    document.getElementById('empFeriasFim').value = (e.ferias && e.ferias.fim) ? e.ferias.fim : '';
+  } else {
+    document.getElementById('empModalTitle').textContent = 'Novo Funcionário';
+    document.getElementById('empNumeroField').style.display = 'none';
+    document.getElementById('empNome').value = '';
+    document.getElementById('empSobrenome').value = '';
+    document.getElementById('empFuncao').value = '';
+    document.getElementById('empTurno').value = '1º Turno';
+    document.getElementById('empVinculo').value = 'Efetivo';
+    document.getElementById('empFeriasToggle').checked = false;
+    document.getElementById('empFeriasInicio').value = '';
+    document.getElementById('empFeriasFim').value = '';
+  }
+  toggleFeriasFields();
+  openModal('modalEmployee');
+}
+async function saveEmployee(){
+  const id = document.getElementById('empId').value;
+  const nome = document.getElementById('empNome').value.trim();
+  const sobrenome = document.getElementById('empSobrenome').value.trim();
+  const funcao = document.getElementById('empFuncao').value.trim();
+  const turno = document.getElementById('empTurno').value;
+  const vinculo = document.getElementById('empVinculo').value;
+  const feriasOn = document.getElementById('empFeriasToggle').checked;
+  const fi = document.getElementById('empFeriasInicio').value;
+  const ff = document.getElementById('empFeriasFim').value;
+  if(!nome || !sobrenome || !funcao){ toast('Preencha todos os campos.', 'error'); return; }
+  if(feriasOn && !fi){ toast('Informe a data de início das férias.', 'error'); return; }
+  const ferias = (feriasOn && fi) ? {inicio:fi, fim: ff || null} : null;
+  let novoNumero = null;
+  if(id){
+    const e = state.employees.find(x=>x.id===id);
+    Object.assign(e, {nome,sobrenome,funcao,turno,vinculo,ferias});
+  } else {
+    novoNumero = formatEmployeeNumber(state.nextEmployeeNum);
+    state.nextEmployeeNum++;
+    state.employees.push({id:uid(), numero:novoNumero, nome, sobrenome, funcao, turno, vinculo, ferias, fotoIndex:(Math.max(1,Number(novoNumero))-1) % EMPLOYEE_PHOTOS.length});
+  }
+  await persist();
+  closeModal('modalEmployee');
+  renderFuncionariosTable();
+  refreshApontamentoDatalist();
+  if(activeTab==='dashboard') renderDashLists();
+  toast(novoNumero ? `Funcionário salvo — número ${novoNumero}.` : 'Funcionário salvo com sucesso.', 'success');
+}
+async function removeEmployee(id){
+  if(!confirm('Remover este funcionário?')) return;
+  state.employees = state.employees.filter(e=>e.id!==id);
+  state.resources.forEach(r=>{ r.funcionarios = r.funcionarios.filter(eid=>eid!==id); });
+  await persist();
+  renderFuncionariosTable();
+  refreshApontamentoDatalist();
+}
+
+/* ===================== APONTAMENTO DE PRODUÇÃO (TABLET) ===================== */
+let finFuncionarioId = '';
+let finPunchId = '';
+
+function renderApontamento(){
+  const el = document.getElementById('panel-apontamento');
+  const openCount = state.punches.filter(p=>p.status==='Aberto').length;
+  el.innerHTML = `
+    <div class="ap-hero">
+      <div class="ap-hero-icon">${icon('helmet',26)}</div>
+      <div>
+        <div class="ap-hero-title">Apontamento de Produção</div>
+        <div class="ap-hero-sub">Toque em um dos botões abaixo</div>
+      </div>
+      <div class="ap-clock" id="apClockDisplay">--:--:--</div>
+    </div>
+    <div class="ap-main-actions">
+      <button type="button" class="ap-big-btn ap-btn-green" onclick="openIniciarModal()">
+        <div class="ap-big-icon">${icon('play',36)}</div>
+        <div>INICIAR</div>
+        <div class="ap-big-sub">Começar a produção em uma máquina</div>
+      </button>
+      <button type="button" class="ap-big-btn ap-btn-red" onclick="openFinalizarModal()">
+        <span class="ap-big-badge" id="apOpenBadge" style="${openCount>0?'':'display:none;'}">${openCount}</span>
+        <div class="ap-big-icon">${icon('stop',36)}</div>
+        <div>FINALIZAR</div>
+        <div class="ap-big-sub">Encerrar um apontamento em aberto</div>
+      </button>
+    </div>
+  `;
+}
+
+/* --- Iniciar (modal) --- */
+function openIniciarModal(){
+  apFuncionarioId=''; apRecurso=''; apRecursoCustom=''; apEmpFilterQuery='';
+  renderIniciarModalBody();
+  openModal('modalIniciar');
+}
+function closeIniciarModal(){ closeModal('modalIniciar'); }
+function renderIniciarModalBody(){
+  const holder = document.getElementById('iniciarModalBody');
+  const openOrders = state.orders.filter(o=>o.status!=='Concluída').slice(-8).reverse();
+  holder.innerHTML = `
+    <div class="ap-step" style="margin-bottom:14px;">
+      <div class="ap-step-head"><div class="ap-step-num">1</div><div class="ap-step-title">Quem está trabalhando?</div></div>
+      <div class="field" style="margin-bottom:14px;">
+        <label>Digite seu número ou nome</label>
+        <input id="apEmpFilterInput" placeholder="Ex: 0007 ou Carlos" oninput="apEmpFilterQuery=this.value; renderApEmpGrid();">
+      </div>
+      <div class="ap-emp-grid" id="apEmpGrid"></div>
+    </div>
+    <div class="ap-step step-purple" style="margin-bottom:14px;">
+      <div class="ap-step-head"><div class="ap-step-num">2</div><div class="ap-step-title">Em qual máquina ou recurso?</div></div>
+      <div class="ap-res-grid" id="apResGrid"></div>
+      <div class="field" style="margin-top:14px; margin-bottom:0;">
+        <label>Outra máquina (se não estiver na lista acima)</label>
+        <input id="apRecursoCustomInput" placeholder="Digite o nome da máquina ou recurso" oninput="apRecursoCustom=this.value;">
+      </div>
+    </div>
+    <div class="ap-step step-orange" style="margin-bottom:14px;">
+      <div class="ap-step-head"><div class="ap-step-num">3</div><div class="ap-step-title">Qual é a ordem de produção?</div></div>
+      <button class="ap-scan-btn" onclick="openScanner()">${icon('qrscan',20)} Ler QR Code da Ordem</button>
+      <div class="ap-or-divider">— ou digite o número da ordem —</div>
+      <input id="pOrdem" class="ap-order-input" list="ordensList" placeholder="000.001">
+      <datalist id="ordensList"></datalist>
+      ${openOrders.length ? `<div class="ap-recent-ops">${openOrders.map(o=>`<button type="button" class="ap-op-chip" onclick="document.getElementById('pOrdem').value='${o.id}';">${o.id} · ${o.codigo}</button>`).join('')}</div>` : ''}
+    </div>
+    <button class="ap-start-btn" onclick="startPunch()">${icon('play',22)} INICIAR APONTAMENTO</button>
+  `;
+  refreshApontamentoDatalist();
+  renderApEmpGrid();
+  renderApResGrid();
+}
+function renderApEmpGrid(){
+  const holder = document.getElementById('apEmpGrid');
+  if(!holder) return;
+  const q = apEmpFilterQuery.trim().toLowerCase();
+  let availableEmps = state.employees.filter(e=>!isOnVacation(e));
+  if(q){ availableEmps = availableEmps.filter(e => (e.numero||'').includes(q) || (e.nome+' '+e.sobrenome).toLowerCase().includes(q)); }
+  if(/^\d{1,4}$/.test(q)){
+    const padded = q.padStart(4,'0');
+    const exact = state.employees.find(e=>e.numero===padded && !isOnVacation(e));
+    if(exact) apFuncionarioId = exact.id;
+  }
+  holder.innerHTML = availableEmps.length ? availableEmps.map(e=>{
+    const sel = apFuncionarioId === e.id;
+    return `<button type="button" class="ap-emp-btn ${sel?'selected':''}" onclick="selectApFuncionario('${e.id}')">
+      ${sel?`<span class="ap-check">${icon('checkCircle',18)}</span>`:''}
+      ${employeeAvatarHTML(e,'ap-emp-avatar')}
+      <div class="ap-emp-btn-name">${e.nome}<br>${e.sobrenome}</div>
+      <div class="ap-emp-num">Nº ${e.numero||'—'}</div>
+    </button>`;
+  }).join('') : `<div class="empty-state" style="grid-column:1/-1; padding:20px;">Nenhum funcionário encontrado.</div>`;
+}
+function renderApResGrid(){
+  const holder = document.getElementById('apResGrid');
+  if(!holder) return;
+  holder.innerHTML = state.resources.length ? state.resources.map(r=>{
+    const sel = apRecurso === r.nome && !apRecursoCustom;
+    return `<button type="button" class="ap-res-btn ${sel?'selected':''}" onclick="selectApRecurso('${r.nome}')">
+      ${sel?`<span class="ap-check">${icon('checkCircle',18)}</span>`:''}
+      <div class="ap-res-code-big">${r.nome}</div>
+      <div class="ap-res-desc-small">${r.descricao}</div>
+    </button>`;
+  }).join('') : `<div class="empty-state" style="grid-column:1/-1; padding:20px;">Nenhuma célula cadastrada. Adicione na aba Recursos.</div>`;
+}
+function selectApFuncionario(id){ apFuncionarioId = id; renderApEmpGrid(); }
+function selectApRecurso(nome){ apRecurso = nome; apRecursoCustom=''; const c = document.getElementById('apRecursoCustomInput'); if(c) c.value=''; renderApResGrid(); }
+function refreshApontamentoDatalist(){
+  const ord = document.getElementById('ordensList');
+  if(ord){ ord.innerHTML = state.orders.filter(o=>o.status!=='Concluída').map(o=>`<option value="${o.id}">${o.codigo} — ${o.descricao}</option>`).join(''); }
+}
+function stepQty(inputId, delta){
+  const el = document.getElementById(inputId);
+  if(!el) return;
+  el.value = Math.max(0, (Number(el.value)||0) + delta);
+}
+function punchQtyBlockHTML(p){
+  return `
+    <div class="ap-qty-grid">
+      <div>
+        <div class="ap-qty-label">${icon('checkCircle',15)} Peças Produzidas</div>
+        <div class="ap-stepper">
+          <button type="button" onclick="stepQty('qtd-prod-${p.id}',-1)">−</button>
+          <input type="number" min="0" id="qtd-prod-${p.id}" value="0">
+          <button type="button" onclick="stepQty('qtd-prod-${p.id}',1)">+</button>
+        </div>
+        <div class="ap-quick-row">
+          <button type="button" class="ap-quick-btn" onclick="stepQty('qtd-prod-${p.id}',10)">+10</button>
+          <button type="button" class="ap-quick-btn" onclick="stepQty('qtd-prod-${p.id}',50)">+50</button>
+        </div>
+      </div>
+      <div>
+        <div class="ap-qty-label">${icon('alertTriangle',15)} Peças Refugadas</div>
+        <div class="ap-stepper">
+          <button type="button" onclick="stepQty('qtd-scrap-${p.id}',-1)">−</button>
+          <input type="number" min="0" id="qtd-scrap-${p.id}" value="0">
+          <button type="button" onclick="stepQty('qtd-scrap-${p.id}',1)">+</button>
+        </div>
+        <div class="ap-quick-row">
+          <button type="button" class="ap-quick-btn" onclick="stepQty('qtd-scrap-${p.id}',5)">+5</button>
+          <button type="button" class="ap-quick-btn" onclick="stepQty('qtd-scrap-${p.id}',10)">+10</button>
+        </div>
+      </div>
+    </div>`;
+}
+async function startPunch(){
+  const funcionarioId = apFuncionarioId;
+  const recurso = (apRecursoCustom||'').trim() || apRecurso;
+  const ordemId = document.getElementById('pOrdem').value.trim().toUpperCase();
+  if(!funcionarioId){ toast('Toque no seu nome no passo 1.', 'error'); beepError(); return; }
+  if(!recurso){ toast('Selecione a máquina no passo 2.', 'error'); beepError(); return; }
+  const order = orderById(ordemId);
+  if(!order){ toast('Ordem de produção não encontrada: ' + ordemId, 'error'); beepError(); return; }
+  if(order.status === 'Concluída'){ toast('Esta ordem já está concluída.', 'error'); beepError(); return; }
+  state.punches.push({ id: uid(), ordemId: order.id, funcionarioId, recurso, inicio: nowISO(), fim:null, quantidadeProduzida:0, quantidadeRefugada:0, status:'Aberto' });
+  recalcOrderStatus(order);
+  await persist();
+  beepStart();
+  toast('Apontamento iniciado — ' + order.id, 'success');
+  apFuncionarioId=''; apRecurso=''; apRecursoCustom='';
+  closeIniciarModal();
+  renderApontamento();
+  renderNav();
+}
+async function endPunch(punchId){
+  const p = state.punches.find(x=>x.id===punchId);
+  if(!p) return;
+  const prod = Number(document.getElementById('qtd-prod-'+punchId).value) || 0;
+  const scrap = Number(document.getElementById('qtd-scrap-'+punchId).value) || 0;
+  p.quantidadeProduzida = prod;
+  p.quantidadeRefugada = scrap;
+  p.fim = nowISO();
+  p.status = 'Fechado';
+  const order = orderById(p.ordemId);
+  if(order) recalcOrderStatus(order);
+  await persist();
+  beepEnd();
+  toast('Apontamento encerrado — ' + p.ordemId, 'success');
+  renderNav();
+}
+
+/* --- Finalizar (modal: operador -> recurso -> quantidades) --- */
+function openPunchesForFuncionario(empId){ return state.punches.filter(p=>p.status==='Aberto' && p.funcionarioId===empId); }
+function openFinalizarModal(){
+  finFuncionarioId=''; finPunchId=''; finEmpFilterQuery='';
+  renderFinalizarStep1();
+  openModal('modalFinalizar');
+}
+function closeFinalizarModal(){ closeModal('modalFinalizar'); }
+function renderFinalizarStep1(){
+  const holder = document.getElementById('finalizarModalBody');
+  const openPunches = state.punches.filter(p=>p.status==='Aberto');
+  const empIds = Array.from(new Set(openPunches.map(p=>p.funcionarioId)));
+  let emps = empIds.map(id=>state.employees.find(e=>e.id===id)).filter(Boolean);
+  if(!emps.length){
+    holder.innerHTML = `<div class="empty-state" style="padding:30px 10px;"><div class="ic">${icon('clock',30)}</div>Nenhum apontamento em aberto no momento.</div>`;
+    return;
+  }
+  const q = finEmpFilterQuery.trim().toLowerCase();
+  if(q){ emps = emps.filter(e => (e.numero||'').includes(q) || (e.nome+' '+e.sobrenome).toLowerCase().includes(q)); }
+  if(/^\d{1,4}$/.test(q)){
+    const padded = q.padStart(4,'0');
+    const exact = empIds.map(id=>state.employees.find(e=>e.id===id)).find(e=>e && e.numero===padded);
+    if(exact){ finEmpFilterQuery=''; selectFinFuncionario(exact.id); return; }
+  }
+  holder.innerHTML = `
+    <div class="ap-step" style="margin-bottom:0; border-left-color:var(--red);">
+      <div class="ap-step-head"><div class="ap-step-num" style="background:var(--red);">1</div><div class="ap-step-title">Quem está finalizando?</div></div>
+      <div class="field" style="margin-bottom:14px;">
+        <label>Digite seu número ou nome</label>
+        <input id="finEmpFilterInput" value="${finEmpFilterQuery}" placeholder="Ex: 0007 ou Carlos" oninput="finEmpFilterQuery=this.value; renderFinalizarStep1();">
+      </div>
+      <div class="ap-emp-grid">
+        ${emps.length ? emps.map(e=>`<button type="button" class="ap-emp-btn" onclick="selectFinFuncionario('${e.id}')">
+          ${employeeAvatarHTML(e,'ap-emp-avatar')}
+          <div class="ap-emp-btn-name">${e.nome}<br>${e.sobrenome}</div>
+          <div class="ap-emp-num">Nº ${e.numero||'—'}</div>
+        </button>`).join('') : `<div class="empty-state" style="grid-column:1/-1; padding:20px;">Ninguém encontrado com esse número/nome entre os apontamentos abertos.</div>`}
+      </div>
+    </div>
+  `;
+}
+function selectFinFuncionario(empId){
+  finFuncionarioId = empId;
+  const punches = openPunchesForFuncionario(empId);
+  if(punches.length===1){ finPunchId = punches[0].id; renderFinalizarStep3(); }
+  else{ renderFinalizarStep2(); }
+}
+function renderFinalizarStep2(){
+  const holder = document.getElementById('finalizarModalBody');
+  const punches = openPunchesForFuncionario(finFuncionarioId);
+  holder.innerHTML = `
+    <div class="ap-step" style="margin-bottom:0; border-left-color:var(--red);">
+      <div class="ap-step-head"><div class="ap-step-num" style="background:var(--red);">2</div><div class="ap-step-title">Qual máquina?</div></div>
+      <div class="ap-res-grid">
+        ${punches.map(p=>`<button type="button" class="ap-res-btn" onclick="selectFinPunch('${p.id}')">
+          <div class="ap-res-code-big">${p.recurso}</div>
+          <div class="ap-res-desc-small">${p.ordemId} · ${elapsedLabel(p.inicio)}</div>
+        </button>`).join('')}
+      </div>
+    </div>
+  `;
+}
+function selectFinPunch(punchId){ finPunchId = punchId; renderFinalizarStep3(); }
+function renderFinalizarStep3(){
+  const holder = document.getElementById('finalizarModalBody');
+  const p = state.punches.find(x=>x.id===finPunchId);
+  if(!p){ renderFinalizarStep1(); return; }
+  holder.innerHTML = `
+    <div class="ap-punch-card" style="margin-bottom:0;">
+      <div class="ap-punch-top">
+        <div>
+          <div class="ap-punch-op">${p.ordemId}</div>
+          <div class="ap-punch-meta" style="display:flex; align-items:center; gap:7px; flex-wrap:wrap;">${employeeIdentityHTML(p.funcionarioId,true)}<span>· ${p.recurso} · iniciado ${elapsedLabel(p.inicio)}</span></div>
+        </div>
+      </div>
+      ${punchQtyBlockHTML(p)}
+      <button class="ap-end-btn" onclick="confirmFinalize('${p.id}')">${icon('stop',18)} CONFIRMAR FINALIZAÇÃO</button>
+    </div>
+  `;
+}
+async function confirmFinalize(punchId){
+  await endPunch(punchId);
+  closeFinalizarModal();
+  renderApontamento();
+}
+
+/* ===================== QR SCANNER ===================== */
+let scannerStream = null;
+let scannerRAF = null;
+function openScanner(){
+  openModal('modalScanner');
+  document.getElementById('scannerStatus').textContent = 'Solicitando acesso à câmera…';
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    document.getElementById('scannerStatus').textContent = 'Câmera não disponível neste dispositivo. Digite o código da OP manualmente.';
+    return;
+  }
+  navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } }).then(stream=>{
+    scannerStream = stream;
+    const video = document.getElementById('scannerVideo');
+    video.srcObject = stream; video.play();
+    document.getElementById('scannerStatus').textContent = 'Aponte a câmera para o QR Code da ordem…';
+    scanLoop();
+  }).catch(()=>{ document.getElementById('scannerStatus').textContent = 'Não foi possível acessar a câmera. Digite o código da OP manualmente.'; });
+}
+function scanLoop(){
+  const video = document.getElementById('scannerVideo');
+  const canvas = document.getElementById('hiddenCanvas');
+  if(!video || video.readyState !== video.HAVE_ENOUGH_DATA){ scannerRAF = requestAnimationFrame(scanLoop); return; }
+  canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+  try{
+    if(window.jsQR){
+      const imageData = ctx.getImageData(0,0,canvas.width, canvas.height);
+      const code = jsQR(imageData.data, imageData.width, imageData.height);
+      if(code && code.data){
+        document.getElementById('pOrdem').value = code.data.trim().toUpperCase();
+        document.getElementById('scannerStatus').textContent = 'QR Code lido: ' + code.data;
+        beepStart();
+        closeScanner();
+        return;
+      }
+    }
+  }catch(e){}
+  scannerRAF = requestAnimationFrame(scanLoop);
+}
+function closeScanner(){
+  closeModal('modalScanner');
+  if(scannerRAF) cancelAnimationFrame(scannerRAF);
+  if(scannerStream){ scannerStream.getTracks().forEach(t=>t.stop()); scannerStream = null; }
+}
+
+/* ===================== ACOMPANHAMENTO DE PRODUÇÃO ===================== */
+let acompSearch = '';
+function renderAcompanhamento(){
+  recalcAllOrderStatuses();
+  const el = document.getElementById('panel-acompanhamento');
+  el.innerHTML = `
+    <div class="section-title">${icon('search',19)} Acompanhamento de Produção</div>
+    <div class="section-sub">Pesquise por ordem de produção ou código da peça para verificar o status.</div>
+    <div class="toolbar">
+      <div class="search-box"><span class="search-ic">${icon('search',15)}</span><input placeholder="Buscar OP ou código..." oninput="acompSearch=this.value; renderAcompTable();"></div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Ordem</th><th>Código</th><th>Descrição</th><th>Progresso</th><th>Status</th><th>Refugo</th><th></th></tr></thead>
+        <tbody id="acompTbody"></tbody>
+      </table>
+    </div>
+    <div id="acompDetail" style="margin-top:20px;"></div>
+  `;
+  renderAcompTable();
+}
+function renderAcompTable(){
+  const tbody = document.getElementById('acompTbody');
+  if(!tbody) return;
+  const q = acompSearch.trim().toLowerCase();
+  const list = state.orders.filter(o=> !q || o.id.toLowerCase().includes(q) || o.codigo.toLowerCase().includes(q)).sort((a,b)=>b.criadoEm.localeCompare(a.criadoEm));
+  tbody.innerHTML = list.length ? list.map(o=>{
+    const produced = orderProducedQty(o.id);
+    const scrap = orderScrapQty(o.id);
+    const pct = Math.min(100, (produced/o.quantidadePlanejada)*100);
+    return `<tr style="cursor:pointer;" onclick="showAcompDetail('${o.id}')">
+      <td style="color:var(--blue); font-weight:700;">${o.id}</td>
+      <td>${o.codigo}</td>
+      <td>${o.descricao}</td>
+      <td style="min-width:140px;">
+        <div class="progress-track" style="margin-bottom:4px;"><div class="progress-fill" style="width:${pct}%;"></div></div>
+        <div style="font-size:10.5px; color:var(--text-faint);">${produced}/${o.quantidadePlanejada}</div>
+      </td>
+      <td>${orderStatusBadge(o.status)}</td>
+      <td class="mono">${scrap}</td>
+      <td style="white-space:nowrap;">
+        <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); showOrderInfo('${o.id}')">${icon('info',13)} INFO</button>
+        <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); showOrderQR('${o.id}')">${icon('qrscan',13)} QR</button>
+        <button class="icon-btn" onclick="event.stopPropagation(); printOrder('${o.id}')" title="Imprimir Ordem">${icon('printer',15)}</button>
+      </td>
+    </tr>`;
+  }).join('') : `<tr class="empty-row"><td colspan="7">Nenhuma ordem encontrada.</td></tr>`;
+}
+function showAcompDetail(orderId){
+  const order = orderById(orderId);
+  const detail = document.getElementById('acompDetail');
+  const punches = state.punches.filter(p=>p.ordemId===orderId).sort((a,b)=>b.inicio.localeCompare(a.inicio));
+  detail.innerHTML = `
+    <div class="card">
+      <div class="section-title" style="font-size:14px;">Histórico de Apontamentos — ${order.id}</div>
+      <div class="table-wrap" style="margin-top:10px;">
+        <table>
+          <thead><tr><th>Funcionário</th><th>Recurso</th><th>Início</th><th>Fim</th><th>Produzido</th><th>Refugo</th><th>Status</th></tr></thead>
+          <tbody>
+          ${punches.length ? punches.map(p=>`
+            <tr>
+              <td>${employeeIdentityHTML(p.funcionarioId,true)}</td>
+              <td>${p.recurso}</td>
+              <td class="mono">${fmtDateTime(p.inicio)}</td>
+              <td class="mono">${p.fim ? fmtDateTime(p.fim) : '—'}</td>
+              <td class="mono">${p.quantidadeProduzida}</td>
+              <td class="mono">${p.quantidadeRefugada}</td>
+              <td>${p.status==='Aberto' ? '<span class="badge badge-blue">Aberto</span>' : '<span class="badge badge-green">Fechado</span>'}</td>
+            </tr>`).join('') : `<tr class="empty-row"><td colspan="7">Nenhum apontamento registrado para esta ordem.</td></tr>`}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+/* ===================== INIT ===================== */
+async function init(){
+  renderShell();
+  renderNav();
+  await loadData();
+  startClock();
+  lastSyncAt = nowBR();
+  setTab('dashboard');
+  toast('Dados sincronizados com todos os usuários deste sistema.', 'success');
+  setInterval(()=>{ if(activeTab==='dashboard') renderRankingAndCharts(); if(activeTab==='apontamento') renderApontamento(); }, 15000);
+}
+
+window.setTab = setTab;
+window.openSidebar = openSidebar;
+window.closeSidebar = closeSidebar;
+window.closeModal = closeModal;
+window.toggleSound = toggleSound;
+window.openOrderModal = openOrderModal;
+window.renderOrderPreview = renderOrderPreview;
+window.saveOrder = saveOrder;
+window.showOrderQR = showOrderQR;
+window.printOrder = printOrder;
+window.showOrderInfo = showOrderInfo;
+window.addProductRow = addProductRow;
+window.updateProduct = updateProduct;
+window.updateClassificacao = updateClassificacao;
+window.removeProduct = removeProduct;
+window.openEmployeeModal = openEmployeeModal;
+window.saveEmployee = saveEmployee;
+window.removeEmployee = removeEmployee;
+window.toggleFeriasFields = toggleFeriasFields;
+window.startPunch = startPunch;
+window.endPunch = endPunch;
+window.stepQty = stepQty;
+window.selectApFuncionario = selectApFuncionario;
+window.renderApEmpGrid = renderApEmpGrid;
+window.selectApRecurso = selectApRecurso;
+window.openIniciarModal = openIniciarModal;
+window.closeIniciarModal = closeIniciarModal;
+window.openFinalizarModal = openFinalizarModal;
+window.closeFinalizarModal = closeFinalizarModal;
+window.selectFinFuncionario = selectFinFuncionario;
+window.renderFinalizarStep1 = renderFinalizarStep1;
+window.selectFinPunch = selectFinPunch;
+window.confirmFinalize = confirmFinalize;
+window.openScanner = openScanner;
+window.closeScanner = closeScanner;
+window.showAcompDetail = showAcompDetail;
+window.renderOrdensTable = renderOrdensTable;
+window.renderEngenhariaTable = renderEngenhariaTable;
+window.renderFuncionariosTable = renderFuncionariosTable;
+window.renderAcompTable = renderAcompTable;
+window.clearDashFilters = clearDashFilters;
+window.zerarAlocacoes = zerarAlocacoes;
+window.openResourceModal = openResourceModal;
+window.saveResource = saveResource;
+window.removeResource = removeResource;
+window.renderRecursosTable = renderRecursosTable;
+window.removeResourceFromRecursos = removeResourceFromRecursos;
+window.changeResourceStatus = changeResourceStatus;
+window.onEmpDragStart = onEmpDragStart;
+window.onResourceDrop = onResourceDrop;
+window.unassignEmployee = unassignEmployee;
+window.openAssignModal = openAssignModal;
+window.confirmAssign = confirmAssign;
+window.openEmployeePhoto = openEmployeePhoto;
+window.closeEmployeePhoto = closeEmployeePhoto;
+
+init();
+})();

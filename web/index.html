@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Prodfy — Gestão Inteligente de Produção</title>
+<link rel="stylesheet" href="css/app.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jsQR/1.4.0/jsQR.js"></script>
+</head>
+<body>
+<div id="prodfy-app">
+  <div class="modal-overlay" id="sidebarScrim" onclick="closeSidebar()"></div>
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <div class="brand-mark">P</div>
+      <div>
+        <div class="brand-text">Prodfy</div>
+        <div class="brand-sub">Gestão Inteligente</div>
+      </div>
+    </div>
+    <nav class="nav" id="navList"></nav>
+    <div class="sidebar-foot">
+      <a class="nav-item" href="conta.html" style="margin-bottom:8px;">Conta e API</a>
+      <div><b>Fábrica:</b> Chão de Fábrica 01</div>
+      <div id="footClock" style="margin-top:4px;"></div>
+    </div>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <div style="display:flex; align-items:center; gap:14px;">
+        <button class="hamburger" onclick="openSidebar()">☰</button>
+        <div class="topbar-title"><span class="eyebrow" id="topEyebrow">Prodfy</span><span id="topTitle">Dashboard</span></div>
+      </div>
+      <div class="topbar-right" id="topbarPills"></div>
+    </div>
+    <div class="content" id="content"></div>
+  </div>
+
+<div class="toast-wrap" id="toastWrap"></div>
+
+<!-- ===== Modal: Employee ===== -->
+<div class="modal-overlay" id="modalEmployee">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title" id="empModalTitle">Novo Funcionário</div>
+      <button class="modal-close" onclick="closeModal('modalEmployee')">×</button>
+    </div>
+    <input type="hidden" id="empId">
+    <div class="field" id="empNumeroField" style="display:none;">
+      <label>Número do Funcionário</label>
+      <input id="empNumeroDisplay" disabled style="font-weight:800; color:var(--blue); background:var(--surface-2);">
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Nome</label><input id="empNome" placeholder="Ex: Carlos"></div>
+      <div class="field"><label>Sobrenome</label><input id="empSobrenome" placeholder="Ex: Silva"></div>
+    </div>
+    <div class="field"><label>Função</label><input id="empFuncao" placeholder="Ex: Operador de Torno"></div>
+    <div class="field-row">
+      <div class="field">
+        <label>Turno</label>
+        <select id="empTurno">
+          <option>1º Turno</option>
+          <option>2º Turno</option>
+          <option>3º Turno</option>
+          <option>Administrativo</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Vínculo</label>
+        <select id="empVinculo">
+          <option>Efetivo</option>
+          <option>Terceiro</option>
+        </select>
+      </div>
+    </div>
+    <div class="checkbox-row"><input type="checkbox" id="empFeriasToggle" onchange="toggleFeriasFields()"><label style="margin:0;">Funcionário em férias</label></div>
+    <div class="field-row" id="feriasFields" style="display:none;">
+      <div class="field"><label>Início</label><input type="date" id="empFeriasInicio"></div>
+      <div class="field"><label>Fim (opcional)</label><input type="date" id="empFeriasFim"></div>
+    </div>
+    <button class="btn btn-primary btn-block" onclick="saveEmployee()">Salvar Funcionário</button>
+  </div>
+</div>
+
+<!-- ===== Modal: Order (OP) ===== -->
+<div class="modal-overlay" id="modalOrder">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">Nova Ordem de Produção</div>
+      <button class="modal-close" onclick="closeModal('modalOrder')">×</button>
+    </div>
+    <div class="field">
+      <label>Código da Peça</label>
+      <select id="ordProduto" onchange="renderOrderPreview()"></select>
+    </div>
+    <div class="field"><label>Quantidade Planejada</label><input type="number" min="1" id="ordQtd" value="100" oninput="renderOrderPreview()"></div>
+    <div class="field">
+      <label>Gerado por</label>
+      <select id="ordGeradoPor"></select>
+    </div>
+    <div class="card" id="ordPreview" style="background:var(--surface-2); font-size:12.5px; box-shadow:none;"></div>
+    <button class="btn btn-primary btn-block" style="margin-top:14px;" onclick="saveOrder(false)">Gerar Ordem de Produção</button>
+    <button class="btn btn-ghost btn-block" style="margin-top:8px;" onclick="saveOrder(true)"><svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 8V3h10v5"/><rect x="4" y="8" width="16" height="9" rx="1.5"/><path d="M7 13h10v8H7z"/><line x1="8" y1="17" x2="16" y2="17"/></svg> Gerar e Imprimir</button>
+  </div>
+</div>
+
+<!-- ===== Modal: Resource / Célula ===== -->
+<div class="modal-overlay" id="modalResource">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title" id="resModalTitle">Nova Célula / Recurso</div>
+      <button class="modal-close" onclick="closeModal('modalResource')">×</button>
+    </div>
+    <input type="hidden" id="resId">
+    <div class="field"><label>Código</label><input id="resNome" placeholder="Ex: CA01"></div>
+    <div class="field"><label>Descrição</label><input id="resDescricao" placeholder="Ex: Cabine de Pintura"></div>
+    <div class="field"><label>Setor</label><input id="resSetor" placeholder="Ex: Caldeiraria Carbono"></div>
+    <button class="btn btn-primary btn-block" onclick="saveResource()">Salvar Célula</button>
+  </div>
+</div>
+
+<!-- ===== Modal: Assign employee to resource ===== -->
+<div class="modal-overlay" id="modalAssign">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">Adicionar Funcionário</div>
+      <button class="modal-close" onclick="closeModal('modalAssign')">×</button>
+    </div>
+    <input type="hidden" id="assignResId">
+    <div class="field">
+      <label>Funcionário</label>
+      <select id="assignEmpSelect"></select>
+    </div>
+    <button class="btn btn-primary btn-block" onclick="confirmAssign()">Adicionar à Célula</button>
+  </div>
+</div>
+
+<!-- ===== Modal: Iniciar Apontamento ===== -->
+<div class="modal-overlay" id="modalIniciar">
+  <div class="modal" style="max-width:640px;">
+    <div class="modal-header">
+      <div class="modal-title">Iniciar Apontamento</div>
+      <button class="modal-close" onclick="closeIniciarModal()">×</button>
+    </div>
+    <div id="iniciarModalBody"></div>
+  </div>
+</div>
+
+<!-- ===== Modal: Finalizar Apontamento ===== -->
+<div class="modal-overlay" id="modalFinalizar">
+  <div class="modal" style="max-width:640px;">
+    <div class="modal-header">
+      <div class="modal-title">Finalizar Apontamento</div>
+      <button class="modal-close" onclick="closeFinalizarModal()">×</button>
+    </div>
+    <div id="finalizarModalBody"></div>
+  </div>
+</div>
+
+<!-- ===== Modal: Order Info ===== -->
+<div class="modal-overlay" id="modalOrderInfo">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">Informações da Ordem</div>
+      <button class="modal-close" onclick="closeModal('modalOrderInfo')">×</button>
+    </div>
+    <div id="orderInfoBody"></div>
+  </div>
+</div>
+
+<!-- ===== Modal: QR view ===== -->
+<div class="modal-overlay" id="modalQR">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">QR Code da Ordem</div>
+      <button class="modal-close" onclick="closeModal('modalQR')">×</button>
+    </div>
+    <div class="qr-preview">
+      <div id="qrCanvasHolder"></div>
+      <div class="op-code" id="qrOpLabel"></div>
+    </div>
+    <div class="section-sub" style="text-align:center; margin-top:12px; margin-bottom:0;">Aponte a câmera do leitor na aba Apontamento para identificar esta ordem automaticamente.</div>
+  </div>
+</div>
+
+<!-- ===== Modal: QR Scanner ===== -->
+<div class="modal-overlay" id="modalScanner">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">Ler QR Code da Ordem</div>
+      <button class="modal-close" onclick="closeScanner()">×</button>
+    </div>
+    <div class="scanner-box">
+      <video id="scannerVideo" playsinline muted></video>
+      <div class="scanner-frame"></div>
+    </div>
+    <div class="scanner-status" id="scannerStatus">Solicitando acesso à câmera…</div>
+  </div>
+</div>
+
+
+<!-- ===== Employee Photo Zoom ===== -->
+<div class="photo-zoom-overlay" id="employeePhotoZoom" onclick="closeEmployeePhoto(event)">
+  <div class="photo-zoom-dialog" role="dialog" aria-modal="true" aria-labelledby="employeePhotoName" onclick="event.stopPropagation()">
+    <button class="photo-zoom-close" type="button" aria-label="Fechar foto" onclick="closeEmployeePhoto()">×</button>
+    <div class="photo-zoom-image-wrap"><img class="photo-zoom-image" id="employeePhotoLarge" alt="Foto ampliada do funcionário"></div>
+    <div class="photo-zoom-info">
+      <div><div class="photo-zoom-name" id="employeePhotoName"></div><div class="photo-zoom-role" id="employeePhotoRole"></div></div>
+      <div class="photo-zoom-meta" id="employeePhotoMeta"></div>
+    </div>
+  </div>
+</div>
+
+<canvas id="hiddenCanvas" style="display:none;"></canvas>
+<div id="printArea"></div>
+</div>
+<script src="js/config.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
