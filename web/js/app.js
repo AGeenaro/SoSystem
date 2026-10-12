@@ -647,6 +647,23 @@ function orderIsClosed(order){
   const status = normalizeOrderStatus(order && order.status);
   return status === 'Finalizado' || status === 'Encaminhado Expedição';
 }
+function orderStatusTone(status){
+  const label = normalizeOrderStatus(status);
+  if(label === 'Não iniciado') return 'gray';
+  if(label === 'Bloqueado') return 'red';
+  if(orderIsClosed({status:label})) return 'green';
+  return 'amber';
+}
+function orderStatusSelect(order){
+  const current = normalizeOrderStatus(order.status);
+  const options = ORDER_STATUSES.map(function(status){
+    return `<option value="${escapeHtml(status)}" ${status===current?'selected':''}>${escapeHtml(status)}</option>`;
+  }).join('');
+  const detail = (current === 'Iniciado/Parado' || current === 'Bloqueado') && (order.setor || order.motivo)
+    ? `<div style="font-size:10.5px; color:var(--text-faint); margin-top:4px;">${escapeHtml(order.setor || '')}${order.motivo ? ' · ' + escapeHtml(order.motivo) : ''}</div>`
+    : '';
+  return `<select class="status-select tone-${orderStatusTone(current)}" data-edit="ordens" onchange="changeOrderStatus('${order.id}', this.value, this)">${options}</select>${detail}`;
+}
 function orderStatusBadge(status){
   const label = normalizeOrderStatus(status);
   const tone = label === 'Não iniciado' ? 'badge-gray' : (label === 'Bloqueado' ? 'badge-red' : (orderIsClosed({status:label}) ? 'badge-green' : 'badge-amber'));
@@ -683,7 +700,33 @@ function isOnVacation(emp){
   if(emp.ferias.fim && today > emp.ferias.fim) return false;
   return true;
 }
-function employeeLocation(empId){ const r = state.resources.find(r=>r.funcionarios.includes(empId)); return r ? r.nome : null; }
+function employeeMachines(empId){
+  return state.resources.filter(function(resource){ return resource.funcionarios.indexOf(empId) >= 0; });
+}
+function employeeLocation(empId){
+  const names = employeeMachines(empId).map(function(resource){ return resource.nome; });
+  return names.length ? names.join(', ') : null;
+}
+function syncEmployeeMachines(empId, resourceIds){
+  state.resources.forEach(function(resource){
+    const linked = resource.funcionarios.indexOf(empId) >= 0;
+    const should = resourceIds.indexOf(resource.id) >= 0;
+    if(should && !linked) resource.funcionarios.push(empId);
+    if(!should && linked) resource.funcionarios = resource.funcionarios.filter(function(id){ return id !== empId; });
+  });
+}
+function renderMachineChoices(containerId, selectedIds){
+  const box = document.getElementById(containerId);
+  if(!box) return;
+  if(!state.resources.length){
+    box.innerHTML = '<div class="section-sub">Nenhuma máquina cadastrada.</div>';
+    return;
+  }
+  box.innerHTML = state.resources.map(function(resource){
+    const checked = selectedIds.indexOf(resource.id) >= 0 ? 'checked' : '';
+    return `<label class="checkbox-row" style="margin:0 12px 8px 0;"><input type="checkbox" value="${resource.id}" ${checked}>${escapeHtml(resource.nome)}</label>`;
+  }).join('');
+}
 
 /* ===================== RENDER SHELL ===================== */
 function renderShell(){
@@ -1052,8 +1095,12 @@ async function assignEmployeeToResource(resId, empId){
   const emp = state.employees.find(e=>e.id===empId);
   if(!emp){ return; }
   if(isOnVacation(emp)){ toast('Este funcionário está de férias.', 'error'); return; }
-  state.resources.forEach(r=>{ r.funcionarios = r.funcionarios.filter(id=>id!==empId); });
   const target = resourceById(resId);
+  if(!target) return;
+  if(target.funcionarios.indexOf(empId) >= 0){
+    toast(emp.nome + ' já está em ' + target.nome + '.', 'success');
+    return;
+  }
   target.funcionarios.push(empId);
   await persist();
   renderDashLists();
@@ -1171,9 +1218,8 @@ function renderOrdensTable(){
         <div class="progress-track" style="margin-bottom:4px;"><div class="progress-fill" style="width:${Math.min(progress.pct, 100)}%;"></div></div>
         <div style="font-size:10.5px; color:var(--text-faint);">${progress.pct}% · ${progress.produced}/${progress.planned}</div>
       </td>
-      <td>${orderStatusBadge(o.status)}</td>
+      <td>${orderStatusSelect(o)}</td>
       <td style="white-space:nowrap;">
-        <button class="btn btn-sm btn-ghost" data-edit="ordens" onclick="openOrderStatus('${o.id}')">Status</button>
         <button class="btn btn-sm btn-ghost" onclick="showOrderQR('${o.id}')">${icon('qrscan',13)} QR Code</button>
         <button class="icon-btn" onclick="printOrder('${o.id}')" title="Imprimir Ordem">${icon('printer',15)}</button>
       </td>
@@ -1776,6 +1822,8 @@ function openEmployeeModal(id){
     document.getElementById('empFeriasFim').value = '';
   }
   toggleFeriasFields();
+  const selected = id ? employeeMachines(id).map(function(resource){ return resource.id; }) : [];
+  renderMachineChoices('empMaquinas', selected);
   openModal('modalEmployee');
 }
 async function saveEmployee(){
@@ -1792,6 +1840,8 @@ async function saveEmployee(){
   if(!nome || !sobrenome || !funcao){ toast('Preencha todos os campos.', 'error'); return; }
   if(feriasOn && !fi){ toast('Informe a data de início das férias.', 'error'); return; }
   const ferias = (feriasOn && fi) ? {inicio:fi, fim: ff || null} : null;
+  const machineIds = Array.from(document.querySelectorAll('#empMaquinas input:checked')).map(function(input){ return input.value; });
+  let employeeId = id;
   let novoNumero = null;
   if(id){
     const e = state.employees.find(x=>x.id===id);
@@ -1799,8 +1849,10 @@ async function saveEmployee(){
   } else {
     novoNumero = formatEmployeeNumber(state.nextEmployeeNum);
     state.nextEmployeeNum++;
-    state.employees.push({id:uid(), numero:novoNumero, nome, sobrenome, funcao, turno, vinculo, ferias});
+    employeeId = uid();
+    state.employees.push({id:employeeId, numero:novoNumero, nome, sobrenome, funcao, turno, vinculo, ferias});
   }
+  syncEmployeeMachines(employeeId, machineIds);
   await persist();
   closeModal('modalEmployee');
   renderFuncionariosTable();
@@ -1851,9 +1903,13 @@ function renderApontamento(){
 }
 
 /* --- Iniciar (modal) --- */
+let apShowNewEmployee = false;
+let apShowNewMachine = false;
 function openIniciarModal(){
   if(deny('apontamento')) return;
   apFuncionarioId=''; apRecurso=''; apRecursoCustom=''; apEmpFilterQuery='';
+  apShowNewEmployee = false;
+  apShowNewMachine = false;
   renderIniciarModalBody();
   openModal('modalIniciar');
 }
@@ -1869,13 +1925,27 @@ function renderIniciarModalBody(){
         <input id="apEmpFilterInput" placeholder="Ex: 0007 ou Carlos" oninput="apEmpFilterQuery=this.value; renderApEmpGrid();">
       </div>
       <div class="ap-emp-grid" id="apEmpGrid"></div>
+      <button type="button" class="btn btn-ghost btn-sm" style="margin-top:10px;" onclick="toggleQuickEmployee()">Cadastrar funcionário</button>
+      <div id="quickEmployeeBox" style="display:${apShowNewEmployee?'block':'none'}; margin-top:10px;">
+        <div class="field-row">
+          <div class="field"><label>Nome</label><input id="quickEmpNome"></div>
+          <div class="field"><label>Sobrenome</label><input id="quickEmpSobrenome"></div>
+        </div>
+        <div class="field"><label>Função</label><input id="quickEmpFuncao" placeholder="Ex: Operador"></div>
+        <div class="field"><label>Máquinas</label><div id="quickEmpMaquinas" style="display:flex; flex-wrap:wrap;"></div></div>
+        <button type="button" class="btn btn-primary btn-sm" onclick="saveQuickEmployee()">Salvar funcionário</button>
+      </div>
     </div>
     <div class="ap-step step-purple" style="margin-bottom:14px;">
       <div class="ap-step-head"><div class="ap-step-num">2</div><div class="ap-step-title">Em qual máquina ou recurso?</div></div>
       <div class="ap-res-grid" id="apResGrid"></div>
-      <div class="field" style="margin-top:14px; margin-bottom:0;">
-        <label>Outra máquina (se não estiver na lista acima)</label>
-        <input id="apRecursoCustomInput" placeholder="Digite o nome da máquina ou recurso" oninput="apRecursoCustom=this.value;">
+      <button type="button" class="btn btn-ghost btn-sm" style="margin-top:10px;" onclick="toggleQuickMachine()">Cadastrar máquina</button>
+      <div id="quickMachineBox" style="display:${apShowNewMachine?'block':'none'}; margin-top:10px;">
+        <div class="field-row">
+          <div class="field"><label>Código</label><input id="quickResNome" placeholder="Ex: XPTO"></div>
+          <div class="field"><label>Descrição</label><input id="quickResDescricao" placeholder="Ex: Torno"></div>
+        </div>
+        <button type="button" class="btn btn-primary btn-sm" onclick="saveQuickMachine()">Salvar máquina</button>
       </div>
     </div>
     <div class="ap-step step-orange" style="margin-bottom:14px;">
@@ -1891,6 +1961,7 @@ function renderIniciarModalBody(){
   refreshApontamentoDatalist();
   renderApEmpGrid();
   renderApResGrid();
+  renderMachineChoices('quickEmpMaquinas', []);
 }
 function renderApEmpGrid(){
   const holder = document.getElementById('apEmpGrid');
@@ -1901,7 +1972,11 @@ function renderApEmpGrid(){
   if(/^\d{1,4}$/.test(q)){
     const padded = q.padStart(4,'0');
     const exact = state.employees.find(e=>e.numero===padded && !isOnVacation(e));
-    if(exact) apFuncionarioId = exact.id;
+    if(exact && apFuncionarioId !== exact.id){
+      apFuncionarioId = exact.id;
+      applyEmployeeMachine(exact.id);
+      renderApResGrid();
+    }
   }
   holder.innerHTML = availableEmps.length ? availableEmps.map(e=>{
     const sel = apFuncionarioId === e.id;
@@ -1916,17 +1991,102 @@ function renderApEmpGrid(){
 function renderApResGrid(){
   const holder = document.getElementById('apResGrid');
   if(!holder) return;
-  holder.innerHTML = state.resources.length ? state.resources.map(r=>{
+  const linked = employeeMachines(apFuncionarioId);
+  const linkedIds = linked.map(function(resource){ return resource.id; });
+  const resources = state.resources.slice().sort(function(a, b){
+    return (linkedIds.indexOf(a.id) >= 0 ? 0 : 1) - (linkedIds.indexOf(b.id) >= 0 ? 0 : 1);
+  });
+  holder.innerHTML = resources.length ? resources.map(r=>{
     const sel = apRecurso === r.nome && !apRecursoCustom;
-    return `<button type="button" class="ap-res-btn ${sel?'selected':''}" onclick="selectApRecurso('${r.nome}')">
+    const mine = linkedIds.indexOf(r.id) >= 0;
+    return `<button type="button" class="ap-res-btn ${sel?'selected':''}" data-nome="${escapeHtml(r.nome)}" onclick="selectApRecurso(this.getAttribute('data-nome'))">
       ${sel?`<span class="ap-check">${icon('checkCircle',18)}</span>`:''}
-      <div class="ap-res-code-big">${r.nome}</div>
-      <div class="ap-res-desc-small">${r.descricao}</div>
+      <div class="ap-res-code-big">${escapeHtml(r.nome)}</div>
+      <div class="ap-res-desc-small">${escapeHtml(r.descricao || '')}${mine ? ' · vínculo' : ''}</div>
     </button>`;
-  }).join('') : `<div class="empty-state" style="grid-column:1/-1; padding:20px;">Nenhuma célula cadastrada. Adicione na aba Recursos.</div>`;
+  }).join('') : `<div class="empty-state" style="grid-column:1/-1; padding:20px;">Nenhuma máquina cadastrada.</div>`;
 }
-function selectApFuncionario(id){ apFuncionarioId = id; renderApEmpGrid(); }
-function selectApRecurso(nome){ apRecurso = nome; apRecursoCustom=''; const c = document.getElementById('apRecursoCustomInput'); if(c) c.value=''; renderApResGrid(); }
+function applyEmployeeMachine(empId){
+  const machines = employeeMachines(empId);
+  if(machines.length === 1){
+    apRecurso = machines[0].nome;
+    apRecursoCustom = '';
+    return;
+  }
+  if(machines.length > 1 && !machines.some(function(resource){ return resource.nome === apRecurso; })){
+    apRecurso = '';
+    apRecursoCustom = '';
+  }
+}
+function selectApFuncionario(id){
+  apFuncionarioId = id;
+  applyEmployeeMachine(id);
+  renderApEmpGrid();
+  renderApResGrid();
+}
+function selectApRecurso(nome){
+  apRecurso = nome;
+  apRecursoCustom = '';
+  renderApResGrid();
+}
+function rememberIniciarFields(){
+  const ordem = document.getElementById('pOrdem');
+  const filter = document.getElementById('apEmpFilterInput');
+  return { ordem: ordem ? ordem.value : '', filter: filter ? filter.value : apEmpFilterQuery };
+}
+function rerenderIniciar(saved){
+  renderIniciarModalBody();
+  const ordem = document.getElementById('pOrdem');
+  const filter = document.getElementById('apEmpFilterInput');
+  if(ordem && saved) ordem.value = saved.ordem;
+  if(filter && saved){ filter.value = saved.filter; apEmpFilterQuery = saved.filter; renderApEmpGrid(); }
+}
+function toggleQuickEmployee(){
+  apShowNewEmployee = !apShowNewEmployee;
+  rerenderIniciar(rememberIniciarFields());
+}
+function toggleQuickMachine(){
+  apShowNewMachine = !apShowNewMachine;
+  rerenderIniciar(rememberIniciarFields());
+}
+async function saveQuickEmployee(){
+  if(deny('apontamento')) return;
+  const nome = document.getElementById('quickEmpNome').value.trim();
+  const sobrenome = document.getElementById('quickEmpSobrenome').value.trim();
+  const funcao = document.getElementById('quickEmpFuncao').value.trim() || 'Operador';
+  if(!nome || !sobrenome){ toast('Informe nome e sobrenome.', 'error'); return; }
+  const numero = formatEmployeeNumber(state.nextEmployeeNum);
+  state.nextEmployeeNum++;
+  const id = uid();
+  state.employees.push({ id: id, numero: numero, nome: nome, sobrenome: sobrenome, funcao: funcao, turno: '1º Turno', vinculo: 'Efetivo', ferias: null });
+  const machineIds = Array.from(document.querySelectorAll('#quickEmpMaquinas input:checked')).map(function(input){ return input.value; });
+  syncEmployeeMachines(id, machineIds);
+  await persist();
+  apFuncionarioId = id;
+  apShowNewEmployee = false;
+  applyEmployeeMachine(id);
+  rerenderIniciar(rememberIniciarFields());
+  toast('Funcionário cadastrado — número ' + numero + '.', 'success');
+}
+async function saveQuickMachine(){
+  if(deny('apontamento')) return;
+  const nome = document.getElementById('quickResNome').value.trim();
+  const descricao = document.getElementById('quickResDescricao').value.trim() || nome;
+  if(!nome){ toast('Informe o código da máquina.', 'error'); return; }
+  if(state.resources.some(function(resource){ return resource.nome.toLowerCase() === nome.toLowerCase(); })){
+    toast('Já existe uma máquina com este código.', 'error');
+    return;
+  }
+  const resource = { id: uid(), nome: nome, descricao: descricao, setor: 'Geral', restricao: '', status: 'Parada', funcionarios: [], grupos: [] };
+  if(apFuncionarioId) resource.funcionarios.push(apFuncionarioId);
+  state.resources.push(resource);
+  await persist();
+  apRecurso = nome;
+  apRecursoCustom = '';
+  apShowNewMachine = false;
+  rerenderIniciar(rememberIniciarFields());
+  toast('Máquina cadastrada.', 'success');
+}
 function refreshApontamentoDatalist(){
   const ord = document.getElementById('ordensList');
   if(ord){ ord.innerHTML = state.orders.filter(o=>o.status!=='Concluída').map(o=>`<option value="${orderLabel(o)}">${orderLabel(o)} — ${o.codigo} — ${o.descricao}</option>`).join(''); }
@@ -2611,26 +2771,38 @@ function togglePassword(id, button){
   input.type = show ? 'text' : 'password';
   button.textContent = show ? 'ocultar' : 'mostrar';
 }
-async function openOrderStatus(id){
-  if(deny('ordens')) return;
+async function changeOrderStatus(id, next, selectEl){
+  if(deny('ordens')){
+    if(selectEl) selectEl.value = normalizeOrderStatus((orderById(id) || {}).status);
+    return;
+  }
   const order = orderById(id);
   if(!order) return;
-  const next = window.prompt('Novo status:\n' + ORDER_STATUSES.join('\n'), normalizeOrderStatus(order.status));
-  if(!next) return;
-  if(ORDER_STATUSES.indexOf(next) < 0){ toast('Status desconhecido.', 'error'); return; }
+  const previous = normalizeOrderStatus(order.status);
+  if(next === previous) return;
+  if(ORDER_STATUSES.indexOf(next) < 0){
+    toast('Escolha um status da lista.', 'error');
+    if(selectEl) selectEl.value = previous;
+    return;
+  }
   let setor = order.setor || '';
   let motivo = order.motivo || '';
   if(next === 'Iniciado/Parado' || next === 'Bloqueado'){
     setor = window.prompt('Setor', setor) || '';
     motivo = window.prompt('Motivo', motivo) || '';
-    if(!setor.trim() || !motivo.trim()){ toast('Informe o setor e o motivo.', 'error'); return; }
+    if(!setor.trim() || !motivo.trim()){
+      toast('Informe o setor e o motivo.', 'error');
+      if(selectEl) selectEl.value = previous;
+      return;
+    }
   }
   order.status = next;
   order.setor = setor.trim();
   order.motivo = motivo.trim();
   await persist();
-  if(activeTab === 'ordens') renderOrdens();
-  if(activeTab === 'acompanhamento') renderAcompanhamento();
+  if(activeTab === 'ordens') renderOrdensTable();
+  if(activeTab === 'acompanhamento') renderAcompTable();
+  toast('Status atualizado.', 'success');
 }
 function readImageFile(input, done){
   const file = input.files && input.files[0];
@@ -3002,6 +3174,10 @@ window.toggleFeriasFields = toggleFeriasFields;
 window.startPunch = startPunch;
 window.endPunch = endPunch;
 window.stepQty = stepQty;
+window.toggleQuickEmployee = toggleQuickEmployee;
+window.toggleQuickMachine = toggleQuickMachine;
+window.saveQuickEmployee = saveQuickEmployee;
+window.saveQuickMachine = saveQuickMachine;
 window.selectApFuncionario = selectApFuncionario;
 window.renderApEmpGrid = renderApEmpGrid;
 window.selectApRecurso = selectApRecurso;
@@ -3037,7 +3213,7 @@ window.openEmployeePhoto = openEmployeePhoto;
 window.closeEmployeePhoto = closeEmployeePhoto;
 window.showForgotPassword = showForgotPassword;
 window.togglePassword = togglePassword;
-window.openOrderStatus = openOrderStatus;
+window.changeOrderStatus = changeOrderStatus;
 window.deleteGroup = deleteGroup;
 window.deleteFamily = deleteFamily;
 window.fillOrderFamilies = fillOrderFamilies;
