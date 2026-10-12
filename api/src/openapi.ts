@@ -3,7 +3,7 @@ export const openApiSpec = {
   info: {
     title: "SoSystem API",
     version: "1.0.0",
-    description: "API REST de usuários com autenticação JWT, validação, tratamento global de erros e rate limiting. O banco SQL fica no Supabase."
+    description: "API REST com usuários e produção de fábrica. Autenticação JWT, validação, tratamento global de erros e rate limiting. O banco SQL fica no Supabase."
   },
   servers: [
     { url: "http://localhost:3000", description: "Desenvolvimento local" },
@@ -12,7 +12,8 @@ export const openApiSpec = {
   tags: [
     { name: "Sistema" },
     { name: "Autenticação" },
-    { name: "Usuários" }
+    { name: "Usuários" },
+    { name: "Produção" }
   ],
   components: {
     securitySchemes: {
@@ -232,6 +233,34 @@ export const openApiSpec = {
           "401": { description: "Não autenticado" },
           "403": { description: "Não é administrador ou tentativa de autoexclusão" },
           "404": { description: "Não encontrado" }
+        }
+      }
+    },
+    "/api/production": {
+      get: {
+        tags: ["Produção"],
+        summary: "Ler ordens, apontamentos, células, produtos e funcionários",
+        security: [{ bearerAuth: [] }],
+        responses: {
+          "200": { description: "Estado atual, sem registros excluídos" },
+          "401": { description: "Não autenticado" }
+        }
+      }
+    },
+    "/api/production/sync": {
+      post: {
+        tags: ["Produção"],
+        summary: "Enviar alterações offline e receber o estado mesclado",
+        description: "Cada registro vence pelo updatedAt mais recente. Exclusões usam deletedAt. Os contadores de ordem e funcionário ficam com o maior valor.",
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: { type: "object" } } }
+        },
+        responses: {
+          "200": { description: "Estado mesclado" },
+          "401": { description: "Não autenticado" },
+          "422": { description: "Validação" }
         }
       }
     }

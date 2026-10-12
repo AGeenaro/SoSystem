@@ -35,3 +35,31 @@ create trigger users_set_updated_at
 before update on public.users
 for each row
 execute function public.set_updated_at();
+
+-- Produção compartilhada. O navegador só guarda uma fila local para trabalhar sem internet.
+
+create table if not exists public.production_records (
+  kind text not null check (kind in ('employee', 'product', 'order', 'punch', 'resource')),
+  id text not null,
+  payload jsonb not null,
+  updated_at timestamptz not null,
+  deleted_at timestamptz,
+  primary key (kind, id)
+);
+
+create table if not exists public.production_meta (
+  id integer primary key check (id = 1),
+  next_order_num integer not null default 1,
+  next_employee_num integer not null default 1,
+  updated_at timestamptz not null default now()
+);
+
+insert into public.production_meta (id)
+values (1)
+on conflict (id) do nothing;
+
+alter table public.production_records enable row level security;
+alter table public.production_meta enable row level security;
+
+revoke all on table public.production_records from anon, authenticated;
+revoke all on table public.production_meta from anon, authenticated;

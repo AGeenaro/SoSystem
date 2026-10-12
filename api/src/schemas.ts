@@ -32,6 +32,18 @@ export const idParamSchema = z.object({
   id: z.string().uuid("O id precisa ser um UUID.")
 });
 
+export const productionSyncSchema = z.object({
+  records: z.array(z.object({
+    kind: z.enum(["employee", "product", "order", "punch", "resource"]),
+    id: z.string().trim().min(1).max(120),
+    payload: z.record(z.string(), z.unknown()),
+    updatedAt: z.string().datetime({ offset: true }),
+    deletedAt: z.string().datetime({ offset: true }).nullable().optional()
+  })).max(5000),
+  nextOrderNum: z.number().int().min(1).max(1_000_000).optional(),
+  nextEmployeeNum: z.number().int().min(1).max(1_000_000).optional()
+}).strict();
+
 export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type CreateUserInput = z.infer<typeof createUserSchema>;

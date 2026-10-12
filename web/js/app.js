@@ -67,24 +67,22 @@ let apEmpFilterQuery = '';
 let finEmpFilterQuery = '';
 
 const AVATAR_COLORS = ['#2F6FED','#17A056','#F5A524','#8B5CF6','#EF4444','#0EA5B7','#D6409F'];
-const EMPLOYEE_PHOTOS = [
-  "assets/photos/01.jpg",
-  "assets/photos/02.jpg",
-  "assets/photos/03.jpg",
-  "assets/photos/04.jpg",
-  "assets/photos/05.jpg",
-  "assets/photos/06.jpg",
-  "assets/photos/07.jpg",
-  "assets/photos/08.jpg",
-  "assets/photos/09.jpg",
-  "assets/photos/10.jpg",
-  "assets/photos/11.jpg",
-  "assets/photos/12.jpg",
-  "assets/photos/13.jpg",
-  "assets/photos/14.jpg",
-  "assets/photos/15.jpg"
+const CACHE_KEY = 'prodfy_sync_v1';
+const LEGACY_KEY = 'prodfy_data_v7_cracha';
+const PRODUCTION_COLLECTIONS = [
+  ['employee', 'employees', item => item.id],
+  ['product', 'products', item => item.codigo],
+  ['order', 'orders', item => item.id],
+  ['punch', 'punches', item => item.id],
+  ['resource', 'resources', item => item.id]
 ];
-const EMPLOYEE_PHOTO_FALLBACKS = EMPLOYEE_PHOTOS;
+let fingerprints = {};
+let pendingDeletes = [];
+let syncLabel = 'Neste aparelho';
+let syncError = false;
+let mutationEpoch = 0;
+let syncTimer = null;
+let syncing = false;
 function colorForName(name){ let h=0; for(let i=0;i<name.length;i++){ h = name.charCodeAt(i) + ((h<<5)-h); } return AVATAR_COLORS[Math.abs(h) % AVATAR_COLORS.length]; }
 function initials(nome, sobrenome){ return ((nome[0]||'')+(sobrenome[0]||'')).toUpperCase(); }
 function genErpCode(classificacao){
@@ -95,28 +93,27 @@ function genErpCode(classificacao){
 function formatOrderNumber(n){ const s = String(n).padStart(6,'0'); return s.slice(0,3) + '.' + s.slice(3); }
 function formatEmployeeNumber(n){ return String(n).padStart(4,'0'); }
 
-function photoIndexForEmployee(e){
-  if(!EMPLOYEE_PHOTOS.length) return 0;
-  const stored = Number(e && e.fotoIndex);
-  if(Number.isInteger(stored) && stored >= 0) return stored % EMPLOYEE_PHOTOS.length;
-  const byNumber = parseInt((e && e.numero) || '', 10);
-  if(Number.isFinite(byNumber) && byNumber > 0) return (byNumber - 1) % EMPLOYEE_PHOTOS.length;
-  const key = ((e && e.nome) || '') + ((e && e.sobrenome) || '');
-  let h = 0;
-  for(let i=0;i<key.length;i++) h = key.charCodeAt(i) + ((h<<5)-h);
-  return Math.abs(h) % EMPLOYEE_PHOTOS.length;
-}
-function employeePhoto(e){ return EMPLOYEE_PHOTOS[photoIndexForEmployee(e)]; }
-function employeePhotoFallback(e){ return EMPLOYEE_PHOTO_FALLBACKS[photoIndexForEmployee(e) % EMPLOYEE_PHOTO_FALLBACKS.length]; }
 function openEmployeePhoto(employeeId, evt){
   if(evt){ evt.preventDefault(); evt.stopPropagation(); }
   const e = state.employees.find(x=>x.id===employeeId);
   if(!e) return;
   const overlay = document.getElementById('employeePhotoZoom');
   const image = document.getElementById('employeePhotoLarge');
-  image.onerror = function(){ this.onerror=null; this.src=employeePhotoFallback(e); };
-  image.src = employeePhoto(e);
-  image.alt = `Foto ampliada de ${e.nome} ${e.sobrenome}`;
+  const letters = initials(e.nome||'', e.sobrenome||'');
+  image.removeAttribute('src');
+  image.alt = `${e.nome} ${e.sobrenome}`;
+  image.style.display = 'none';
+  const wrap = image.parentElement;
+  if(wrap){
+    wrap.style.background = colorForName((e.nome||'')+(e.sobrenome||''));
+    wrap.style.color = '#fff';
+    wrap.style.display = 'flex';
+    wrap.style.alignItems = 'center';
+    wrap.style.justifyContent = 'center';
+    wrap.style.fontSize = '64px';
+    wrap.style.fontWeight = '800';
+    wrap.setAttribute('data-letters', letters);
+  }
   document.getElementById('employeePhotoName').textContent = `${e.nome} ${e.sobrenome}`;
   document.getElementById('employeePhotoRole').textContent = `${e.funcao} • ${e.turno}`;
   document.getElementById('employeePhotoMeta').textContent = `Funcionário ${e.numero}`;
@@ -132,9 +129,9 @@ function closeEmployeePhoto(evt){
 document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeEmployeePhoto(); });
 function employeeAvatarHTML(e, className){
   if(!e) return '';
-  const photo = employeePhoto(e);
-  const fallback = employeePhotoFallback(e);
-  return `<span class="${className} worker-avatar" role="button" tabindex="0" title="Clique para ampliar a foto de ${e.nome}" aria-label="Ampliar foto de ${e.nome} ${e.sobrenome}" onclick="openEmployeePhoto('${e.id}', event)" onkeydown="if(event.key==='Enter'||event.key===' '){openEmployeePhoto('${e.id}',event)}" style="background-image:url('${photo}'),url('${fallback}');"></span>`;
+  const color = colorForName((e.nome||'')+(e.sobrenome||''));
+  const letters = initials(e.nome||'', e.sobrenome||'');
+  return `<span class="${className} worker-avatar" role="button" tabindex="0" title="${e.nome} ${e.sobrenome}" aria-label="${e.nome} ${e.sobrenome}" onclick="openEmployeePhoto('${e.id}', event)" onkeydown="if(event.key==='Enter'||event.key===' '){openEmployeePhoto('${e.id}',event)}" style="background:${color};color:#fff;">${letters}</span>`;
 }
 function employeeIdentityHTML(id, compact){
   const e = state.employees.find(x=>x.id===id);
@@ -146,122 +143,208 @@ function employeeMiniChipHTML(id){
   if(!e) return '';
   return `<span class="employee-mini-chip">${employeeAvatarHTML(e,'inline-avatar-small')}<span>${e.nome} ${e.sobrenome}</span></span>`;
 }
-function ensureEmployeePhotos(){
-  let changed = false;
-  state.employees.forEach((e,i)=>{
-    if(!Number.isInteger(Number(e.fotoIndex)) || Number(e.fotoIndex) < 0){
-      e.fotoIndex = i % EMPLOYEE_PHOTOS.length;
-      changed = true;
-    } else {
-      e.fotoIndex = Number(e.fotoIndex) % EMPLOYEE_PHOTOS.length;
-    }
+function emptyState(){
+  return { employees:[], products:[], orders:[], punches:[], resources:[], nextOrderNum:1, nextEmployeeNum:1 };
+}
+function authToken(){
+  try { return localStorage.getItem('prodfy_jwt') || ''; } catch(e){ return ''; }
+}
+function apiBase(){
+  return (window.PRODIFY_CONFIG && window.PRODIFY_CONFIG.apiUrl) || '';
+}
+function recordBody(item){
+  const clone = Object.assign({}, item);
+  delete clone.updatedAt;
+  return clone;
+}
+function stampChanges(){
+  const seen = new Set();
+  const now = new Date().toISOString();
+  PRODUCTION_COLLECTIONS.forEach(([kind, key, idOf])=>{
+    state[key].forEach(item=>{
+      const id = String(idOf(item) || '');
+      if(!id) return;
+      const mapKey = kind + ':' + id;
+      seen.add(mapKey);
+      const json = JSON.stringify(recordBody(item));
+      if(fingerprints[mapKey] !== json){
+        item.updatedAt = now;
+        fingerprints[mapKey] = json;
+      }
+    });
   });
-  return changed;
+  Object.keys(fingerprints).forEach(mapKey=>{
+    if(seen.has(mapKey)) return;
+    const splitAt = mapKey.indexOf(':');
+    pendingDeletes.push({ kind: mapKey.slice(0, splitAt), id: mapKey.slice(splitAt + 1), updatedAt: now });
+    delete fingerprints[mapKey];
+  });
 }
-
-function defaultData(){
-  return {
-    employees: (function(){
-      const base = [
-        {nome:'Carlos', sobrenome:'Almeida', funcao:'Operador CNC', turno:'1º Turno', vinculo:'Efetivo'},
-        {nome:'Eduardo', sobrenome:'Lima', funcao:'Operador de Montagem', turno:'1º Turno', vinculo:'Efetivo'},
-        {nome:'João', sobrenome:'Pereira', funcao:'Operador de Prensa', turno:'2º Turno', vinculo:'Terceiro'},
-        {nome:'Rafael', sobrenome:'Costa', funcao:'Inspetor de Qualidade', turno:'2º Turno', vinculo:'Efetivo'},
-        {nome:'Marcos', sobrenome:'Vinícius', funcao:'Soldador', turno:'1º Turno', vinculo:'Efetivo'},
-        {nome:'Bruno', sobrenome:'Ferreira', funcao:'Operador de Dobra', turno:'1º Turno', vinculo:'Efetivo'},
-        {nome:'Diego', sobrenome:'Martins', funcao:'Operador de Acabamento', turno:'2º Turno', vinculo:'Terceiro'},
-        {nome:'Thiago', sobrenome:'Rocha', funcao:'Operador CNC', turno:'3º Turno', vinculo:'Efetivo'},
-        {nome:'Felipe', sobrenome:'Andrade', funcao:'Auxiliar de Produção', turno:'1º Turno', vinculo:'Efetivo'},
-        {nome:'Gustavo', sobrenome:'Ramos', funcao:'Operador de Montagem', turno:'2º Turno', vinculo:'Efetivo'},
-        {nome:'Leonardo', sobrenome:'Barbosa', funcao:'Soldador', turno:'3º Turno', vinculo:'Terceiro'},
-        {nome:'Rodrigo', sobrenome:'Nunes', funcao:'Operador de Prensa', turno:'1º Turno', vinculo:'Efetivo'},
-        {nome:'André', sobrenome:'Cardoso', funcao:'Inspetor de Qualidade', turno:'1º Turno', vinculo:'Efetivo'},
-        {nome:'Vinícius', sobrenome:'Teixeira', funcao:'Operador de Dobra', turno:'2º Turno', vinculo:'Efetivo'},
-        {nome:'Paulo', sobrenome:'Henrique', funcao:'Supervisor de Produção', turno:'Administrativo', vinculo:'Efetivo'}
-      ];
-      return base.map((e,i) => ({ id: uid(), numero: formatEmployeeNumber(i+1), nome:e.nome, sobrenome:e.sobrenome, funcao:e.funcao, turno:e.turno, vinculo:e.vinculo, ferias:null, fotoIndex:i % EMPLOYEE_PHOTOS.length }));
-    })(),
-    products: (function(){
-      const base = [
-        {descricao:'Eixo Pinhão 20mm', tempoFabricacaoMin:6, classificacao:'PI'},
-        {descricao:'Suporte Chapa L', tempoFabricacaoMin:3.5, classificacao:'PI'},
-        {descricao:'Flange Sextavado', tempoFabricacaoMin:9, classificacao:'PF'},
-        {descricao:'Bucha de Nylon', tempoFabricacaoMin:1.5, classificacao:'PF'},
-        {descricao:'Parafuso Sextavado M10', tempoFabricacaoMin:1.2, classificacao:'PI'},
-        {descricao:'Porca Flangeada', tempoFabricacaoMin:0.8, classificacao:'PI'},
-        {descricao:'Arruela de Pressão', tempoFabricacaoMin:0.6, classificacao:'PI'},
-        {descricao:'Eixo Escalonado', tempoFabricacaoMin:7.5, classificacao:'PI'},
-        {descricao:'Engrenagem Reta Z20', tempoFabricacaoMin:11, classificacao:'PI'},
-        {descricao:'Correia Dentada', tempoFabricacaoMin:2.4, classificacao:'PF'},
-        {descricao:'Rolamento Blindado', tempoFabricacaoMin:1.8, classificacao:'PI'},
-        {descricao:'Suporte de Fixação', tempoFabricacaoMin:4.2, classificacao:'PI'},
-        {descricao:'Placa Base Retangular', tempoFabricacaoMin:5.6, classificacao:'PI'},
-        {descricao:'Tubo Redondo 25mm', tempoFabricacaoMin:2.1, classificacao:'PI'},
-        {descricao:'Chapa Perfurada', tempoFabricacaoMin:3.9, classificacao:'PI'},
-        {descricao:'Bucha de Bronze', tempoFabricacaoMin:2.7, classificacao:'PI'},
-        {descricao:'Pino Guia', tempoFabricacaoMin:1.0, classificacao:'PI'},
-        {descricao:'Anel de Vedação', tempoFabricacaoMin:0.9, classificacao:'PF'},
-        {descricao:'Mancal de Deslizamento', tempoFabricacaoMin:6.8, classificacao:'PI'},
-        {descricao:'Base para Motor', tempoFabricacaoMin:8.4, classificacao:'PF'},
-        {descricao:'Coluna de Sustentação', tempoFabricacaoMin:7.1, classificacao:'PI'},
-        {descricao:'Guia Linear', tempoFabricacaoMin:5.3, classificacao:'PI'},
-        {descricao:'Came de Acionamento', tempoFabricacaoMin:4.6, classificacao:'PI'},
-        {descricao:'Trava de Segurança', tempoFabricacaoMin:2.0, classificacao:'PF'},
-        {descricao:'Suporte em L', tempoFabricacaoMin:3.0, classificacao:'PI'},
-        {descricao:'Grampo de Fixação', tempoFabricacaoMin:1.4, classificacao:'PI'},
-        {descricao:'Espaçador Cilíndrico', tempoFabricacaoMin:0.7, classificacao:'PI'},
-        {descricao:'Disco de Corte', tempoFabricacaoMin:3.3, classificacao:'PF'},
-        {descricao:'Haste Roscada', tempoFabricacaoMin:2.6, classificacao:'PI'},
-        {descricao:'Junta de Vedação', tempoFabricacaoMin:1.1, classificacao:'PF'},
-        {descricao:'Cantoneira de Aço', tempoFabricacaoMin:3.7, classificacao:'PI'},
-        {descricao:'Perfil U 40mm', tempoFabricacaoMin:4.0, classificacao:'PI'},
-        {descricao:'Tampa de Proteção', tempoFabricacaoMin:2.3, classificacao:'PF'},
-        {descricao:'Caixa de Redução', tempoFabricacaoMin:12.5, classificacao:'PF'}
-      ];
-      return base.map(p => ({ codigo: genErpCode(p.classificacao), descricao: p.descricao, tempoFabricacaoMin: p.tempoFabricacaoMin, classificacao: p.classificacao }));
-    })(),
-    orders: [],
-    punches: [],
-    resources: [
-      {id: uid(), nome:'CA01', descricao:'Cabine de Pintura', setor:'Pintura', status:'Produzindo', funcionarios:[]},
-      {id: uid(), nome:'ES01', descricao:'Estufa de Secagem', setor:'Pintura', status:'Produzindo', funcionarios:[]},
-      {id: uid(), nome:'JA01', descricao:'Cabine de Jato 1', setor:'Preparação', status:'Parada', funcionarios:[]},
-      {id: uid(), nome:'MO01', descricao:'Bancada de Montagem 1', setor:'Montagem', status:'Produzindo', funcionarios:[]},
-      {id: uid(), nome:'MO02', descricao:'Bancada de Montagem 2', setor:'Montagem', status:'Parada', funcionarios:[]},
-      {id: uid(), nome:'SO01', descricao:'Estação de Solda MIG', setor:'Solda', status:'Produzindo', funcionarios:[]},
-      {id: uid(), nome:'SO02', descricao:'Estação de Solda TIG', setor:'Solda', status:'Manutenção', funcionarios:[]},
-      {id: uid(), nome:'DO01', descricao:'Dobradeira Hidráulica 1', setor:'Dobra', status:'Produzindo', funcionarios:[]},
-      {id: uid(), nome:'DO02', descricao:'Dobradeira CNC 2', setor:'Dobra', status:'Parada', funcionarios:[]},
-      {id: uid(), nome:'AC01', descricao:'Linha de Acabamento', setor:'Acabamento', status:'Produzindo', funcionarios:[]}
-    ],
-    nextOrderNum: 1,
-    nextEmployeeNum: 16
-  };
+function rebuildFingerprints(){
+  fingerprints = {};
+  PRODUCTION_COLLECTIONS.forEach(([kind, key, idOf])=>{
+    state[key].forEach(item=>{
+      const id = String(idOf(item) || '');
+      if(!id) return;
+      fingerprints[kind + ':' + id] = JSON.stringify(recordBody(item));
+    });
+  });
 }
-
-async function loadData(){
-  let loaded = false;
+function saveCache(){
   try{
-    const r = await window.storage.get(STORAGE_KEY, true);
-    if(r && r.value){
-      state = Object.assign(defaultData(), JSON.parse(r.value));
-      loaded = true;
-    }
-  }catch(e){}
-  if(!loaded) state = defaultData();
-  const photosUpdated = ensureEmployeePhotos();
-  if(!loaded || photosUpdated) await persist();
+    localStorage.setItem(CACHE_KEY, JSON.stringify({ state, fingerprints, pendingDeletes }));
+    localStorage.removeItem(LEGACY_KEY);
+    localStorage.removeItem(STORAGE_KEY);
+  }catch(e){
+    console.error('Erro ao guardar a fila local', e);
+  }
 }
-async function persist(){
+function loadCache(){
+  try{
+    localStorage.removeItem(LEGACY_KEY);
+    localStorage.removeItem(STORAGE_KEY);
+  }catch(e){}
+  state = emptyState();
+  fingerprints = {};
+  pendingDeletes = [];
+  try{
+    const raw = localStorage.getItem(CACHE_KEY);
+    if(!raw) return;
+    const parsed = JSON.parse(raw);
+    state = Object.assign(emptyState(), parsed.state || {});
+    PRODUCTION_COLLECTIONS.forEach(([, key])=>{ if(!Array.isArray(state[key])) state[key] = []; });
+    fingerprints = parsed.fingerprints || {};
+    pendingDeletes = Array.isArray(parsed.pendingDeletes) ? parsed.pendingDeletes : [];
+  }catch(e){
+    state = emptyState();
+  }
+}
+function buildChanges(){
+  const records = [];
+  PRODUCTION_COLLECTIONS.forEach(([kind, key, idOf])=>{
+    state[key].forEach(item=>{
+      const id = String(idOf(item) || '');
+      if(!id || !item.updatedAt) return;
+      records.push({ kind, id, payload: recordBody(item), updatedAt: item.updatedAt, deletedAt: null });
+    });
+  });
+  pendingDeletes.forEach(tomb=>{
+    records.push({ kind: tomb.kind, id: tomb.id, payload: {}, updatedAt: tomb.updatedAt, deletedAt: tomb.updatedAt });
+  });
+  return { records, nextOrderNum: state.nextOrderNum, nextEmployeeNum: state.nextEmployeeNum };
+}
+function applySnapshot(data){
+  const tomb = new Map((data.tombstones || []).map(item => [item.kind + ':' + item.id, item.updatedAt]));
+  const next = emptyState();
+  next.nextOrderNum = Math.max(state.nextOrderNum || 1, data.nextOrderNum || 1);
+  next.nextEmployeeNum = Math.max(state.nextEmployeeNum || 1, data.nextEmployeeNum || 1);
+  PRODUCTION_COLLECTIONS.forEach(([kind, key, idOf])=>{
+    const serverItems = Array.isArray(data[key]) ? data[key] : [];
+    const serverById = new Map(serverItems.map(item => [String(idOf(item)), item]));
+    const localById = new Map((state[key] || []).map(item => [String(idOf(item) || ''), item]));
+    const merged = [];
+    const seen = new Set();
+    serverById.forEach((serverItem, id)=>{
+      const local = localById.get(id);
+      const deletion = pendingDeletes.find(item => item.kind === kind && item.id === id);
+      if(deletion && deletion.updatedAt > (serverItem.updatedAt || '')) return;
+      if(local && local.updatedAt && local.updatedAt > (serverItem.updatedAt || '')) merged.push(local);
+      else merged.push(serverItem);
+      seen.add(id);
+    });
+    localById.forEach((local, id)=>{
+      if(!id || seen.has(id)) return;
+      const tombAt = tomb.get(kind + ':' + id);
+      if(tombAt && tombAt >= (local.updatedAt || '')) return;
+      merged.push(local);
+    });
+    next[key] = merged;
+  });
+  pendingDeletes = pendingDeletes.filter(item => {
+    const tombAt = tomb.get(item.kind + ':' + item.id);
+    return !(tombAt && tombAt >= item.updatedAt);
+  });
+  state = next;
+  rebuildFingerprints();
+}
+function scheduleSync(){
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(()=>{ syncNow(); }, 1500);
+}
+async function syncNow(){
+  if(syncing) return;
+  if(!navigator.onLine){
+    setSyncPill('Offline — alterações neste aparelho', true);
+    return;
+  }
+  const token = authToken();
+  if(!token){
+    setSyncPill('Entre na conta para sincronizar', true);
+    return;
+  }
+  const epoch = mutationEpoch;
+  syncing = true;
   setSyncPill('Sincronizando…');
   try{
-    await window.storage.set(STORAGE_KEY, JSON.stringify(state), true);
+    const response = await fetch(apiBase() + '/api/production/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify(buildChanges())
+    });
+    if(response.status === 401){
+      setSyncPill('Entre de novo para sincronizar', true);
+      return;
+    }
+    if(!response.ok) throw new Error('Falha ao sincronizar');
+    const body = await response.json();
+    applySnapshot(body.data || {});
+    saveCache();
     lastSyncAt = nowBR();
     setSyncPill('Sincronizado');
+    if(mutationEpoch !== epoch) scheduleSync();
+    else refreshAfterSync();
+  }catch(e){
+    setSyncPill('Sem conexão — dados guardados neste aparelho', true);
+  }finally{
+    syncing = false;
+  }
+}
+function refreshAfterSync(){
+  if(typeof renderNav === 'function') renderNav();
+  if(activeTab==='dashboard' && typeof renderDashboard === 'function') renderDashboard();
+  if(activeTab==='ordens' && typeof renderOrdens === 'function') renderOrdens();
+  if(activeTab==='apontamento' && typeof renderApontamento === 'function') renderApontamento();
+  if(activeTab==='recursos' && typeof renderRecursos === 'function') renderRecursos();
+  if(activeTab==='engenharia' && typeof renderEngenharia === 'function') renderEngenharia();
+  if(activeTab==='funcionarios' && typeof renderFuncionarios === 'function') renderFuncionarios();
+  if(activeTab==='acompanhamento' && typeof renderAcompanhamento === 'function') renderAcompanhamento();
+}
+async function loadData(){
+  loadCache();
+  window.addEventListener('online', ()=>{
+    toast('Internet voltou. Enviando o que foi feito neste aparelho.', 'success');
+    syncNow();
+  });
+  window.addEventListener('offline', ()=>{
+    setSyncPill('Offline — alterações neste aparelho', true);
+  });
+  setInterval(()=>{ if(navigator.onLine) syncNow(); }, 30000);
+  await syncNow();
+}
+async function persist(){
+  mutationEpoch++;
+  try{
+    stampChanges();
+    saveCache();
+    lastSyncAt = nowBR();
+    if(!navigator.onLine) setSyncPill('Offline — alterações neste aparelho', true);
+    else if(!authToken()) setSyncPill('Entre na conta para sincronizar', true);
+    else setSyncPill('Sincronizando…');
+    scheduleSync();
   }catch(e){
     console.error('Erro ao salvar dados', e);
     setSyncPill('Falha ao salvar', true);
-    toast('Não foi possível salvar os dados agora.', 'error');
+    toast('Não foi possível guardar os dados neste aparelho.', 'error');
   }
 }
 function uid(){ return 'id-' + Math.random().toString(36).slice(2,10) + Date.now().toString(36); }
@@ -331,10 +414,12 @@ function toast(msg, kind){
 
 /* ===================== TOPBAR PILLS ===================== */
 function setSyncPill(text, isError){
+  syncLabel = text;
+  syncError = !!isError;
   const el = document.getElementById('pillSync');
   if(!el) return;
-  el.innerHTML = icon('sync',13) + ' ' + text;
-  el.className = 'pill ' + (isError ? 'pill-red' : 'pill-green');
+  el.innerHTML = icon('sync',13) + ' ' + syncLabel;
+  el.className = 'pill ' + (syncError ? 'pill-red' : 'pill-green');
 }
 function renderTopbarPills(){
   const holder = document.getElementById('topbarPills');
@@ -349,7 +434,7 @@ function renderTopbarPills(){
   }
   holder.innerHTML = `
     <div class="pill clickable" onclick="toggleSound()">${icon(soundEnabled?'volume':'volumeMute',14)} ${soundEnabled?'Som ativado':'Som desativado'}</div>
-    <div class="pill pill-green" id="pillSync">${icon('sync',13)} Sincronizado</div>
+    <div class="pill ${syncError ? 'pill-red' : 'pill-green'}" id="pillSync">${icon('sync',13)} ${syncLabel}</div>
     <div class="pill pill-blue"><span class="pill-dot"></span>Status: ${statusLabel}</div>
     <div class="pill">${icon('clock',13)} Atualizado: ${fmtDateShort(lastSyncAt || nowBR())}</div>
   `;
@@ -411,7 +496,9 @@ function closeModal(id){ document.getElementById(id).classList.remove('open'); }
 /* ===================== HELPERS ===================== */
 function employeeName(id){ const e = state.employees.find(x=>x.id===id); return e ? (e.nome+' '+e.sobrenome) : '—'; }
 function productByCode(codigo){ return state.products.find(p=>p.codigo===codigo); }
-function orderById(id){ return state.orders.find(o=>o.id===id); }
+function orderLabel(order){ return (order && (order.numero || order.id)) || ''; }
+function orderById(id){ return state.orders.find(o=>o.id===id || o.numero===id); }
+function punchOrderLabel(punch){ const order = orderById(punch && punch.ordemId); return order ? orderLabel(order) : ((punch && punch.ordemId) || ''); }
 function resourceById(id){ return state.resources.find(r=>r.id===id); }
 function orderProducedQty(orderId){ return state.punches.filter(p=>p.ordemId===orderId).reduce((s,p)=>s+(Number(p.quantidadeProduzida)||0), 0); }
 function orderScrapQty(orderId){ return state.punches.filter(p=>p.ordemId===orderId).reduce((s,p)=>s+(Number(p.quantidadeRefugada)||0), 0); }
@@ -478,7 +565,7 @@ function renderDashboard(){
       <div class="filter-bar">
         <div class="field grow">
           <label>Buscar célula / funcionário</label>
-          <input id="dashSearchInput" placeholder="Ex.: CA01, montagem, João..." value="${dashSearch}" oninput="dashSearch=this.value; renderDashLists();">
+          <input id="dashSearchInput" placeholder="Busque por célula, setor ou funcionário" value="${dashSearch}" oninput="dashSearch=this.value; renderDashLists();">
         </div>
         <div class="field fixed">
           <label>Setor monitorado</label>
@@ -891,11 +978,11 @@ function renderOrdensTable(){
   const tbody = document.getElementById('ordensTbody');
   if(!tbody) return;
   const q = ordensSearch.trim().toLowerCase();
-  const list = state.orders.filter(o => !q || o.id.toLowerCase().includes(q) || o.codigo.toLowerCase().includes(q)).sort((a,b)=> b.criadoEm.localeCompare(a.criadoEm));
+  const list = state.orders.filter(o => !q || orderLabel(o).toLowerCase().includes(q) || o.codigo.toLowerCase().includes(q)).sort((a,b)=> b.criadoEm.localeCompare(a.criadoEm));
   tbody.innerHTML = list.length ? list.map(o=>{
     const produced = orderProducedQty(o.id);
     return `<tr>
-      <td style="color:var(--blue); font-weight:700;">${o.id}</td>
+      <td style="color:var(--blue); font-weight:700;">${orderLabel(o)}</td>
       <td>${o.codigo}</td>
       <td>${o.descricao}</td>
       <td class="mono">${o.quantidadePlanejada}</td>
@@ -936,12 +1023,13 @@ async function saveOrder(shouldPrint){
   const prod = productByCode(codigo);
   const geradoPor = document.getElementById('ordGeradoPor').value || 'Não informado';
   if(!prod || !qtd || qtd<=0){ toast('Informe uma quantidade válida.', 'error'); return; }
-  const opId = formatOrderNumber(state.nextOrderNum);
+  const numero = formatOrderNumber(state.nextOrderNum);
+  const opId = uid();
   state.nextOrderNum++;
-  state.orders.push({ id: opId, codigo: prod.codigo, descricao: prod.descricao, quantidadePlanejada: qtd, tempoEstimadoTotalMin: prod.tempoFabricacaoMin*qtd, status:'Aberta', criadoEm: nowISO(), geradoPor });
+  state.orders.push({ id: opId, numero, codigo: prod.codigo, descricao: prod.descricao, quantidadePlanejada: qtd, tempoEstimadoTotalMin: prod.tempoFabricacaoMin*qtd, status:'Aberta', criadoEm: nowISO(), geradoPor });
   await persist();
   closeModal('modalOrder');
-  toast('Ordem ' + opId + ' gerada com sucesso.', 'success');
+  toast('Ordem ' + numero + ' gerada com sucesso.', 'success');
   renderOrdensTable();
   refreshApontamentoDatalist();
   if(shouldPrint) printOrder(opId);
@@ -952,7 +1040,7 @@ function showOrderInfo(orderId){
   const apontadores = Array.from(new Set(state.punches.filter(p=>p.ordemId===orderId).map(p=>p.funcionarioId)));
   document.getElementById('orderInfoBody').innerHTML = `
     <div style="margin-bottom:14px;">
-      <div style="font-size:20px; font-weight:800;">${order.id}</div>
+      <div style="font-size:20px; font-weight:800;">${orderLabel(order)}</div>
       <div style="color:var(--text-muted); font-size:13px;">${order.codigo} — ${order.descricao}</div>
       <div style="margin-top:8px;">${orderStatusBadge(order.status)}</div>
     </div>
@@ -972,11 +1060,11 @@ function showOrderInfo(orderId){
 function showOrderQR(orderId){
   const order = orderById(orderId);
   if(!order) return;
-  document.getElementById('qrOpLabel').textContent = order.id + '  ·  ' + order.codigo;
+  document.getElementById('qrOpLabel').textContent = orderLabel(order) + '  ·  ' + order.codigo;
   const holder = document.getElementById('qrCanvasHolder');
   holder.innerHTML = '';
-  if(window.QRCode){ new QRCode(holder, { text: order.id, width:200, height:200, colorDark:'#111', colorLight:'#fff' }); }
-  else{ holder.innerHTML = `<div style="padding:40px; border:2px dashed #999; font-weight:700;">${order.id}</div>`; }
+  if(window.QRCode){ new QRCode(holder, { text: orderLabel(order), width:200, height:200, colorDark:'#111', colorLight:'#fff' }); }
+  else{ holder.innerHTML = `<div style="padding:40px; border:2px dashed #999; font-weight:700;">${orderLabel(order)}</div>`; }
   openModal('modalQR');
 }
 function printOrder(orderId){
@@ -992,11 +1080,11 @@ function printOrder(orderId){
         <div>
           <div class="print-brand">PRODFY</div>
           <div class="print-doc-title">Ordem de Produção</div>
-          <div class="print-op-number">${order.id}</div>
+          <div class="print-op-number">${orderLabel(order)}</div>
         </div>
         <div class="print-qr-block">
           <div id="${qrHolderId}"></div>
-          <div class="print-qr-label">${order.id}</div>
+          <div class="print-qr-label">${orderLabel(order)}</div>
         </div>
       </div>
       <div class="print-info-grid">
@@ -1020,7 +1108,7 @@ function printOrder(orderId){
   `;
   if(window.QRCode){
     const qrHolder = document.getElementById(qrHolderId);
-    if(qrHolder) new QRCode(qrHolder, { text: order.id, width:104, height:104, colorDark:'#111', colorLight:'#fff' });
+    if(qrHolder) new QRCode(qrHolder, { text: orderLabel(order), width:104, height:104, colorDark:'#111', colorLight:'#fff' });
   }
   setTimeout(()=>{ window.print(); }, 150);
 }
@@ -1193,7 +1281,7 @@ async function saveEmployee(){
   } else {
     novoNumero = formatEmployeeNumber(state.nextEmployeeNum);
     state.nextEmployeeNum++;
-    state.employees.push({id:uid(), numero:novoNumero, nome, sobrenome, funcao, turno, vinculo, ferias, fotoIndex:(Math.max(1,Number(novoNumero))-1) % EMPLOYEE_PHOTOS.length});
+    state.employees.push({id:uid(), numero:novoNumero, nome, sobrenome, funcao, turno, vinculo, ferias});
   }
   await persist();
   closeModal('modalEmployee');
@@ -1276,7 +1364,7 @@ function renderIniciarModalBody(){
       <div class="ap-or-divider">— ou digite o número da ordem —</div>
       <input id="pOrdem" class="ap-order-input" list="ordensList" placeholder="000.001">
       <datalist id="ordensList"></datalist>
-      ${openOrders.length ? `<div class="ap-recent-ops">${openOrders.map(o=>`<button type="button" class="ap-op-chip" onclick="document.getElementById('pOrdem').value='${o.id}';">${o.id} · ${o.codigo}</button>`).join('')}</div>` : ''}
+      ${openOrders.length ? `<div class="ap-recent-ops">${openOrders.map(o=>`<button type="button" class="ap-op-chip" onclick="document.getElementById('pOrdem').value='${orderLabel(o)}';">${orderLabel(o)} · ${o.codigo}</button>`).join('')}</div>` : ''}
     </div>
     <button class="ap-start-btn" onclick="startPunch()">${icon('play',22)} INICIAR APONTAMENTO</button>
   `;
@@ -1321,7 +1409,7 @@ function selectApFuncionario(id){ apFuncionarioId = id; renderApEmpGrid(); }
 function selectApRecurso(nome){ apRecurso = nome; apRecursoCustom=''; const c = document.getElementById('apRecursoCustomInput'); if(c) c.value=''; renderApResGrid(); }
 function refreshApontamentoDatalist(){
   const ord = document.getElementById('ordensList');
-  if(ord){ ord.innerHTML = state.orders.filter(o=>o.status!=='Concluída').map(o=>`<option value="${o.id}">${o.codigo} — ${o.descricao}</option>`).join(''); }
+  if(ord){ ord.innerHTML = state.orders.filter(o=>o.status!=='Concluída').map(o=>`<option value="${orderLabel(o)}">${orderLabel(o)} — ${o.codigo} — ${o.descricao}</option>`).join(''); }
 }
 function stepQty(inputId, delta){
   const el = document.getElementById(inputId);
@@ -1370,7 +1458,7 @@ async function startPunch(){
   recalcOrderStatus(order);
   await persist();
   beepStart();
-  toast('Apontamento iniciado — ' + order.id, 'success');
+  toast('Apontamento iniciado — ' + orderLabel(order), 'success');
   apFuncionarioId=''; apRecurso=''; apRecursoCustom='';
   closeIniciarModal();
   renderApontamento();
@@ -1389,7 +1477,7 @@ async function endPunch(punchId){
   if(order) recalcOrderStatus(order);
   await persist();
   beepEnd();
-  toast('Apontamento encerrado — ' + p.ordemId, 'success');
+  toast('Apontamento encerrado — ' + punchOrderLabel(p), 'success');
   renderNav();
 }
 
@@ -1449,7 +1537,7 @@ function renderFinalizarStep2(){
       <div class="ap-res-grid">
         ${punches.map(p=>`<button type="button" class="ap-res-btn" onclick="selectFinPunch('${p.id}')">
           <div class="ap-res-code-big">${p.recurso}</div>
-          <div class="ap-res-desc-small">${p.ordemId} · ${elapsedLabel(p.inicio)}</div>
+          <div class="ap-res-desc-small">${punchOrderLabel(p)} · ${elapsedLabel(p.inicio)}</div>
         </button>`).join('')}
       </div>
     </div>
@@ -1464,7 +1552,7 @@ function renderFinalizarStep3(){
     <div class="ap-punch-card" style="margin-bottom:0;">
       <div class="ap-punch-top">
         <div>
-          <div class="ap-punch-op">${p.ordemId}</div>
+          <div class="ap-punch-op">${punchOrderLabel(p)}</div>
           <div class="ap-punch-meta" style="display:flex; align-items:center; gap:7px; flex-wrap:wrap;">${employeeIdentityHTML(p.funcionarioId,true)}<span>· ${p.recurso} · iniciado ${elapsedLabel(p.inicio)}</span></div>
         </div>
       </div>
@@ -1550,13 +1638,13 @@ function renderAcompTable(){
   const tbody = document.getElementById('acompTbody');
   if(!tbody) return;
   const q = acompSearch.trim().toLowerCase();
-  const list = state.orders.filter(o=> !q || o.id.toLowerCase().includes(q) || o.codigo.toLowerCase().includes(q)).sort((a,b)=>b.criadoEm.localeCompare(a.criadoEm));
+  const list = state.orders.filter(o=> !q || orderLabel(o).toLowerCase().includes(q) || o.codigo.toLowerCase().includes(q)).sort((a,b)=>b.criadoEm.localeCompare(a.criadoEm));
   tbody.innerHTML = list.length ? list.map(o=>{
     const produced = orderProducedQty(o.id);
     const scrap = orderScrapQty(o.id);
     const pct = Math.min(100, (produced/o.quantidadePlanejada)*100);
     return `<tr style="cursor:pointer;" onclick="showAcompDetail('${o.id}')">
-      <td style="color:var(--blue); font-weight:700;">${o.id}</td>
+      <td style="color:var(--blue); font-weight:700;">${orderLabel(o)}</td>
       <td>${o.codigo}</td>
       <td>${o.descricao}</td>
       <td style="min-width:140px;">
@@ -1579,7 +1667,7 @@ function showAcompDetail(orderId){
   const punches = state.punches.filter(p=>p.ordemId===orderId).sort((a,b)=>b.inicio.localeCompare(a.inicio));
   detail.innerHTML = `
     <div class="card">
-      <div class="section-title" style="font-size:14px;">Histórico de Apontamentos — ${order.id}</div>
+      <div class="section-title" style="font-size:14px;">Histórico de Apontamentos — ${orderLabel(order)}</div>
       <div class="table-wrap" style="margin-top:10px;">
         <table>
           <thead><tr><th>Funcionário</th><th>Recurso</th><th>Início</th><th>Fim</th><th>Produzido</th><th>Refugo</th><th>Status</th></tr></thead>
@@ -1607,9 +1695,11 @@ async function init(){
   renderNav();
   await loadData();
   startClock();
-  lastSyncAt = nowBR();
   setTab('dashboard');
-  toast('Dados sincronizados com todos os usuários deste sistema.', 'success');
+  if(!navigator.onLine) toast('Sem internet. Dá para continuar; as alterações sobem quando a conexão voltar.', 'success');
+  else if(!authToken()) toast('Entre em Conta e API para gravar a produção no banco.', 'error');
+  else if(syncError) toast('As alterações ficaram neste aparelho e sobem quando a API responder.', 'error');
+  else toast('Produção ligada ao banco. O mesmo conteúdo aparece nos outros aparelhos.', 'success');
   setInterval(()=>{ if(activeTab==='dashboard') renderRankingAndCharts(); if(activeTab==='apontamento') renderApontamento(); }, 15000);
 }
 

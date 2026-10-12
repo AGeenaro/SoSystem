@@ -16,7 +16,7 @@ npm run build
 - validação de cadastro, login e JWT
 - CRUD de usuários com papéis admin e user
 - rate limit das rotas de autenticação
-- separação do frontend (HTML, CSS, JS e as 15 fotos)
+- separação do frontend e sincronização da produção com o banco
 
 O banco desses testes é memória. Eles não gravam no Supabase e não exigem chave.
 

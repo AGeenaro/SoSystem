@@ -7,11 +7,10 @@ O Prodfy deixou de ser um único arquivo HTML. Python não faz parte desta entre
 - `index.html` — estrutura das telas e modais
 - `css/app.css` — visual
 - `js/app.js` — monitoramento, ordens, apontamento, recursos, engenharia, funcionários e acompanhamento
-- `assets/photos/` — 15 fotos que antes estavam embutidas em base64
 - `js/config.js` — URL da API
 - `conta.html` e `js/conta.js` — cadastro, login e CRUD de usuários contra a API
 
-Os dados de produção (ordens, apontamentos, recursos, produtos e funcionários de fábrica) ficam no `localStorage` do navegador, na chave `prodfy_data_v7_cracha`. Isso substitui o `window.storage` do arquivo único, que só existia no ambiente em que o HTML foi gerado. A página de conta usa outra chave, `prodfy_jwt`, só para o token.
+Ordens, apontamentos, células, produtos e funcionários ficam nas tabelas `public.production_records` e `public.production_meta`. O navegador guarda só a fila `prodfy_sync_v1` para continuar sem internet. Quando a conexão volta, `POST /api/production/sync` envia as alterações. O registro com `updatedAt` mais recente vence, a exclusão fica marcada e os contadores de ordem e funcionário ficam com o maior número. A chave antiga `prodfy_data_v7_cracha` é apagada e não entra no banco. A página de conta usa `prodfy_jwt` para o token. Os funcionários aparecem pelas iniciais, sem fotos de exemplo.
 
 ## API (`api/`)
 
@@ -26,7 +25,7 @@ Express organiza as rotas em `src/app.ts`. O servidor de produção está em `sr
 
 ## Banco
 
-Supabase Postgres, projeto [tmqyymurvkgjmejyhzdx](https://supabase.com/dashboard/project/tmqyymurvkgjmejyhzdx). O script está em `supabase/schema.sql`. A tabela é `public.users`. RLS fica ligado e não há política para as chaves `anon` e `authenticated`, então o navegador não lê o hash da senha. Só a service role, usada no Render, acessa a tabela.
+Supabase Postgres, projeto [tmqyymurvkgjmejyhzdx](https://supabase.com/dashboard/project/tmqyymurvkgjmejyhzdx). O script está em `supabase/schema.sql`. As tabelas são `public.users`, `public.production_records` e `public.production_meta`. RLS fica ligado e não há política para as chaves `anon` e `authenticated`, então o navegador não lê o banco direto. Só a service role, usada no Render, acessa as tabelas.
 
 ## Hospedagem
 

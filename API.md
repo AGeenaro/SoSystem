@@ -193,6 +193,36 @@ Resposta `200` com o usuário público atualizado.
 
 Administrador. Não é permitido excluir a própria conta. Resposta `204` sem corpo.
 
+## Produção
+
+Qualquer usuário autenticado lê e sincroniza a mesma fábrica. A resposta de leitura e de sincronização traz `employees`, `products`, `orders`, `punches`, `resources`, `tombstones`, `nextOrderNum` e `nextEmployeeNum`.
+
+### `GET /api/production`
+
+Estado atual, sem registros excluídos.
+
+### `POST /api/production/sync`
+
+Envia o que mudou neste aparelho e devolve o estado mesclado. Um registro novo com `updatedAt` mais recente substitui o antigo. `deletedAt` marca a exclusão. Uma cópia antiga não recria o que já foi excluído. `nextOrderNum` e `nextEmployeeNum` ficam com o maior valor recebido.
+
+```json
+{
+  "records": [
+    {
+      "kind": "order",
+      "id": "id-op1",
+      "payload": { "numero": "000.001", "codigo": "30.2000.1000", "status": "Aberta" },
+      "updatedAt": "2026-10-12T15:00:00.000Z",
+      "deletedAt": null
+    }
+  ],
+  "nextOrderNum": 2,
+  "nextEmployeeNum": 1
+}
+```
+
+`kind` aceita `employee`, `product`, `order`, `punch` e `resource`. No máximo 5000 registros por pedido.
+
 ## Exemplo com curl
 
 ```bash

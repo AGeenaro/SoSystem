@@ -45,6 +45,7 @@ describe("API de usuários", () => {
     expect(spec.status).toBe(200);
     expect(spec.body.openapi).toBe("3.0.3");
     expect(spec.body.paths["/api/auth/login"]).toBeTruthy();
+    expect(spec.body.paths["/api/production/sync"].post).toBeTruthy();
     expect(spec.body.paths["/api/users/{id}"].delete).toBeTruthy();
     expect(spec.body.components.securitySchemes.bearerAuth.scheme).toBe("bearer");
   });
@@ -187,5 +188,78 @@ describe("API de usuários", () => {
     const blocked = await request(limited).post("/api/auth/login").send({ email: "a@fabrica.com", password: "12345678" });
     expect(blocked.status).toBe(429);
     expect(blocked.body.error.code).toBe("RATE_LIMITED");
+  });
+});
+
+describe("produção compartilhada", () => {
+  it("mescla aparelhos diferentes e não revive exclusão antiga", async () => {
+    const app = buildApp();
+    const anon = await request(app).post("/api/production/sync").send({ records: [] });
+    expect(anon.status).toBe(401);
+
+    const session = await register(app, "op@fabrica.com", "Operador");
+    const auth = { Authorization: `Bearer ${session.body.data.accessToken}` };
+
+    const phone = await request(app).post("/api/production/sync").set(auth).send({
+      records: [{
+        kind: "employee",
+        id: "emp-1",
+        payload: { nome: "Ana" },
+        updatedAt: "2026-10-12T12:00:00.000Z",
+        deletedAt: null
+      }],
+      nextOrderNum: 2,
+      nextEmployeeNum: 3
+    });
+    expect(phone.status).toBe(200);
+    expect(phone.body.data.employees).toEqual([
+      expect.objectContaining({ nome: "Ana", updatedAt: "2026-10-12T12:00:00.000Z" })
+    ]);
+
+    const notebook = await request(app).post("/api/production/sync").set(auth).send({
+      records: [{
+        kind: "resource",
+        id: "cel-1",
+        payload: { nome: "MO01" },
+        updatedAt: "2026-10-12T12:05:00.000Z",
+        deletedAt: null
+      }],
+      nextOrderNum: 1,
+      nextEmployeeNum: 1
+    });
+    expect(notebook.body.data.employees).toHaveLength(1);
+    expect(notebook.body.data.resources).toHaveLength(1);
+    expect(notebook.body.data.nextOrderNum).toBe(2);
+    expect(notebook.body.data.nextEmployeeNum).toBe(3);
+
+    const removed = await request(app).post("/api/production/sync").set(auth).send({
+      records: [{
+        kind: "employee",
+        id: "emp-1",
+        payload: {},
+        updatedAt: "2026-10-12T12:10:00.000Z",
+        deletedAt: "2026-10-12T12:10:00.000Z"
+      }]
+    });
+    expect(removed.body.data.employees).toHaveLength(0);
+    expect(removed.body.data.resources).toHaveLength(1);
+    expect(removed.body.data.tombstones).toEqual([
+      expect.objectContaining({ kind: "employee", id: "emp-1" })
+    ]);
+
+    const stale = await request(app).post("/api/production/sync").set(auth).send({
+      records: [{
+        kind: "employee",
+        id: "emp-1",
+        payload: { nome: "Ana" },
+        updatedAt: "2026-10-12T12:00:00.000Z",
+        deletedAt: null
+      }]
+    });
+    expect(stale.body.data.employees).toHaveLength(0);
+
+    const current = await request(app).get("/api/production").set(auth);
+    expect(current.status).toBe(200);
+    expect(current.body.data.resources[0].nome).toBe("MO01");
   });
 });

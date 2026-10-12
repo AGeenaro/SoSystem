@@ -3,7 +3,7 @@
 ## 1. Banco no Supabase
 
 1. Abra o [SQL Editor](https://supabase.com/dashboard/project/tmqyymurvkgjmejyhzdx/sql/new) do projeto `tmqyymurvkgjmejyhzdx`.
-2. Cole e execute `supabase/schema.sql`.
+2. Cole e execute `supabase/schema.sql`. Pode rodar de novo: o script cria o que falta, inclusive as tabelas de produção, e não apaga usuários já cadastrados.
 3. Em Project Settings → API, copie a **service_role**. Ela não vai para o Git. Também não use essa chave no frontend.
 
 URL do projeto, já usada pela API:
@@ -16,7 +16,7 @@ O arquivo `render.yaml` descreve o serviço `sosystem-api`.
 
 1. No Render, use **New → Blueprint** e aponte para este repositório GitHub, ou crie um Web Service manual com:
    - Root Directory: `api`
-   - Build: `npm install && npm run build`
+   - Build: `npm install --include=dev && npm run build`
    - Start: `npm start`
    - Health check: `/health`
 2. Preencha no painel:

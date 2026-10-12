@@ -1,5 +1,6 @@
 import "dotenv/config";
 import { createApp } from "./app.js";
+import { createSupabaseProductionRepository } from "./repositories/supabaseProductionRepository.js";
 import { createSupabaseUserRepository } from "./repositories/supabaseUserRepository.js";
 
 const port = Number(process.env.PORT || 3000);
@@ -19,6 +20,7 @@ const corsOrigin = (process.env.CORS_ORIGIN || "*")
 
 const app = createApp({
   users: createSupabaseUserRepository(supabaseUrl, supabaseKey),
+  production: createSupabaseProductionRepository(supabaseUrl, supabaseKey),
   jwtSecret,
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || "8h",
   bcryptRounds: Number(process.env.BCRYPT_ROUNDS || 10),

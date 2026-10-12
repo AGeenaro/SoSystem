@@ -7,11 +7,15 @@ import { requireAdmin, requireAuth, signToken } from "./auth.js";
 import { HttpError, asyncHandler, errorHandler } from "./http.js";
 import { openApiSpec } from "./openapi.js";
 import { buildLimiter } from "./rateLimit.js";
+import type { ProductionRecord } from "./production/merge.js";
+import type { ProductionRepository } from "./repositories/productionRepository.js";
+import { createMemoryProductionRepository } from "./repositories/memoryProductionRepository.js";
 import { toPublicUser, type UserPatch, type UserRepository, type UserRole } from "./repositories/userRepository.js";
-import { createUserSchema, idParamSchema, loginSchema, registerSchema, updateUserSchema } from "./schemas.js";
+import { createUserSchema, idParamSchema, loginSchema, productionSyncSchema, registerSchema, updateUserSchema } from "./schemas.js";
 
 export type AppOptions = {
   users: UserRepository;
+  production?: ProductionRepository;
   jwtSecret: string;
   jwtExpiresIn?: string;
   bcryptRounds?: number;
@@ -37,7 +41,8 @@ export function createApp(options: AppOptions): Express {
   app.disable("x-powered-by");
   app.use(helmet({ contentSecurityPolicy: false }));
   app.use(cors({ origin: options.corsOrigin ?? true }));
-  app.use(express.json({ limit: "1mb" }));
+  app.use(express.json({ limit: "2mb" }));
+  const production = options.production ?? createMemoryProductionRepository();
 
   app.get("/", (_req, res) => {
     res.json({
@@ -162,6 +167,27 @@ export function createApp(options: AppOptions): Express {
     const updated = await options.users.update(id, patch);
     if (!updated) throw new HttpError(404, "NOT_FOUND", "Usuário não encontrado.");
     res.json({ data: toPublicUser(updated) });
+  }));
+
+  app.get("/api/production", auth, asyncHandler(async (_req, res) => {
+    res.json({ data: await production.snapshot() });
+  }));
+
+  app.post("/api/production/sync", auth, asyncHandler(async (req, res) => {
+    const input = parseBody(productionSyncSchema, req.body);
+    const records: ProductionRecord[] = input.records.map((record) => ({
+      kind: record.kind,
+      id: record.id,
+      payload: record.payload,
+      updatedAt: record.updatedAt,
+      deletedAt: record.deletedAt ?? null
+    }));
+    const snapshot = await production.sync({
+      records,
+      nextOrderNum: input.nextOrderNum,
+      nextEmployeeNum: input.nextEmployeeNum
+    });
+    res.json({ data: snapshot });
   }));
 
   app.delete("/api/users/:id", auth, requireAdmin(), asyncHandler(async (req, res) => {
