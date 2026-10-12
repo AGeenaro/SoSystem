@@ -583,6 +583,42 @@ function renderNav(){
   }
   const version = document.getElementById('versionFoot');
   if(version) version.textContent = 'Versão ' + ((window.PRODIFY_CONFIG && window.PRODIFY_CONFIG.version) || '');
+  renderCompanyFoot();
+  if(sessionUser && !companyListLoaded){
+    companyListLoaded = true;
+    refreshCompanyFoot();
+  }
+}
+let knownCompanies = [];
+let companyListLoaded = false;
+let companyListReady = false;
+function renderCompanyFoot(){
+  const foot = document.getElementById('companyFoot');
+  if(!foot) return;
+  if(!sessionUser){
+    foot.innerHTML = '<b>Empresa:</b> —';
+    return;
+  }
+  if(!companyListReady){
+    foot.innerHTML = '<b>Empresa:</b> …';
+    return;
+  }
+  if(sessionUser.role === 'administrador_suporte'){
+    const selected = activeCompanyId();
+    const options = knownCompanies.map(function(company){
+      return `<option value="${company.id}" ${company.id===selected?'selected':''}>${escapeHtml(company.name)}</option>`;
+    }).join('');
+    foot.innerHTML = `<b>Empresa</b><select class="company-switch" onchange="selectCompany(this.value)"><option value="" ${selected?'':'selected'} disabled>Escolha a empresa</option>${options}</select>`;
+    return;
+  }
+  const mine = knownCompanies.find(function(company){ return company.id === sessionUser.companyId; });
+  foot.innerHTML = `<b>Empresa:</b> ${escapeHtml(mine ? mine.name : 'Sem empresa')}`;
+}
+async function refreshCompanyFoot(){
+  try{ knownCompanies = (await accountApi('/api/companies')).data || []; }
+  catch(e){ knownCompanies = []; }
+  companyListReady = true;
+  renderCompanyFoot();
 }
 function setTab(id, options){
   options = options || {};
@@ -2726,6 +2762,9 @@ async function deleteAccessUser(id){
 }
 async function logout(){
   localStorage.removeItem('prodfy_jwt');
+  knownCompanies = [];
+  companyListLoaded = false;
+  companyListReady = false;
   rememberSession(null);
   showLogin(false);
 }
@@ -3183,13 +3222,16 @@ async function renderCompanySettings(){
   loadOwnLogs();
 }
 async function selectCompany(id){
-  localStorage.setItem('prodfy_company', id || '');
+  if(!id || (sessionUser && sessionUser.role !== 'administrador_suporte')) return;
+  localStorage.setItem('prodfy_company', id);
   state = emptyState();
   fingerprints = {};
   pendingDeletes = [];
+  renderCompanyFoot();
   await renderCompanySettings();
   await syncNow();
   renderNav();
+  renderActiveTab();
 }
 async function createCompany(event){
   event.preventDefault();
@@ -3197,7 +3239,10 @@ async function createCompany(event){
     const created = await accountApi('/api/companies', { method:'POST', body:{ name: document.getElementById('newCompanyName').value } });
     localStorage.setItem('prodfy_company', created.data.id);
     toast('Empresa criada.', 'success');
+    await refreshCompanyFoot();
     await renderCompanySettings();
+    await syncNow();
+    renderActiveTab();
   }catch(error){ toast(error.message, 'error'); }
 }
 async function saveCompany(event, id){

@@ -75,6 +75,7 @@ body{ margin:0; font-family:var(--font); background:var(--bg); color:var(--text)
 
 .sidebar-foot{ padding:14px 20px 18px 20px; border-top:1px solid rgba(255,255,255,0.08); font-size:11px; color:var(--sidebar-text); }
 .sidebar-foot b{ color:#dfe4ee; }
+.company-switch{ margin-top:6px; background:#1a2236; color:#fff; border-color:rgba(255,255,255,0.18); }
 
 /* ===== Main ===== */
 .main{ flex:1; display:flex; flex-direction:column; min-width:0; height:100vh; overflow:hidden; }
