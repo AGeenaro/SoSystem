@@ -1395,41 +1395,171 @@ function renderCadastro(){
   renderProductCatalog();
   renderCatalogs();
 }
+let itemSearch = '';
+let itemGroupFilter = '';
+let itemFamilyFilter = '';
+let editingProductCode = '';
+function productGroup(product){
+  const family = state.families.find(function(item){ return item.id === (product && product.familiaId); });
+  const group = family && state.groups.find(function(item){ return item.id === family.grupoId; });
+  return { family: family || null, group: group || null };
+}
+function familyOptionsHtml(groupId, selectedId){
+  const families = state.families.filter(function(family){ return !groupId || family.grupoId === groupId; });
+  if(!families.length) return '<option value="">Nenhuma família neste grupo</option>';
+  return families.map(function(family){
+    return `<option value="${family.id}" ${family.id===selectedId?'selected':''}>${escapeHtml(family.nome)}</option>`;
+  }).join('');
+}
+function syncProductOnOrders(oldCode, oldDescricao, product){
+  const link = productGroup(product);
+  const grupoId = link.group ? link.group.id : '';
+  state.orders.forEach(function(order){
+    (order.itens || []).forEach(function(item){
+      if(item.codigo !== oldCode) return;
+      item.codigo = product.codigo;
+      if(item.descricao === oldDescricao) item.descricao = product.descricao;
+      item.familiaId = product.familiaId || '';
+      item.grupoId = grupoId;
+    });
+    if(order.codigo === oldCode){
+      order.codigo = product.codigo;
+      if(order.descricao === oldDescricao) order.descricao = product.descricao;
+    }
+  });
+}
 function renderProductCatalog(){
   const box = document.getElementById('productCatalog');
   if(!box) return;
-  const suggestedCode = genErpCode('PF');
-  const families = state.families.map(function(family){
-    const group = state.groups.find(function(item){ return item.id === family.grupoId; });
-    const label = group ? family.nome + ' · ' + group.nome : family.nome;
-    return `<option value="${family.id}">${escapeHtml(label)}</option>`;
+  const editing = state.products.find(function(product){ return product.codigo === editingProductCode; });
+  const editLink = productGroup(editing);
+  const editGroupId = editLink.group ? editLink.group.id : ((state.groups[0] && state.groups[0].id) || '');
+  const classificacao = editing ? (editing.classificacao || 'PF') : 'PF';
+  const suggestedCode = editing ? editing.codigo : genErpCode(classificacao);
+  const groupOptions = state.groups.map(function(group){
+    return `<option value="${group.id}" ${group.id===editGroupId?'selected':''}>${escapeHtml(group.nome)}</option>`;
+  }).join('');
+  const filterGroups = state.groups.map(function(group){
+    return `<option value="${group.id}" ${group.id===itemGroupFilter?'selected':''}>${escapeHtml(group.nome)}</option>`;
   }).join('');
   box.innerHTML = `
-    <div class="section-title" style="font-size:16px;">Cadastro Produto/Item</div>
+    <div class="section-title" style="font-size:16px;">${editing ? 'Editar Produto/Item' : 'Cadastro Produto/Item'}</div>
+    ${editing ? `<div class="section-sub">Corrigindo ${escapeHtml(editing.codigo)}.</div>` : ''}
     <form onsubmit="saveProductItem(event)">
       <div class="field-row">
-        <div class="field"><label>Nome do item</label><input id="itemDescricao" data-edit="engenharia" required maxlength="120" placeholder="Ex: Ponteira 20mm"></div>
+        <div class="field"><label>Nome do item</label><input id="itemDescricao" data-edit="engenharia" required maxlength="120" placeholder="Ex: Ponteira 20mm" value="${escapeHtml(editing ? editing.descricao : '')}"></div>
         <div class="field"><label>Código</label><input id="itemCodigo" data-edit="engenharia" data-auto="${escapeHtml(suggestedCode)}" value="${escapeHtml(suggestedCode)}" maxlength="40"></div>
       </div>
       <div class="field-row">
-        <div class="field"><label>Classificação</label>
-          <select id="itemClasse" data-edit="engenharia" onchange="refreshItemCode()"><option value="PI">PI — intermediário</option><option value="PF" selected>PF — final</option></select>
+        <div class="field"><label>Grupo</label>
+          <select id="itemGrupo" data-edit="engenharia" onchange="fillItemFamilies()">${groupOptions || '<option value="">Cadastre um grupo</option>'}</select>
         </div>
-        <div class="field"><label>Tempo (min/peça)</label><input id="itemTempo" data-edit="engenharia" type="number" min="0" step="0.1" value="1"></div>
         <div class="field"><label>Família</label>
-          <select id="itemFamilia" data-edit="engenharia"><option value="">Sem família</option>${families}</select>
+          <select id="itemFamilia" data-edit="engenharia">${familyOptionsHtml(editGroupId, editing ? editing.familiaId : '')}</select>
         </div>
       </div>
-      <button class="btn btn-primary" data-edit="engenharia" type="submit">Salvar produto</button>
+      <div class="field-row">
+        <div class="field"><label>Classificação</label>
+          <select id="itemClasse" data-edit="engenharia" onchange="refreshItemCode()"><option value="PI" ${classificacao==='PI'?'selected':''}>PI — intermediário</option><option value="PF" ${classificacao==='PF'?'selected':''}>PF — final</option></select>
+        </div>
+        <div class="field"><label>Tempo (min/peça)</label><input id="itemTempo" data-edit="engenharia" type="number" min="0" step="0.1" value="${editing ? (Number(editing.tempoFabricacaoMin) || 0) : 1}"></div>
+      </div>
+      <button class="btn btn-primary" data-edit="engenharia" type="submit">${editing ? 'Salvar alterações' : 'Salvar produto'}</button>
+      ${editing ? '<button class="btn btn-ghost" type="button" style="margin-left:8px;" onclick="cancelItemEdit()">Cancelar</button>' : ''}
     </form>
-    <div style="margin-top:12px;">${state.products.length ? state.products.map(function(product){
-      const family = state.families.find(function(item){ return item.id === product.familiaId; });
-      const idx = state.products.indexOf(product);
-      return `<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;margin-top:6px;">
-        <span><b>${escapeHtml(product.codigo)}</b> — ${escapeHtml(product.descricao || '')}${family ? ' · ' + escapeHtml(family.nome) : ''}</span>
-        <button class="icon-btn danger" data-edit="engenharia" type="button" onclick="removeProduct(${idx})" title="Excluir produto">${icon('trash',14)}</button>
-      </div>`;
-    }).join('') : '<div class="section-sub">Nenhum produto cadastrado.</div>'}</div>`;
+    <div class="filter-bar" style="margin-top:16px;">
+      <div class="field grow">
+        <label>Buscar</label>
+        <input id="itemFilterText" placeholder="Código, nome, grupo ou família" value="${escapeHtml(itemSearch)}" oninput="onItemFilterText(this.value)">
+      </div>
+      <div class="field">
+        <label>Grupo</label>
+        <select id="itemFilterGrupo" onchange="onItemFilterGroup()"><option value="">Todos</option>${filterGroups}</select>
+      </div>
+      <div class="field">
+        <label>Família</label>
+        <select id="itemFilterFamilia" onchange="onItemFilterFamily()"></select>
+      </div>
+    </div>
+    <div class="table-wrap" style="margin-top:12px;">
+      <table>
+        <thead><tr><th>Código</th><th>Item</th><th>Grupo</th><th>Família</th><th>Classe</th><th>Tempo</th><th style="width:90px;"></th></tr></thead>
+        <tbody id="itemTbody"></tbody>
+      </table>
+    </div>`;
+  fillItemFilterFamilies();
+  renderProductList();
+}
+function fillItemFamilies(){
+  const group = document.getElementById('itemGrupo');
+  const family = document.getElementById('itemFamilia');
+  if(!group || !family) return;
+  const selected = family.value;
+  family.innerHTML = familyOptionsHtml(group.value, selected);
+}
+function fillItemFilterFamilies(){
+  const family = document.getElementById('itemFilterFamilia');
+  if(!family) return;
+  const families = state.families.filter(function(item){ return !itemGroupFilter || item.grupoId === itemGroupFilter; });
+  family.innerHTML = '<option value="">Todas</option>' + families.map(function(item){
+    return `<option value="${item.id}" ${item.id===itemFamilyFilter?'selected':''}>${escapeHtml(item.nome)}</option>`;
+  }).join('');
+}
+function onItemFilterText(value){
+  itemSearch = value;
+  renderProductList();
+}
+function onItemFilterGroup(){
+  itemGroupFilter = document.getElementById('itemFilterGrupo').value;
+  const stillValid = state.families.some(function(family){ return family.id === itemFamilyFilter && (!itemGroupFilter || family.grupoId === itemGroupFilter); });
+  if(!stillValid) itemFamilyFilter = '';
+  fillItemFilterFamilies();
+  renderProductList();
+}
+function onItemFilterFamily(){
+  itemFamilyFilter = document.getElementById('itemFilterFamilia').value;
+  renderProductList();
+}
+function renderProductList(){
+  const tbody = document.getElementById('itemTbody');
+  if(!tbody) return;
+  const words = itemSearch.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const list = state.products.filter(function(product){
+    const link = productGroup(product);
+    if(itemGroupFilter && (!link.group || link.group.id !== itemGroupFilter)) return false;
+    if(itemFamilyFilter && product.familiaId !== itemFamilyFilter) return false;
+    const hay = [product.codigo, product.descricao, link.group && link.group.nome, link.family && link.family.nome, product.classificacao].join(' ').toLowerCase();
+    return words.every(function(word){ return hay.indexOf(word) >= 0; });
+  });
+  tbody.innerHTML = list.length ? list.map(function(product){
+    const link = productGroup(product);
+    return `<tr>
+      <td class="mono">${escapeHtml(product.codigo)}</td>
+      <td>${escapeHtml(product.descricao || '')}</td>
+      <td>${escapeHtml(link.group ? link.group.nome : '—')}</td>
+      <td>${escapeHtml(link.family ? link.family.nome : '—')}</td>
+      <td>${escapeHtml(product.classificacao || '')}</td>
+      <td class="mono">${Number(product.tempoFabricacaoMin) || 0}</td>
+      <td style="white-space:nowrap;">
+        <button class="icon-btn" data-edit="engenharia" type="button" data-code="${escapeHtml(product.codigo)}" onclick="editProduct(this.getAttribute('data-code'))" title="Editar item">${icon('gear',14)}</button>
+        <button class="icon-btn danger" data-edit="engenharia" type="button" data-code="${escapeHtml(product.codigo)}" onclick="removeProductByCode(this.getAttribute('data-code'))" title="Excluir produto">${icon('trash',14)}</button>
+      </td>
+    </tr>`;
+  }).join('') : `<tr class="empty-row"><td colspan="7">${state.products.length ? 'Nenhum item com esses filtros.' : 'Nenhum produto cadastrado.'}</td></tr>`;
+  applyAccess();
+}
+function editProduct(codigo){
+  if(deny('engenharia')) return;
+  editingProductCode = codigo;
+  renderProductCatalog();
+  applyAccess();
+  const name = document.getElementById('itemDescricao');
+  if(name) name.focus();
+}
+function cancelItemEdit(){
+  editingProductCode = '';
+  renderProductCatalog();
+  applyAccess();
 }
 async function saveProductItem(event){
   event.preventDefault();
@@ -1438,17 +1568,39 @@ async function saveProductItem(event){
   const classificacao = document.getElementById('itemClasse').value || 'PF';
   let codigo = document.getElementById('itemCodigo').value.trim();
   const tempo = Math.max(0, Number(document.getElementById('itemTempo').value) || 0);
+  const grupoId = document.getElementById('itemGrupo').value;
   const familiaId = document.getElementById('itemFamilia').value;
+  const family = state.families.find(function(item){ return item.id === familiaId && item.grupoId === grupoId; });
   if(!descricao){ toast('Informe o nome do produto.', 'error'); return; }
+  if(!family){ toast('Informe o grupo e a família.', 'error'); return; }
   if(!codigo) codigo = genErpCode(classificacao);
-  if(productCodeTaken(codigo)){
+  const editIndex = editingProductCode ? state.products.findIndex(function(product){ return product.codigo === editingProductCode; }) : -1;
+  if(productCodeTaken(codigo, editIndex >= 0 ? editIndex : undefined)){
     toast('Já existe um produto com este código.', 'error');
+    return;
+  }
+  if(editIndex >= 0){
+    const product = state.products[editIndex];
+    const oldCode = product.codigo;
+    const oldDescricao = product.descricao;
+    product.codigo = codigo;
+    product.descricao = descricao;
+    product.tempoFabricacaoMin = tempo || 1;
+    product.classificacao = classificacao;
+    product.familiaId = familiaId;
+    syncProductOnOrders(oldCode, oldDescricao, product);
+    editingProductCode = '';
+    await persist();
+    renderProductCatalog();
+    if(typeof renderEngenhariaTable === 'function') renderEngenhariaTable();
+    applyAccess();
+    toast('Produto atualizado.', 'success');
     return;
   }
   state.products.push({ codigo: codigo, descricao: descricao, tempoFabricacaoMin: tempo || 1, classificacao: classificacao, familiaId: familiaId });
   await persist();
-  event.target.reset();
   renderProductCatalog();
+  if(typeof renderEngenhariaTable === 'function') renderEngenhariaTable();
   applyAccess();
   toast('Produto cadastrado.', 'success');
 }
@@ -1459,7 +1611,14 @@ function refreshItemCode(){
   const current = input.value.trim();
   const auto = input.getAttribute('data-auto') || '';
   if(current && current !== auto) return;
-  const next = genErpCode(classe.value || 'PF');
+  let next = genErpCode(classe.value || 'PF');
+  if(editingProductCode){
+    const parts = current.split('.');
+    const last4 = (parts[2] && /^\d{4}$/.test(parts[2])) ? parts[2] : '';
+    const candidate = last4 ? ('30.' + (classe.value==='PI'?'2000':'3000') + '.' + last4) : '';
+    const idx = state.products.findIndex(function(product){ return product.codigo === editingProductCode; });
+    if(candidate && !productCodeTaken(candidate, idx)) next = candidate;
+  }
   input.value = next;
   input.setAttribute('data-auto', next);
 }
@@ -1499,26 +1658,38 @@ async function updateProduct(idx, field, value){
     if(productCodeTaken(value, idx)){ toast('Já existe um produto com este código.', 'error'); renderEngenhariaTable(); return; }
   }
   if(field==='tempoFabricacaoMin') value = Math.max(0, Number(value)||0);
+  const oldCode = p.codigo;
+  const oldDescricao = p.descricao;
   p[field] = value;
+  syncProductOnOrders(oldCode, oldDescricao, p);
   await persist();
+  if(typeof renderProductList === 'function') renderProductList();
   toast('Código atualizado.', 'success');
 }
 async function updateClassificacao(idx, newClass){
   if(deny('engenharia')) return;
   const p = state.products[idx]; if(!p) return;
+  const oldCode = p.codigo;
+  const oldDescricao = p.descricao;
   p.classificacao = newClass;
   const parts = (p.codigo||'').split('.');
   const last4 = (parts[2] && /^\d{4}$/.test(parts[2])) ? parts[2] : '';
   let codigo = last4 ? ('30.' + (newClass==='PI'?'2000':'3000') + '.' + last4) : genErpCode(newClass);
   if(productCodeTaken(codigo, idx)) codigo = genErpCode(newClass);
   p.codigo = codigo;
+  syncProductOnOrders(oldCode, oldDescricao, p);
   await persist();
   renderEngenhariaTable();
   toast('Classificação atualizada — código ' + p.codigo, 'success');
 }
+async function removeProductByCode(codigo){
+  const idx = state.products.findIndex(function(product){ return product.codigo === codigo; });
+  if(idx >= 0) await removeProduct(idx);
+}
 async function removeProduct(idx){
   if(deny('engenharia')) return;
   if(!confirm('Excluir este produto?')) return;
+  if(state.products[idx] && state.products[idx].codigo === editingProductCode) editingProductCode = '';
   state.products.splice(idx,1);
   await persist();
   renderEngenhariaTable();
@@ -2874,6 +3045,13 @@ window.fillOrderItems = fillOrderItems;
 window.addOrderItem = addOrderItem;
 window.removeOrderDraftItem = removeOrderDraftItem;
 window.refreshItemCode = refreshItemCode;
+window.fillItemFamilies = fillItemFamilies;
+window.onItemFilterText = onItemFilterText;
+window.onItemFilterGroup = onItemFilterGroup;
+window.onItemFilterFamily = onItemFilterFamily;
+window.editProduct = editProduct;
+window.cancelItemEdit = cancelItemEdit;
+window.removeProductByCode = removeProductByCode;
 window.saveProductItem = saveProductItem;
 window.saveGroup = saveGroup;
 window.saveFamily = saveFamily;
