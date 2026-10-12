@@ -442,9 +442,6 @@ tr.row-vacation td{ color:#7A1F24; }
 .password-field input{ flex:1; }
 .eye-btn{ border:1px solid var(--line); background:var(--surface-2); border-radius:8px; padding:8px 10px; cursor:pointer; }
 .logo-preview{ width:72px; height:72px; object-fit:contain; border:1px solid var(--line); border-radius:8px; background:#fff; }
-.catalog-card{ display:flex; gap:12px; align-items:center; }
-.catalog-card img{ width:54px; height:54px; object-fit:cover; border-radius:8px; background:var(--surface-2); }
-
 @media print{
   body *{ visibility:hidden; }
   #printArea, #printArea *{ visibility:visible; }

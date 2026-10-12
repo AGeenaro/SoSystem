@@ -281,6 +281,8 @@ function applySnapshot(data){
     return !(tombAt && tombAt >= item.updatedAt);
   });
   state = next;
+  state.groups.forEach(function(item){ delete item.imagem; });
+  state.families.forEach(function(item){ delete item.imagem; });
   rebuildFingerprints();
 }
 function scheduleSync(){
@@ -2294,16 +2296,14 @@ function renderCatalogs(){
   groups.innerHTML = `<div class="section-title" style="font-size:16px;">Grupos</div>
     <div class="section-sub">Ex.: Usinagem, Chaparia, Pintura, Almoxarifado.</div>
     <div class="field"><label>Nome</label><input id="groupName" data-edit="engenharia"></div>
-    <div class="field"><label>Imagem</label><input id="groupImage" type="file" accept="image/*" data-edit="engenharia"></div>
     <button class="btn btn-primary" data-edit="engenharia" type="button" onclick="saveGroup()">Salvar grupo</button>
     <div style="margin-top:12px;">${state.groups.map(function(group){
-      return `<button class="btn btn-sm" type="button" style="margin:4px;" onclick="showGroupItems('${group.id}')">${group.imagem ? `<img alt="" src="${group.imagem}" style="width:22px;height:22px;object-fit:cover;border-radius:4px;vertical-align:middle;"> ` : ''}${escapeHtml(group.nome)}</button>`;
+      return `<button class="btn btn-sm" type="button" style="margin:4px;" onclick="showGroupItems('${group.id}')">${escapeHtml(group.nome)}</button>`;
     }).join('') || '<div class="section-sub">Nenhum grupo.</div>'}</div>`;
   families.innerHTML = `<div class="section-title" style="font-size:16px;">Famílias</div>
     <div class="section-sub">Ex.: Ponteiras, Chapas, Tubos, Arruelas.</div>
     <div class="field"><label>Nome</label><input id="familyName" data-edit="engenharia"></div>
     <div class="field"><label>Grupo</label><select id="familyGroup" data-edit="engenharia">${state.groups.map(function(group){ return `<option value="${group.id}">${escapeHtml(group.nome)}</option>`; }).join('')}</select></div>
-    <div class="field"><label>Imagem</label><input id="familyImage" type="file" accept="image/*" data-edit="engenharia"></div>
     <button class="btn btn-primary" data-edit="engenharia" type="button" onclick="saveFamily()">Salvar família</button>
     <div style="margin-top:12px;">${state.families.map(function(family){
       return `<button class="btn btn-sm" type="button" style="margin:4px;" onclick="showFamilyModels('${family.id}')">${escapeHtml(family.nome)}</button>`;
@@ -2313,25 +2313,21 @@ async function saveGroup(){
   if(deny('engenharia')) return;
   const nome = document.getElementById('groupName').value.trim();
   if(!nome){ toast('Informe o nome do grupo.', 'error'); return; }
-  readImageFile(document.getElementById('groupImage'), async function(imagem){
-    state.groups.push({ id: uid(), nome: nome, imagem: imagem });
-    await persist();
-    renderCatalogs();
-    applyAccess();
-  });
+  state.groups.push({ id: uid(), nome: nome });
+  await persist();
+  renderCatalogs();
+  applyAccess();
 }
 async function saveFamily(){
   if(deny('engenharia')) return;
   const nome = document.getElementById('familyName').value.trim();
   const grupoId = document.getElementById('familyGroup').value;
   if(!nome || !grupoId){ toast('Informe a família e o grupo.', 'error'); return; }
-  readImageFile(document.getElementById('familyImage'), async function(imagem){
-    state.families.push({ id: uid(), nome: nome, grupoId: grupoId, imagem: imagem });
-    await persist();
-    renderCatalogs();
-    renderEngenhariaTable();
-    applyAccess();
-  });
+  state.families.push({ id: uid(), nome: nome, grupoId: grupoId });
+  await persist();
+  renderCatalogs();
+  renderEngenhariaTable();
+  applyAccess();
 }
 function showGroupItems(groupId){
   const group = state.groups.find(function(item){ return item.id === groupId; });

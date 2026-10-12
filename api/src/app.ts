@@ -192,8 +192,10 @@ export function createApp(options: AppOptions): Express {
 
   function prepareRecords(records: ProductionRecord[]): ProductionRecord[] {
     return records.map((record) => {
-      if ((record.kind === "group" || record.kind === "family") && typeof record.payload.imagem === "string" && record.payload.imagem.length > 300_000) {
-        throw new HttpError(422, "IMAGE_TOO_LARGE", "A imagem do cadastro passou do tamanho permitido.");
+      if (record.kind === "group" || record.kind === "family") {
+        const payload = { ...record.payload };
+        delete payload.imagem;
+        return { ...record, payload };
       }
       if (record.kind !== "order") return record;
       try {
