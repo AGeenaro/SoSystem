@@ -16,7 +16,7 @@ describe("frontend separado", () => {
     expect(js).toContain("/monitoramento");
     expect(js).toContain("/ordens_producao");
     expect(js).toContain("administrador_suporte");
-    expect(html).toContain("serviceWorker.register('sw.js')");
+    expect(html).toMatch(/serviceWorker\.register\('sw\.js(?:\?[^']*)?'\)/);
     expect(existsSync(path.join(web, "sw.js"))).toBe(true);
     expect(html).not.toContain("<style>");
     expect(css).toContain("--blue");
