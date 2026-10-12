@@ -77,7 +77,8 @@ const PRODUCTION_COLLECTIONS = [
   ['punch', 'punches', item => item.id],
   ['resource', 'resources', item => item.id],
   ['group', 'groups', item => item.id],
-  ['family', 'families', item => item.id]
+  ['family', 'families', item => item.id],
+  ['equipment', 'equipments', item => item.id]
 ];
 let fingerprints = {};
 let pendingDeletes = [];
@@ -163,7 +164,7 @@ function employeeMiniChipHTML(id){
   return `<span class="employee-mini-chip">${employeeAvatarHTML(e,'inline-avatar-small')}<span>${e.nome} ${e.sobrenome}</span></span>`;
 }
 function emptyState(){
-  return { employees:[], products:[], orders:[], punches:[], resources:[], groups:[], families:[], nextOrderNum:1, nextEmployeeNum:1 };
+  return { employees:[], products:[], orders:[], punches:[], resources:[], groups:[], families:[], equipments:[], nextOrderNum:1, nextEmployeeNum:1 };
 }
 function activeCompanyId(){
   if(sessionUser && sessionUser.companyId) return sessionUser.companyId;
@@ -683,6 +684,18 @@ function resourceById(id){ return state.resources.find(r=>r.id===id); }
 function orderProducedQty(orderId){ return state.punches.filter(p=>p.ordemId===orderId).reduce((s,p)=>s+(Number(p.quantidadeProduzida)||0), 0); }
 function orderProgress(order){
   const items = orderItems(order);
+  if(orderUsesRoute(order)){
+    const totals = items.reduce(function(sum, item){
+      const qty = itemPlanned(item);
+      let planned = qty;
+      let done = Math.min(itemProduced(item), qty);
+      if(item.pintura){ planned += qty; done += Math.min(itemPainted(item), qty); }
+      if(item.montagem){ planned += qty; done += Math.min(itemAssembled(item), qty); }
+      return { planned: sum.planned + planned, done: sum.done + done };
+    }, { planned: 0, done: 0 });
+    const pct = totals.planned > 0 ? Math.round((totals.done / totals.planned) * 1000) / 10 : 0;
+    return { planned: totals.planned, produced: totals.done, pct: pct };
+  }
   const planned = items.reduce(function(sum, item){ return sum + (Number(item.quantidade) || 0); }, 0) || Number(order.quantidadePlanejada) || 0;
   const marked = items.reduce(function(sum, item){ return sum + (Number(item.produzida) || 0); }, 0);
   const produced = Math.max(orderProducedQty(order.id), marked);
@@ -743,8 +756,75 @@ function groupProgress(order){
     return { name: name, pct: pct, quantidade: row.quantidade, produzida: row.produzida };
   });
 }
+function itemPlanned(item){ return Number(item && item.quantidade) || 0; }
+function itemProduced(item){ return Number(item && item.produzida) || 0; }
+function itemPainted(item){ return Number(item && item.pintada) || 0; }
+function itemAssembled(item){ return Number(item && item.montada) || 0; }
+function orderUsesRoute(order){
+  return !!(order && Array.isArray(order.equipamentos) && order.equipamentos.length);
+}
+function equipmentFabricated(item, order){
+  if(!order || !item.equipamentoId) return itemProduced(item) >= itemPlanned(item);
+  return orderItems(order).filter(function(other){ return other.equipamentoId === item.equipamentoId; }).every(function(other){
+    return itemProduced(other) >= itemPlanned(other);
+  });
+}
+function itemOpenStage(item, order){
+  const qty = itemPlanned(item);
+  if(qty <= 0) return null;
+  if(itemProduced(item) < qty){
+    const group = state.groups.find(function(entry){ return entry.id === item.grupoId; });
+    return { key: 'fabricacao', nome: group ? group.nome : 'Fabricação', falta: qty - itemProduced(item) };
+  }
+  if(!equipmentFabricated(item, order)) return null;
+  if(item.pintura && itemPainted(item) < qty) return { key: 'pintura', nome: 'Pintura', falta: qty - itemPainted(item) };
+  if(item.montagem && itemAssembled(item) < qty) return { key: 'montagem', nome: 'Montagem', falta: qty - itemAssembled(item) };
+  return null;
+}
+function applyItemQty(item, qty, order){
+  let left = Math.max(0, Number(qty) || 0);
+  while(left > 0){
+    const stage = itemOpenStage(item, order);
+    if(!stage){
+      item.produzida = itemProduced(item) + left;
+      return;
+    }
+    const take = Math.min(left, stage.falta);
+    if(take <= 0) return;
+    if(stage.key === 'fabricacao') item.produzida = itemProduced(item) + take;
+    else if(stage.key === 'pintura') item.pintada = itemPainted(item) + take;
+    else item.montada = itemAssembled(item) + take;
+    left -= take;
+  }
+}
+function routeStatus(order){
+  const items = orderItems(order);
+  if(!items.length) return 'Não iniciado';
+  const any = items.some(function(item){ return itemProduced(item) > 0 || itemPainted(item) > 0 || itemAssembled(item) > 0; });
+  const fabDone = items.every(function(item){ return itemProduced(item) >= itemPlanned(item); });
+  const paintLeft = items.some(function(item){ return item.pintura && itemPainted(item) < itemPlanned(item); });
+  const assemblyLeft = items.some(function(item){ return item.montagem && itemAssembled(item) < itemPlanned(item); });
+  if(fabDone && !paintLeft && !assemblyLeft && any) return 'Encaminhado Expedição';
+  if(fabDone && paintLeft) return 'Finalizado/Em Pintura';
+  if(fabDone && !paintLeft && assemblyLeft) return 'Finalizado/Em montagem';
+  return 'Não iniciado';
+}
+function routeHint(order){
+  if(!orderUsesRoute(order)) return '';
+  const status = routeStatus(order);
+  if(status === 'Encaminhado Expedição') return '100% fabricado, pintado e montado';
+  if(status === 'Finalizado/Em Pintura') return 'Fabricação pronta · pintura em andamento';
+  if(status === 'Finalizado/Em montagem') return 'Pintura pronta · montagem em andamento';
+  const names = Array.from(new Set(orderItems(order).map(function(item){ return itemOpenStage(item, order); }).filter(Boolean).map(function(stage){ return stage.nome; })));
+  return names.length ? ('Nos setores: ' + names.join(', ')) : '';
+}
 function recalcOrderStatus(order){
-  order.status = normalizeOrderStatus(order.status);
+  const current = normalizeOrderStatus(order.status);
+  if(!orderUsesRoute(order) || current === 'Bloqueado' || current === 'Iniciado/Parado'){
+    order.status = current;
+    return;
+  }
+  order.status = routeStatus(order);
 }
 function recalcAllOrderStatuses(){ state.orders.forEach(recalcOrderStatus); }
 function isOnVacation(emp){
@@ -1286,7 +1366,7 @@ function renderOrdens(){
   const el = document.getElementById('panel-ordens');
   el.innerHTML = `
     <div class="section-title">${icon('clipboard',19)} Ordens de Produção</div>
-    <div class="section-sub">O pedido reúne grupo, família e itens. A porcentagem produzida aparece nesta lista e no Acompanhamento.</div>
+    <div class="section-sub">O pedido vincula equipamentos já cadastrados. Cada peça vai para o setor do grupo. Pintura e montagem só abrem no fim, e apenas nas peças marcadas. Com 100%, o pedido vai para expedição.</div>
     <div class="toolbar">
       <div class="search-box"><span class="search-ic">${icon('search',15)}</span><input placeholder="Buscar por OP ou código..." oninput="ordensSearch=this.value; renderOrdensTable();"></div>
       <button class="btn btn-primary" data-edit="ordens" onclick="openOrderModal()">${icon('plus',14)} Nova Ordem de Produção</button>
@@ -1312,14 +1392,23 @@ function renderOrdensTable(){
       const group = state.groups.find(function(entry){ return entry.id === item.grupoId; });
       return group ? group.nome : '';
     }).filter(Boolean)));
+    const machines = (o.equipamentos || []).map(function(item){
+      const times = Number(item.quantidade) || 1;
+      return item.nome + (times > 1 ? ' × ' + times : '');
+    });
+    const hint = routeHint(o);
     return `<tr>
-      <td style="color:var(--blue); font-weight:700;">${orderLabel(o)}</td>
+      <td>
+        <div style="color:var(--blue); font-weight:700;">${orderLabel(o)}</div>
+        <div style="font-size:11px; color:var(--text-muted);">${escapeHtml(machines.join(', ') || o.descricao || '')}</div>
+      </td>
       <td>${escapeHtml(groupNames.join(', ') || '—')}</td>
       <td>${items.length}</td>
       <td class="mono">${progress.planned}</td>
       <td style="min-width:120px;">
         <div class="progress-track" style="margin-bottom:4px;"><div class="progress-fill" style="width:${Math.min(progress.pct, 100)}%;"></div></div>
         <div style="font-size:10.5px; color:var(--text-faint);">${progress.pct}% · ${progress.produced}/${progress.planned}</div>
+        ${hint ? `<div style="font-size:10.5px; color:var(--text-muted); margin-top:2px;">${escapeHtml(hint)}</div>` : ''}
       </td>
       <td>${orderStatusSelect(o)}</td>
       <td style="white-space:nowrap;">
@@ -1329,93 +1418,118 @@ function renderOrdensTable(){
     </tr>`;
   }).join('') : `<tr class="empty-row"><td colspan="7">Nenhum pedido encontrado. Clique em "Nova Ordem de Produção" para começar.</td></tr>`;
 }
-let orderDraftItems = [];
+let orderDraftEquipments = [];
+function equipmentById(id){ return state.equipments.find(function(item){ return item.id === id; }); }
+function explodeEquipment(equipment, times){
+  const count = Math.max(1, Number(times) || 1);
+  return (equipment.itens || []).map(function(part){
+    const product = productByCode(part.codigo);
+    const link = productGroup(product || { familiaId: '' });
+    const each = Math.max(0, Number(part.quantidade) || 0);
+    return {
+      id: uid(),
+      codigo: part.codigo,
+      descricao: product ? product.descricao : part.codigo,
+      grupoId: link.group ? link.group.id : '',
+      familiaId: product ? (product.familiaId || '') : '',
+      quantidade: each * count,
+      produzida: 0,
+      pintada: 0,
+      montada: 0,
+      pintura: !!(product && product.pintura),
+      montagem: !!(product && product.montagem),
+      equipamentoId: equipment.id,
+      equipamentoNome: equipment.nome,
+      tempo: Number(product && product.tempoFabricacaoMin) || 0
+    };
+  }).filter(function(item){ return item.quantidade > 0; });
+}
 function openOrderModal(){
   if(deny('ordens')) return;
-  if(!state.groups.length || !state.families.length || !state.products.length){
-    toast('Cadastre grupo, família e produto antes de abrir o pedido.', 'error');
+  if(!state.equipments.length){
+    toast('Cadastre um equipamento antes de abrir o pedido.', 'error');
     return;
   }
-  orderDraftItems = [];
-  document.getElementById('ordGrupo').innerHTML = state.groups.map(function(group){
-    return `<option value="${group.id}">${escapeHtml(group.nome)}</option>`;
+  orderDraftEquipments = [];
+  const select = document.getElementById('ordEquipamento');
+  select.innerHTML = state.equipments.map(function(item){
+    return `<option value="${item.id}">${escapeHtml(item.nome)}</option>`;
   }).join('');
   document.getElementById('ordQtd').value = 1;
   const geradoSel = document.getElementById('ordGeradoPor');
   geradoSel.innerHTML = state.employees.length ? state.employees.map(e=>`<option value="${e.nome} ${e.sobrenome}">${e.nome} ${e.sobrenome}</option>`).join('') : '<option value="">Nenhum funcionário cadastrado</option>';
-  fillOrderFamilies();
+  renderOrderPreview();
   renderOrderDraft();
   openModal('modalOrder');
 }
-function fillOrderFamilies(){
-  const groupId = document.getElementById('ordGrupo').value;
-  const families = state.families.filter(function(family){ return family.grupoId === groupId; });
-  document.getElementById('ordFamilia').innerHTML = families.length
-    ? families.map(function(family){ return `<option value="${family.id}">${escapeHtml(family.nome)}</option>`; }).join('')
-    : '<option value="">Nenhuma família neste grupo</option>';
-  fillOrderItems();
-}
-function fillOrderItems(){
-  const familyId = document.getElementById('ordFamilia').value;
-  const products = state.products.filter(function(product){ return product.familiaId === familyId; });
-  document.getElementById('ordProduto').innerHTML = products.length
-    ? products.map(function(product){ return `<option value="${product.codigo}">${escapeHtml(product.codigo)} — ${escapeHtml(product.descricao)}</option>`; }).join('')
-    : '<option value="">Nenhum item nesta família</option>';
-  renderOrderPreview();
-}
 function renderOrderPreview(){
-  const codigo = document.getElementById('ordProduto') && document.getElementById('ordProduto').value;
+  const equipment = equipmentById(document.getElementById('ordEquipamento') && document.getElementById('ordEquipamento').value);
   const qtd = Number(document.getElementById('ordQtd') && document.getElementById('ordQtd').value) || 0;
-  const prod = productByCode(codigo);
   const prev = document.getElementById('ordPreview');
   if(!prev) return;
-  if(!prod){ prev.innerHTML = 'Escolha um item da família.'; return; }
-  const total = (Number(prod.tempoFabricacaoMin) || 0) * qtd;
-  prev.innerHTML = `<div><b>${escapeHtml(prod.descricao)}</b></div>
-    <div style="margin-top:6px; color:var(--text-muted);">Tempo deste item: ${total.toFixed(0)} min</div>`;
+  if(!equipment){ prev.innerHTML = 'Escolha um equipamento cadastrado.'; return; }
+  const lines = explodeEquipment(equipment, qtd).map(function(item){
+    const group = state.groups.find(function(entry){ return entry.id === item.grupoId; });
+    const flags = [item.pintura ? 'pintura no fim' : '', item.montagem ? 'montagem no fim' : ''].filter(Boolean).join(' · ');
+    return `<div>${escapeHtml(group ? group.nome : 'Sem setor')} · ${escapeHtml(item.descricao)} · ${item.quantidade}${flags ? ' · ' + escapeHtml(flags) : ''}</div>`;
+  }).join('');
+  prev.innerHTML = `<div><b>${escapeHtml(equipment.nome)}</b> × ${qtd || 0}</div><div style="margin-top:6px;">${lines || 'Este equipamento ainda não tem peças.'}</div>`;
 }
-function addOrderItem(){
-  const codigo = document.getElementById('ordProduto').value;
+function addOrderEquipment(){
+  const equipment = equipmentById(document.getElementById('ordEquipamento').value);
   const qtd = Number(document.getElementById('ordQtd').value);
-  const prod = productByCode(codigo);
-  const familia = state.families.find(function(item){ return item.id === (prod && prod.familiaId); });
-  if(!prod || !familia || !qtd || qtd <= 0){ toast('Escolha grupo, família, item e quantidade.', 'error'); return; }
-  const existing = orderDraftItems.find(function(item){ return item.codigo === prod.codigo; });
+  if(!equipment || !qtd || qtd <= 0){ toast('Escolha o equipamento e a quantidade.', 'error'); return; }
+  if(!(equipment.itens || []).length){ toast('Este equipamento não tem peças cadastradas.', 'error'); return; }
+  const existing = orderDraftEquipments.find(function(item){ return item.equipmentId === equipment.id; });
   if(existing) existing.quantidade += qtd;
-  else orderDraftItems.push({ id: uid(), codigo: prod.codigo, descricao: prod.descricao, grupoId: familia.grupoId, familiaId: familia.id, quantidade: qtd, produzida: 0, tempo: Number(prod.tempoFabricacaoMin) || 0 });
+  else orderDraftEquipments.push({ id: uid(), equipmentId: equipment.id, nome: equipment.nome, quantidade: qtd });
   renderOrderDraft();
 }
 function removeOrderDraftItem(id){
-  orderDraftItems = orderDraftItems.filter(function(item){ return item.id !== id; });
+  orderDraftEquipments = orderDraftEquipments.filter(function(item){ return item.id !== id; });
   renderOrderDraft();
 }
 function renderOrderDraft(){
   const box = document.getElementById('ordItemList');
   if(!box) return;
-  box.innerHTML = orderDraftItems.length ? orderDraftItems.map(function(item){
-    const group = state.groups.find(function(entry){ return entry.id === item.grupoId; });
-    const family = state.families.find(function(entry){ return entry.id === item.familiaId; });
-    return `<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;margin-top:6px;">
-      <span>${escapeHtml(group ? group.nome : '—')} · ${escapeHtml(family ? family.nome : '—')} · <b>${escapeHtml(item.codigo)}</b> · ${item.quantidade}</span>
-      <button class="icon-btn danger" type="button" onclick="removeOrderDraftItem('${item.id}')" title="Tirar item">${icon('trash',14)}</button>
+  box.innerHTML = orderDraftEquipments.length ? orderDraftEquipments.map(function(item){
+    const equipment = equipmentById(item.equipmentId);
+    const parts = equipment ? explodeEquipment(equipment, item.quantidade) : [];
+    const detail = parts.map(function(part){
+      const group = state.groups.find(function(entry){ return entry.id === part.grupoId; });
+      return `<div style="font-size:12px; color:var(--text-muted);">${escapeHtml(group ? group.nome : 'Sem setor')} · ${escapeHtml(part.descricao)} · ${part.quantidade}</div>`;
+    }).join('');
+    return `<div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;margin-top:8px;">
+      <div><b>${escapeHtml(item.nome)}</b> × ${item.quantidade}${detail}</div>
+      <button class="icon-btn danger" type="button" onclick="removeOrderDraftItem('${item.id}')" title="Tirar equipamento">${icon('trash',14)}</button>
     </div>`;
-  }).join('') : '<div class="section-sub">Nenhum item no pedido.</div>';
+  }).join('') : '<div class="section-sub">Nenhum equipamento vinculado.</div>';
 }
 async function saveOrder(shouldPrint){
   if(deny('ordens')) return;
   const geradoPor = document.getElementById('ordGeradoPor').value || 'Não informado';
-  if(!orderDraftItems.length){ toast('Adicione ao menos um item ao pedido.', 'error'); return; }
+  if(!orderDraftEquipments.length){ toast('Vincule ao menos um equipamento ao pedido.', 'error'); return; }
   const numero = formatOrderNumber(state.nextOrderNum);
   const opId = uid();
   state.nextOrderNum++;
-  const itens = orderDraftItems.map(function(item){
-    return { id: item.id, codigo: item.codigo, descricao: item.descricao, grupoId: item.grupoId, familiaId: item.familiaId, quantidade: item.quantidade, produzida: 0 };
+  const equipamentos = orderDraftEquipments.map(function(item){
+    return { id: item.equipmentId, nome: item.nome, quantidade: item.quantidade };
   });
+  const itens = [];
+  let tempo = 0;
+  orderDraftEquipments.forEach(function(item){
+    const equipment = equipmentById(item.equipmentId);
+    if(!equipment) return;
+    explodeEquipment(equipment, item.quantidade).forEach(function(part){
+      tempo += part.tempo * part.quantidade;
+      itens.push(part);
+    });
+  });
+  if(!itens.length){ toast('Os equipamentos vinculados não têm peças.', 'error'); state.nextOrderNum--; return; }
   const quantidade = itens.reduce(function(sum, item){ return sum + item.quantidade; }, 0);
-  const tempo = orderDraftItems.reduce(function(sum, item){ return sum + (item.tempo * item.quantidade); }, 0);
-  const first = itens[0];
-  state.orders.push({ id: opId, numero, codigo: first.codigo, descricao: itens.length > 1 ? itens.length + ' itens' : first.descricao, quantidadePlanejada: quantidade, tempoEstimadoTotalMin: tempo, status:'Não iniciado', setor:'', motivo:'', criadoEm: nowISO(), geradoPor, itens: itens });
-  orderDraftItems = [];
+  const nomes = equipamentos.map(function(item){ return item.nome + (item.quantidade > 1 ? ' × ' + item.quantidade : ''); });
+  state.orders.push({ id: opId, numero, codigo: itens[0].codigo, descricao: nomes.join(', '), quantidadePlanejada: quantidade, tempoEstimadoTotalMin: tempo, status:'Não iniciado', setor:'', motivo:'', criadoEm: nowISO(), geradoPor, equipamentos: equipamentos, itens: itens });
+  orderDraftEquipments = [];
   await persist();
   closeModal('modalOrder');
   toast('Ordem ' + numero + ' gerada com sucesso.', 'success');
@@ -1432,11 +1546,17 @@ function showOrderInfo(orderId){
       <div style="font-size:20px; font-weight:800;">${orderLabel(order)}</div>
       <div style="color:var(--text-muted); font-size:13px;">${order.codigo} — ${order.descricao}</div>
       <div style="margin-top:8px;">${orderStatusBadge(order.status)} ${order.motivo ? `<span class="section-sub">${escapeHtml(order.motivo)}</span>` : ''}</div>
-      <div style="margin-top:10px; font-weight:700;">Produzido: ${orderProgress(order).pct}%</div>
+      <div style="margin-top:10px; font-weight:700;">Andamento: ${orderProgress(order).pct}%</div>
+      ${routeHint(order) ? `<div style="margin-top:4px; color:var(--text-muted);">${escapeHtml(routeHint(order))}</div>` : ''}
       <div style="margin-top:6px;">${orderItems(order).map(function(item){
         const group = state.groups.find(function(entry){ return entry.id === item.grupoId; });
         const family = state.families.find(function(entry){ return entry.id === item.familiaId; });
-        return `<div>${escapeHtml(group ? group.nome : 'Sem grupo')} · ${escapeHtml(family ? family.nome : 'Sem família')} · ${escapeHtml(item.descricao || item.codigo || '')} · ${Number(item.quantidade) || 0} peças</div>`;
+        const stage = itemOpenStage(item, order);
+        const waitingEquipment = !stage && itemProduced(item) >= itemPlanned(item) && (item.pintura || item.montagem) && !equipmentFabricated(item, order);
+        const flags = [item.pintura ? ('pintura ' + itemPainted(item) + '/' + itemPlanned(item)) : '', item.montagem ? ('montagem ' + itemAssembled(item) + '/' + itemPlanned(item)) : ''].filter(Boolean).join(' · ');
+        const machine = item.equipamentoNome ? item.equipamentoNome + ' · ' : '';
+        const where = stage ? (' · agora: ' + stage.nome) : (waitingEquipment ? ' · aguarda o equipamento' : ' · pronto');
+        return `<div>${escapeHtml(machine)}${escapeHtml(group ? group.nome : 'Sem grupo')} · ${escapeHtml(family ? family.nome : 'Sem família')} · ${escapeHtml(item.descricao || item.codigo || '')} · fabricado ${itemProduced(item)}/${itemPlanned(item)}${flags ? ' · ' + escapeHtml(flags) : ''}${escapeHtml(where)}</div>`;
       }).join('')}</div>
     </div>
     <div class="card" style="box-shadow:none; background:var(--surface-2); margin-bottom:14px;">
@@ -1493,6 +1613,14 @@ function printOrder(orderId){
         <div><span class="print-label">Data de Geração</span><span class="print-value">${fmtDateTime(order.criadoEm)}</span></div>
         <div><span class="print-label">Data de Impressão</span><span class="print-value">${fmtDateTime(nowISO())}</span></div>
       </div>
+      <div class="print-section-title">Composição do pedido</div>
+      <table class="print-table">
+        <thead><tr><th>Equipamento</th><th>Setor</th><th>Peça</th><th>Qtd.</th><th>Pintura</th><th>Montagem</th></tr></thead>
+        <tbody>${orderItems(order).map(function(item){
+          const group = state.groups.find(function(entry){ return entry.id === item.grupoId; });
+          return `<tr><td>${escapeHtml(item.equipamentoNome || '—')}</td><td>${escapeHtml(group ? group.nome : '—')}</td><td>${escapeHtml(item.descricao || item.codigo || '')}</td><td>${itemPlanned(item)}</td><td>${item.pintura ? 'Sim' : 'Não'}</td><td>${item.montagem ? 'Sim' : 'Não'}</td></tr>`;
+        }).join('')}</tbody>
+      </table>
       <div class="print-section-title">Apontamento de Produção — preenchimento manual</div>
       <table class="print-table">
         <thead><tr><th>Funcionário</th><th>Recurso</th><th>Início</th><th>Fim</th><th>Qtd. Produzida</th><th>Qtd. Refugada</th></tr></thead>
@@ -1533,16 +1661,18 @@ function renderCadastro(){
   if(!el) return;
   el.innerHTML = `
     <div class="section-title">${icon('plus',19)} Cadastro</div>
-    <div class="section-sub">Produtos, grupos e famílias usados nas ordens de produção.</div>
+    <div class="section-sub">Itens, grupos, famílias e equipamentos. O grupo é o setor da peça.</div>
     <div class="card" id="productCatalog" style="margin-bottom:14px;"></div>
     <div class="grid grid-2">
       <div class="card" id="groupCatalog"></div>
       <div class="card" id="familyCatalog"></div>
     </div>
+    <div class="card" id="equipmentCatalog" style="margin-top:14px;"></div>
     <div class="card" id="groupItems" style="margin-top:14px;"></div>
   `;
   renderProductCatalog();
   renderCatalogs();
+  renderEquipmentCatalog();
 }
 let itemSearch = '';
 let itemGroupFilter = '';
@@ -1570,11 +1700,18 @@ function syncProductOnOrders(oldCode, oldDescricao, product){
       if(item.descricao === oldDescricao) item.descricao = product.descricao;
       item.familiaId = product.familiaId || '';
       item.grupoId = grupoId;
+      item.pintura = !!product.pintura;
+      item.montagem = !!product.montagem;
     });
     if(order.codigo === oldCode){
       order.codigo = product.codigo;
       if(order.descricao === oldDescricao) order.descricao = product.descricao;
     }
+  });
+  state.equipments.forEach(function(equipment){
+    (equipment.itens || []).forEach(function(part){
+      if(part.codigo === oldCode) part.codigo = product.codigo;
+    });
   });
 }
 function renderProductCatalog(){
@@ -1612,6 +1749,10 @@ function renderProductCatalog(){
           <select id="itemClasse" data-edit="engenharia" onchange="refreshItemCode()"><option value="PI" ${classificacao==='PI'?'selected':''}>PI — intermediário</option><option value="PF" ${classificacao==='PF'?'selected':''}>PF — final</option></select>
         </div>
         <div class="field"><label>Tempo (min/peça)</label><input id="itemTempo" data-edit="engenharia" type="number" min="0" step="0.1" value="${editing ? (Number(editing.tempoFabricacaoMin) || 0) : 1}"></div>
+      </div>
+      <div class="field-row">
+        <label style="display:flex;align-items:center;gap:8px;"><input id="itemPintura" data-edit="engenharia" type="checkbox" ${editing && editing.pintura ? 'checked' : ''}> Vai para pintura no fim</label>
+        <label style="display:flex;align-items:center;gap:8px;"><input id="itemMontagem" data-edit="engenharia" type="checkbox" ${editing && editing.montagem ? 'checked' : ''}> Vai para montagem no fim</label>
       </div>
       <button class="btn btn-primary" data-edit="engenharia" type="submit">${editing ? 'Salvar alterações' : 'Salvar produto'}</button>
       ${editing ? '<button class="btn btn-ghost" type="button" style="margin-left:8px;" onclick="cancelItemEdit()">Cancelar</button>' : ''}
@@ -1684,7 +1825,7 @@ function renderProductList(){
     const link = productGroup(product);
     return `<tr>
       <td class="mono">${escapeHtml(product.codigo)}</td>
-      <td>${escapeHtml(product.descricao || '')}</td>
+      <td>${escapeHtml(product.descricao || '')}${[product.pintura ? 'Pintura' : '', product.montagem ? 'Montagem' : ''].filter(Boolean).length ? `<div style="font-size:11px;color:var(--text-faint);">${[product.pintura ? 'Pintura' : '', product.montagem ? 'Montagem' : ''].filter(Boolean).join(' · ')}</div>` : ''}</td>
       <td>${escapeHtml(link.group ? link.group.nome : '—')}</td>
       <td>${escapeHtml(link.family ? link.family.nome : '—')}</td>
       <td>${escapeHtml(product.classificacao || '')}</td>
@@ -1719,6 +1860,8 @@ async function saveProductItem(event){
   const tempo = Math.max(0, Number(document.getElementById('itemTempo').value) || 0);
   const grupoId = document.getElementById('itemGrupo').value;
   const familiaId = document.getElementById('itemFamilia').value;
+  const pintura = !!document.getElementById('itemPintura').checked;
+  const montagem = !!document.getElementById('itemMontagem').checked;
   const family = state.families.find(function(item){ return item.id === familiaId && item.grupoId === grupoId; });
   if(!descricao){ toast('Informe o nome do produto.', 'error'); return; }
   if(!family){ toast('Informe o grupo e a família.', 'error'); return; }
@@ -1737,6 +1880,8 @@ async function saveProductItem(event){
     product.tempoFabricacaoMin = tempo || 1;
     product.classificacao = classificacao;
     product.familiaId = familiaId;
+    product.pintura = pintura;
+    product.montagem = montagem;
     syncProductOnOrders(oldCode, oldDescricao, product);
     editingProductCode = '';
     await persist();
@@ -1746,7 +1891,7 @@ async function saveProductItem(event){
     toast('Produto atualizado.', 'success');
     return;
   }
-  state.products.push({ codigo: codigo, descricao: descricao, tempoFabricacaoMin: tempo || 1, classificacao: classificacao, familiaId: familiaId });
+  state.products.push({ codigo: codigo, descricao: descricao, tempoFabricacaoMin: tempo || 1, classificacao: classificacao, familiaId: familiaId, pintura: pintura, montagem: montagem });
   await persist();
   renderProductCatalog();
   if(typeof renderEngenhariaTable === 'function') renderEngenhariaTable();
@@ -2192,7 +2337,7 @@ async function saveQuickMachine(){
 }
 function refreshApontamentoDatalist(){
   const ord = document.getElementById('ordensList');
-  if(ord){ ord.innerHTML = state.orders.filter(o=>o.status!=='Concluída').map(o=>`<option value="${orderLabel(o)}">${orderLabel(o)} — ${o.codigo} — ${o.descricao}</option>`).join(''); }
+  if(ord){ ord.innerHTML = state.orders.filter(function(order){ return !orderIsClosed(order); }).map(o=>`<option value="${orderLabel(o)}">${orderLabel(o)} — ${o.codigo} — ${o.descricao}</option>`).join(''); }
 }
 function stepQty(inputId, delta){
   const el = document.getElementById(inputId);
@@ -2200,7 +2345,18 @@ function stepQty(inputId, delta){
   el.value = Math.max(0, (Number(el.value)||0) + delta);
 }
 function punchQtyBlockHTML(p){
+  const order = orderById(p.ordemId);
+  const options = order ? orderItems(order).map(function(item){
+    const stage = itemOpenStage(item, order);
+    if(!stage) return '';
+    const machine = item.equipamentoNome ? item.equipamentoNome + ' · ' : '';
+    return `<option value="${item.id}">${escapeHtml(machine + (item.descricao || item.codigo) + ' · ' + stage.nome + ' · falta ' + stage.falta)}</option>`;
+  }).join('') : '';
   return `
+    <div class="field" style="margin-bottom:10px;">
+      <label>Peça deste apontamento</label>
+      <select id="qtd-item-${p.id}">${options || '<option value="">Nenhuma peça pendente</option>'}</select>
+    </div>
     <div class="ap-qty-grid">
       <div>
         <div class="ap-qty-label">${icon('checkCircle',15)} Peças Produzidas</div>
@@ -2259,7 +2415,20 @@ async function endPunch(punchId){
   p.fim = nowISO();
   p.status = 'Fechado';
   const order = orderById(p.ordemId);
-  if(order) recalcOrderStatus(order);
+  if(order){
+    const chosen = document.getElementById('qtd-item-'+punchId);
+    const item = chosen && (order.itens || []).find(function(entry){ return entry.id === chosen.value; });
+    if(prod > 0 && orderUsesRoute(order) && !item){
+      toast('Escolha a peça deste apontamento.', 'error');
+      p.fim = null;
+      p.status = 'Aberto';
+      p.quantidadeProduzida = 0;
+      p.quantidadeRefugada = 0;
+      return;
+    }
+    if(item && prod > 0) applyItemQty(item, prod, order);
+    recalcOrderStatus(order);
+  }
   await persist();
   beepEnd();
   toast('Apontamento encerrado — ' + punchOrderLabel(p), 'success');
@@ -3080,7 +3249,7 @@ function renderCatalogs(){
   const families = document.getElementById('familyCatalog');
   if(!groups || !families) return;
   groups.innerHTML = `<div class="section-title" style="font-size:16px;">Cadastro Grupo</div>
-    <div class="section-sub">Ex.: Usinagem, Chaparia, Pintura, Almoxarifado.</div>
+    <div class="section-sub">O grupo é o setor da peça. Ex.: Usinagem, Chaparia, Solda.</div>
     <div class="field"><label>Nome</label><input id="groupName" data-edit="engenharia"></div>
     <button class="btn btn-primary" data-edit="engenharia" type="button" onclick="saveGroup()">Salvar grupo</button>
     <div style="margin-top:12px;">${state.groups.map(function(group){
@@ -3100,6 +3269,87 @@ function renderCatalogs(){
         <button class="icon-btn danger" data-edit="engenharia" type="button" onclick="deleteFamily('${family.id}')" title="Excluir família">${icon('trash',14)}</button>
       </span>`;
     }).join('') || '<div class="section-sub">Nenhuma família.</div>'}</div>`;
+}
+let equipmentNameDraft = '';
+let equipmentParts = [];
+function setEquipmentName(value){ equipmentNameDraft = value; }
+function renderEquipmentCatalog(){
+  const box = document.getElementById('equipmentCatalog');
+  if(!box) return;
+  const options = state.products.map(function(product){
+    const link = productGroup(product);
+    const sector = link.group ? link.group.nome : 'Sem setor';
+    return `<option value="${escapeHtml(product.codigo)}">${escapeHtml(product.descricao)} · ${escapeHtml(sector)}</option>`;
+  }).join('');
+  const parts = equipmentParts.map(function(part, index){
+    const product = productByCode(part.codigo);
+    return `<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;margin-top:6px;">
+      <span>${escapeHtml(product ? product.descricao : part.codigo)} · ${part.quantidade}</span>
+      <button class="icon-btn danger" type="button" onclick="removeEquipmentPart(${index})" title="Tirar peça">${icon('trash',14)}</button>
+    </div>`;
+  }).join('');
+  const saved = state.equipments.map(function(equipment){
+    const summary = (equipment.itens || []).map(function(part){
+      const product = productByCode(part.codigo);
+      return (product ? product.descricao : part.codigo) + ' × ' + part.quantidade;
+    }).join(', ');
+    return `<div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;margin-top:8px;">
+      <div><b>${escapeHtml(equipment.nome)}</b><div style="font-size:12px;color:var(--text-muted);">${escapeHtml(summary || 'Sem peças')}</div></div>
+      <button class="icon-btn danger" data-edit="engenharia" type="button" onclick="deleteEquipment('${equipment.id}')" title="Excluir equipamento">${icon('trash',14)}</button>
+    </div>`;
+  }).join('');
+  box.innerHTML = `<div class="section-title" style="font-size:16px;">Cadastro Equipamento</div>
+    <div class="section-sub">O equipamento junta as peças. Ex.: Decanter 183, Flotador 400, Tanque 10m³.</div>
+    <div class="field"><label>Nome</label><input id="equipmentName" data-edit="engenharia" value="${escapeHtml(equipmentNameDraft)}" oninput="setEquipmentName(this.value)" placeholder="Ex.: Decanter 183"></div>
+    <div class="field-row">
+      <div class="field grow"><label>Peça</label><select id="equipmentPart" data-edit="engenharia">${options || '<option value="">Cadastre um item antes</option>'}</select></div>
+      <div class="field"><label>Quantidade</label><input id="equipmentQty" data-edit="engenharia" type="number" min="1" value="1"></div>
+    </div>
+    <button class="btn btn-ghost" data-edit="engenharia" type="button" onclick="addEquipmentPart()">Adicionar peça</button>
+    <div>${parts || '<div class="section-sub" style="margin-top:8px;">Nenhuma peça nesta composição.</div>'}</div>
+    <button class="btn btn-primary" data-edit="engenharia" type="button" style="margin-top:10px;" onclick="saveEquipment()">Salvar equipamento</button>
+    <div style="margin-top:12px;">${saved || '<div class="section-sub">Nenhum equipamento.</div>'}</div>`;
+}
+function addEquipmentPart(){
+  if(deny('engenharia')) return;
+  const name = document.getElementById('equipmentName');
+  if(name) equipmentNameDraft = name.value;
+  const codigo = document.getElementById('equipmentPart').value;
+  const quantidade = Number(document.getElementById('equipmentQty').value);
+  if(!codigo || !quantidade || quantidade <= 0){ toast('Escolha a peça e a quantidade.', 'error'); return; }
+  const existing = equipmentParts.find(function(part){ return part.codigo === codigo; });
+  if(existing) existing.quantidade += quantidade;
+  else equipmentParts.push({ codigo: codigo, quantidade: quantidade });
+  renderEquipmentCatalog();
+  applyAccess();
+}
+function removeEquipmentPart(index){
+  equipmentParts.splice(index, 1);
+  renderEquipmentCatalog();
+  applyAccess();
+}
+async function saveEquipment(){
+  if(deny('engenharia')) return;
+  const nome = (document.getElementById('equipmentName').value || '').trim();
+  if(!nome){ toast('Informe o nome do equipamento.', 'error'); return; }
+  if(!equipmentParts.length){ toast('Adicione ao menos uma peça.', 'error'); return; }
+  state.equipments.push({ id: uid(), nome: nome, itens: equipmentParts.map(function(part){ return { codigo: part.codigo, quantidade: part.quantidade }; }) });
+  equipmentNameDraft = '';
+  equipmentParts = [];
+  await persist();
+  renderEquipmentCatalog();
+  applyAccess();
+  toast('Equipamento cadastrado.', 'success');
+}
+async function deleteEquipment(id){
+  if(deny('engenharia')) return;
+  const equipment = equipmentById(id);
+  if(!equipment) return;
+  if(!confirm('Excluir o equipamento ' + equipment.nome + '? Pedidos já gerados continuam com a composição gravada.')) return;
+  state.equipments = state.equipments.filter(function(item){ return item.id !== id; });
+  await persist();
+  renderEquipmentCatalog();
+  applyAccess();
 }
 async function saveGroup(){
   if(deny('engenharia')) return;
@@ -3201,19 +3451,18 @@ function renderTaskBoard(){
   const board = document.getElementById('taskBoard');
   if(!board) return;
   const byOperator = {};
-  const byMachine = {};
+  const bySector = {};
   state.orders.filter(function(order){ return !orderIsClosed(order); }).forEach(function(order){
     orderItems(order).forEach(function(item){
-      const produced = Number(item.produzida) || 0;
-      const planned = Number(item.quantidade) || 0;
-      if(planned && produced >= planned) return;
-      const line = `${orderLabel(order)} · ${item.descricao || order.descricao} · falta ${Math.max(planned - produced, 0)}`;
+      const stage = itemOpenStage(item, order);
+      if(!stage) return;
+      const equipmentName = item.equipamentoNome ? item.equipamentoNome + ' · ' : '';
+      const line = `${orderLabel(order)} · ${equipmentName}${item.descricao || order.descricao} · falta ${stage.falta}`;
       const operator = item.funcionarioNome || 'Sem operador';
-      const machine = item.recursoNome || 'Sem máquina';
       if(!byOperator[operator]) byOperator[operator] = [];
-      if(!byMachine[machine]) byMachine[machine] = [];
+      if(!bySector[stage.nome]) bySector[stage.nome] = [];
       byOperator[operator].push(line);
-      byMachine[machine].push(line);
+      bySector[stage.nome].push(line);
     });
   });
   function column(title, groups){
@@ -3223,7 +3472,7 @@ function renderTaskBoard(){
   }
   board.innerHTML = `<div class="section-title" style="margin-top:18px;">Lista de tarefas</div>
     <button class="btn btn-sm" type="button" onclick="printTasks()">Imprimir</button>
-    <div class="grid grid-2" style="margin-top:10px;">${column('Por operador', byOperator)}${column('Por máquina', byMachine)}</div>`;
+    <div class="grid grid-2" style="margin-top:10px;">${column('Por operador', byOperator)}${column('Por setor', bySector)}</div>`;
 }
 function printTasks(){
   const board = document.getElementById('taskBoard');
@@ -3477,10 +3726,12 @@ window.togglePassword = togglePassword;
 window.changeOrderStatus = changeOrderStatus;
 window.deleteGroup = deleteGroup;
 window.deleteFamily = deleteFamily;
-window.fillOrderFamilies = fillOrderFamilies;
-window.fillOrderItems = fillOrderItems;
-window.addOrderItem = addOrderItem;
+window.addOrderEquipment = addOrderEquipment;
 window.removeOrderDraftItem = removeOrderDraftItem;
+window.addEquipmentPart = addEquipmentPart;
+window.removeEquipmentPart = removeEquipmentPart;
+window.saveEquipment = saveEquipment;
+window.deleteEquipment = deleteEquipment;
 window.refreshItemCode = refreshItemCode;
 window.fillItemFamilies = fillItemFamilies;
 window.onItemFilterText = onItemFilterText;

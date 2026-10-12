@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { HttpError } from "../http.js";
-import type { ProductionKind, ProductionRecord } from "../production/merge.js";
+import { persistEquipment, presentEquipment, type ProductionKind, type ProductionRecord } from "../production/merge.js";
 import type { ProductionBucket, ProductionRepository } from "./productionRepository.js";
 
 type RecordRow = {
@@ -36,7 +36,7 @@ export function createSupabaseProductionRepository(url: string, serviceRoleKey: 
         throw new HttpError(500, "DATABASE_ERROR", "Não foi possível ler a produção.");
       }
       return {
-        records: ((recordsResult.data ?? []) as RecordRow[]).map(toRecord),
+        records: ((recordsResult.data ?? []) as RecordRow[]).map((row) => presentEquipment(toRecord(row))),
         nextOrderNum: metaResult.data?.next_order_num ?? 1,
         nextEmployeeNum: metaResult.data?.next_employee_num ?? 1
       };
@@ -44,14 +44,17 @@ export function createSupabaseProductionRepository(url: string, serviceRoleKey: 
     async save(companyId, bucket: ProductionBucket) {
       if (bucket.records.length) {
         const { error } = await supabase.from("production_records").upsert(
-          bucket.records.map((record) => ({
-            company_id: companyId,
-            kind: record.kind,
-            id: record.id,
-            payload: record.payload,
-            updated_at: record.updatedAt,
-            deleted_at: record.deletedAt
-          })),
+          bucket.records.map((record) => {
+            const stored = persistEquipment(record);
+            return {
+              company_id: companyId,
+              kind: stored.kind,
+              id: stored.id,
+              payload: stored.payload,
+              updated_at: stored.updatedAt,
+              deleted_at: stored.deletedAt
+            };
+          }),
           { onConflict: "company_id,kind,id" }
         );
         if (error) throw new HttpError(500, "DATABASE_ERROR", "Não foi possível gravar a produção.");

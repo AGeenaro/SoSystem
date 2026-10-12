@@ -2,6 +2,7 @@ import request from "supertest";
 import bcrypt from "bcryptjs";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createApp, type AppOptions } from "../src/app.js";
+import { persistEquipment, presentEquipment } from "../src/production/merge.js";
 import { createMemoryUserRepository } from "../src/repositories/memoryUserRepository.js";
 
 const SECRET = "test-secret";
@@ -363,5 +364,49 @@ describe("produção compartilhada", () => {
     const current = await request(app).get("/api/production").set(auth);
     expect(current.status).toBe(200);
     expect(current.body.data.resources[0].nome).toBe("MO01");
+  });
+});
+
+describe("equipamento na produção", () => {
+  it("guarda o equipamento no formato aceito pelo banco e devolve como equipamento", () => {
+    const stored = persistEquipment({
+      kind: "equipment",
+      id: "eq-1",
+      payload: { nome: "Decanter 183", itens: [{ codigo: "30.3000.0001", quantidade: 1 }] },
+      updatedAt: "2026-10-12T12:00:00.000Z",
+      deletedAt: null
+    });
+    expect(stored.kind).toBe("product");
+    expect(stored.payload.tipo).toBe("equipamento");
+    const shown = presentEquipment(stored);
+    expect(shown.kind).toBe("equipment");
+    expect(shown.payload.tipo).toBeUndefined();
+    expect(shown.payload.nome).toBe("Decanter 183");
+  });
+
+  it("aceita o equipamento no sync e devolve na coleção própria", async () => {
+    const app = buildApp();
+    const session = await register(app, "eq@fabrica.com", "Equipamentos");
+    const createdCompany = await request(app)
+      .post("/api/companies")
+      .set("Authorization", `Bearer ${session.body.data.accessToken}`)
+      .send({ name: "Fábrica Norte" });
+    const auth = {
+      Authorization: `Bearer ${session.body.data.accessToken}`,
+      "x-company-id": createdCompany.body.data.id
+    };
+    const synced = await request(app).post("/api/production/sync").set(auth).send({
+      records: [{
+        kind: "equipment",
+        id: "eq-1",
+        payload: { nome: "Decanter 183", itens: [{ codigo: "30.3000.0001", quantidade: 2 }] },
+        updatedAt: "2026-10-12T15:00:00.000Z",
+        deletedAt: null
+      }]
+    });
+    expect(synced.status).toBe(200);
+    expect(synced.body.data.equipments).toHaveLength(1);
+    expect(synced.body.data.equipments[0].nome).toBe("Decanter 183");
+    expect(synced.body.data.products).toHaveLength(0);
   });
 });

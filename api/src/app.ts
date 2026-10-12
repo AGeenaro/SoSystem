@@ -194,7 +194,7 @@ export function createApp(options: AppOptions): Express {
     if (snapshot.resources.length > company.maxMachines) {
       throw new HttpError(403, "LIMIT_MACHINES", "A empresa atingiu o limite de máquinas.");
     }
-    const registrations = snapshot.employees.length + snapshot.products.length + snapshot.groups.length + snapshot.families.length;
+    const registrations = snapshot.employees.length + snapshot.products.length + snapshot.groups.length + snapshot.families.length + snapshot.equipments.length;
     if (registrations > company.maxRegistrations) {
       throw new HttpError(403, "LIMIT_REGISTRATIONS", "A empresa atingiu o limite de cadastros.");
     }

@@ -1,4 +1,4 @@
-export const PRODUCTION_KINDS = ["employee", "product", "order", "punch", "resource", "group", "family"] as const;
+export const PRODUCTION_KINDS = ["employee", "product", "order", "punch", "resource", "group", "family", "equipment"] as const;
 
 export type ProductionKind = (typeof PRODUCTION_KINDS)[number];
 
@@ -18,6 +18,7 @@ export type ProductionSnapshot = {
   resources: Record<string, unknown>[];
   groups: Record<string, unknown>[];
   families: Record<string, unknown>[];
+  equipments: Record<string, unknown>[];
   tombstones: { kind: ProductionKind; id: string; updatedAt: string }[];
   nextOrderNum: number;
   nextEmployeeNum: number;
@@ -30,7 +31,8 @@ const COLLECTIONS: Record<ProductionKind, keyof ProductionSnapshot> = {
   punch: "punches",
   resource: "resources",
   group: "groups",
-  family: "families"
+  family: "families",
+  equipment: "equipments"
 };
 
 export function mergeRecords(current: ProductionRecord[], incoming: ProductionRecord[]): ProductionRecord[] {
@@ -62,6 +64,7 @@ export function toSnapshot(
     resources: [],
     groups: [],
     families: [],
+    equipments: [],
     tombstones: [],
     nextOrderNum,
     nextEmployeeNum
@@ -78,4 +81,16 @@ export function toSnapshot(
     });
   }
   return snapshot;
+}
+
+export function persistEquipment(record: ProductionRecord): ProductionRecord {
+  if (record.kind !== "equipment") return record;
+  return { ...record, kind: "product", payload: { ...record.payload, tipo: "equipamento" } };
+}
+
+export function presentEquipment(record: ProductionRecord): ProductionRecord {
+  if (record.kind !== "product" || record.payload.tipo !== "equipamento") return record;
+  const payload = { ...record.payload };
+  delete payload.tipo;
+  return { ...record, kind: "equipment", payload };
 }
