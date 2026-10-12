@@ -25,10 +25,10 @@ async function suporte(api = app()) {
 }
 
 describe("pedidos, bloqueios e empresas", () => {
-  it("exige setor e motivo para parada e bloqueio", () => {
-    expect(() => changeOrderStatus("Não iniciado", "Bloqueado", {})).toThrow(/setor e o motivo/);
-    const stopped = changeOrderStatus("Não iniciado", "Iniciado/Parado", { setor: "Pintura", motivo: "Falta tinta" });
-    expect(stopped).toEqual({ status: "Iniciado/Parado", setor: "Pintura", motivo: "Falta tinta" });
+  it("exige motivo para parada e bloqueio", () => {
+    expect(() => changeOrderStatus("Não iniciado", "Bloqueado", {})).toThrow(/motivo/);
+    const stopped = changeOrderStatus("Não iniciado", "Iniciado/Parado", { motivo: "Falta tinta" });
+    expect(stopped).toEqual({ status: "Iniciado/Parado", setor: "", motivo: "Falta tinta" });
     expect(changeOrderStatus("Aberta", "Concluída", {}).status).toBe("Finalizado");
     expect(() => changeOrderStatus("Não iniciado", "Inventado", {})).toThrow(/desconhecido/);
   });

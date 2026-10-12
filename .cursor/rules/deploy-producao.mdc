@@ -1,0 +1,13 @@
+---
+description: Publicar cada alteração pedida na produção do SoSystem
+alwaysApply: true
+---
+
+# Deploy em produção
+
+Quando Adinã pedir uma alteração neste projeto, termine publicando em produção. Não espere um pedido separado de deploy.
+
+- Grave o commit e envie para `main` em `https://github.com/AGeenaro/SoSystem.git`.
+- Esse push publica o site na Vercel e a API no Render.
+- Não inclua `.cursorignore` nem arquivos `.env`.
+- Confirme que https://so-system-api.vercel.app está servindo a alteração antes de encerrar.

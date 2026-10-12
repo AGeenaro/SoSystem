@@ -659,8 +659,8 @@ function orderStatusSelect(order){
   const options = ORDER_STATUSES.map(function(status){
     return `<option value="${escapeHtml(status)}" ${status===current?'selected':''}>${escapeHtml(status)}</option>`;
   }).join('');
-  const detail = (current === 'Iniciado/Parado' || current === 'Bloqueado') && (order.setor || order.motivo)
-    ? `<div style="font-size:10.5px; color:var(--text-faint); margin-top:4px;">${escapeHtml(order.setor || '')}${order.motivo ? ' · ' + escapeHtml(order.motivo) : ''}</div>`
+  const detail = (current === 'Iniciado/Parado' || current === 'Bloqueado') && order.motivo
+    ? `<div style="font-size:10.5px; color:var(--text-faint); margin-top:4px;">${escapeHtml(order.motivo)}</div>`
     : '';
   return `<select class="status-select tone-${orderStatusTone(current)}" data-edit="ordens" onchange="changeOrderStatus('${order.id}', this.value, this)">${options}</select>${detail}`;
 }
@@ -714,6 +714,41 @@ function syncEmployeeMachines(empId, resourceIds){
     if(should && !linked) resource.funcionarios.push(empId);
     if(!should && linked) resource.funcionarios = resource.funcionarios.filter(function(id){ return id !== empId; });
   });
+}
+function renderGroupChoices(containerId, selectedIds){
+  const box = document.getElementById(containerId);
+  if(!box) return;
+  if(!state.groups.length){
+    box.innerHTML = '<div class="section-sub">Nenhum grupo cadastrado.</div>';
+    return;
+  }
+  box.innerHTML = state.groups.map(function(group){
+    const checked = selectedIds.indexOf(group.id) >= 0 ? 'checked' : '';
+    return `<label class="checkbox-row" style="margin:0 12px 8px 0;"><input type="checkbox" value="${group.id}" ${checked}>${escapeHtml(group.nome)}</label>`;
+  }).join('');
+}
+function resourceGroupIds(resource){
+  if(resource.grupos && resource.grupos.length) return resource.grupos.slice();
+  if(!resource.setor || resource.setor === 'Geral') return [];
+  return String(resource.setor).split(',').map(function(name){
+    const group = state.groups.find(function(item){ return item.nome === name.trim(); });
+    return group ? group.id : '';
+  }).filter(Boolean);
+}
+function resourceGroupNames(resource){
+  const names = (resource.grupos || []).map(function(id){
+    const group = state.groups.find(function(item){ return item.id === id; });
+    return group ? group.nome : '';
+  }).filter(Boolean);
+  if(names.length) return names;
+  if(resource.setor && resource.setor !== 'Geral') return String(resource.setor).split(',').map(function(name){ return name.trim(); }).filter(Boolean);
+  return [];
+}
+function orderSector(order){
+  return Array.from(new Set(orderItems(order).map(function(item){
+    const group = state.groups.find(function(entry){ return entry.id === item.grupoId; });
+    return group ? group.nome : '';
+  }).filter(Boolean))).join(', ');
 }
 function renderMachineChoices(containerId, selectedIds){
   const box = document.getElementById(containerId);
@@ -771,10 +806,10 @@ function renderDashboard(){
       <div class="filter-bar">
         <div class="field grow">
           <label>Buscar célula / funcionário</label>
-          <input id="dashSearchInput" placeholder="Busque por célula, setor ou funcionário" value="${dashSearch}" oninput="dashSearch=this.value; renderDashLists();">
+          <input id="dashSearchInput" placeholder="Busque por célula, grupo ou funcionário" value="${dashSearch}" oninput="dashSearch=this.value; renderDashLists();">
         </div>
         <div class="field fixed">
-          <label>Setor monitorado</label>
+          <label>Grupo</label>
           <select id="dashSetorSelect" onchange="dashSetor=this.value; renderDashLists();"></select>
         </div>
         <button class="btn btn-ghost" onclick="clearDashFilters()">Limpar filtros</button>
@@ -839,8 +874,14 @@ function renderDashboard(){
 function populateSetorSelect(){
   const sel = document.getElementById('dashSetorSelect');
   if(!sel) return;
-  const setores = Array.from(new Set(state.resources.map(r=>r.setor))).sort();
-  sel.innerHTML = ['Todos', ...setores].map(s=>`<option value="${s}" ${s===dashSetor?'selected':''}>${s}</option>`).join('');
+  const names = state.groups.map(function(group){ return group.nome; });
+  state.resources.forEach(function(resource){
+    resourceGroupNames(resource).forEach(function(name){
+      if(names.indexOf(name) < 0) names.push(name);
+    });
+  });
+  names.sort();
+  sel.innerHTML = ['Todos', ...names].map(s=>`<option value="${s}" ${s===dashSetor?'selected':''}>${s}</option>`).join('');
 }
 function clearDashFilters(){
   dashSearch=''; dashSetor='Todos';
@@ -890,8 +931,9 @@ function renderResourceGrid(){
   if(!holder) return;
   const q = dashSearch.trim().toLowerCase();
   const list = state.resources.filter(r=>{
-    const matchesSearch = !q || r.nome.toLowerCase().includes(q) || r.descricao.toLowerCase().includes(q);
-    const matchesSetor = dashSetor==='Todos' || r.setor===dashSetor;
+    const names = resourceGroupNames(r);
+    const matchesSearch = !q || r.nome.toLowerCase().includes(q) || r.descricao.toLowerCase().includes(q) || names.join(' ').toLowerCase().includes(q);
+    const matchesSetor = dashSetor==='Todos' || names.indexOf(dashSetor) >= 0;
     return matchesSearch && matchesSetor;
   });
   holder.innerHTML = list.length ? list.map(r=>{
@@ -910,7 +952,7 @@ function renderResourceGrid(){
       </div>
       <div class="res-desc">${r.descricao}</div>
       <div class="res-tags">
-        <span class="badge badge-gray">${r.setor}</span>
+        ${resourceGroupNames(r).length ? resourceGroupNames(r).map(function(name){ return `<span class="badge badge-gray">${escapeHtml(name)}</span>`; }).join('') : ''}
         <span class="badge badge-gray">${r.funcionarios.length} funcionário(s)</span>
       </div>
       <select class="status-select st-${r.status}" data-edit="recursos" onchange="changeResourceStatus('${r.id}', this.value)">
@@ -1037,14 +1079,14 @@ function openResourceModal(id){
     document.getElementById('resModalTitle').textContent = 'Editar Célula';
     document.getElementById('resNome').value = r.nome;
     document.getElementById('resDescricao').value = r.descricao;
-    document.getElementById('resSetor').value = r.setor;
     document.getElementById('resRestricao').value = r.restricao || '';
+    renderGroupChoices('resGrupos', resourceGroupIds(r));
   } else {
     document.getElementById('resModalTitle').textContent = 'Nova Célula / Recurso';
     document.getElementById('resNome').value = '';
     document.getElementById('resDescricao').value = '';
-    document.getElementById('resSetor').value = '';
     document.getElementById('resRestricao').value = '';
+    renderGroupChoices('resGrupos', []);
   }
   openModal('modalResource');
 }
@@ -1053,11 +1095,15 @@ async function saveResource(){
   const id = document.getElementById('resId').value;
   const nome = document.getElementById('resNome').value.trim();
   const descricao = document.getElementById('resDescricao').value.trim();
-  const setor = document.getElementById('resSetor').value.trim() || 'Geral';
   const restricao = document.getElementById('resRestricao').value.trim();
+  const groupIds = Array.from(document.querySelectorAll('#resGrupos input:checked')).map(function(input){ return input.value; });
+  const setor = groupIds.map(function(id){
+    const group = state.groups.find(function(item){ return item.id === id; });
+    return group ? group.nome : '';
+  }).filter(Boolean).join(', ');
   if(!nome || !descricao){ toast('Preencha código e descrição.', 'error'); return; }
-  if(id){ Object.assign(resourceById(id), {nome,descricao,setor,restricao}); }
-  else{ state.resources.push({id:uid(), nome, descricao, setor, restricao, status:'Parada', funcionarios:[], grupos:[]}); }
+  if(id){ Object.assign(resourceById(id), {nome,descricao,setor,restricao,grupos:groupIds}); }
+  else{ state.resources.push({id:uid(), nome, descricao, setor, restricao, status:'Parada', funcionarios:[], grupos:groupIds}); }
   await persist();
   closeModal('modalResource');
   populateSetorSelect();
@@ -1137,12 +1183,12 @@ function renderRecursos(){
     <div class="section-title">${icon('wrench',19)} Recursos</div>
     <div class="section-sub">Cadastro das máquinas, células e recursos utilizados no apontamento de produção e no monitoramento.</div>
     <div class="toolbar">
-      <div class="search-box"><span class="search-ic">${icon('search',15)}</span><input placeholder="Buscar código, descrição ou setor..." oninput="recSearch=this.value; renderRecursosTable();"></div>
+      <div class="search-box"><span class="search-ic">${icon('search',15)}</span><input placeholder="Buscar código, descrição ou grupo..." oninput="recSearch=this.value; renderRecursosTable();"></div>
       <button class="btn btn-primary" data-edit="recursos" onclick="openResourceModal()">${icon('plus',14)} Novo Recurso</button>
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Código</th><th>Descrição</th><th>Setor</th><th>Status</th><th>Funcionários</th><th style="width:110px;"></th></tr></thead>
+        <thead><tr><th>Código</th><th>Descrição</th><th>Grupo</th><th>Status</th><th>Funcionários</th><th style="width:110px;"></th></tr></thead>
         <tbody id="recTbody"></tbody>
       </table>
     </div>
@@ -1153,14 +1199,17 @@ function renderRecursosTable(){
   const tbody = document.getElementById('recTbody');
   if(!tbody) return;
   const q = recSearch.trim().toLowerCase();
-  const list = state.resources.filter(r => !q || r.nome.toLowerCase().includes(q) || r.descricao.toLowerCase().includes(q) || r.setor.toLowerCase().includes(q));
+  const list = state.resources.filter(r => {
+    const names = resourceGroupNames(r).join(' ').toLowerCase();
+    return !q || r.nome.toLowerCase().includes(q) || r.descricao.toLowerCase().includes(q) || names.includes(q);
+  });
   tbody.innerHTML = list.length ? list.map(r=>{
     const statusBadgeClass = r.status==='Produzindo' ? 'badge-green' : (r.status==='Manutenção' ? 'badge-amber' : 'badge-red');
     const nomes = r.funcionarios.map(id=>{ const e=state.employees.find(x=>x.id===id); return e ? (e.nome+' '+e.sobrenome) : null; }).filter(Boolean);
     return `<tr>
       <td style="font-weight:700;">${r.nome}</td>
       <td>${r.descricao}</td>
-      <td><span class="badge badge-gray">${r.setor}</span></td>
+      <td>${resourceGroupNames(r).map(function(name){ return `<span class="badge badge-gray">${escapeHtml(name)}</span>`; }).join(' ') || '—'}</td>
       <td><span class="badge ${statusBadgeClass}"><span class="dot"></span>${r.status}</span></td>
       <td>${nomes.length ? nomes.join(', ') : '<span style="color:var(--text-faint);">Nenhum</span>'}</td>
       <td>
@@ -1328,7 +1377,7 @@ function showOrderInfo(orderId){
     <div style="margin-bottom:14px;">
       <div style="font-size:20px; font-weight:800;">${orderLabel(order)}</div>
       <div style="color:var(--text-muted); font-size:13px;">${order.codigo} — ${order.descricao}</div>
-      <div style="margin-top:8px;">${orderStatusBadge(order.status)} ${order.motivo ? `<span class="section-sub">${escapeHtml(order.setor || '')} · ${escapeHtml(order.motivo)}</span>` : ''}</div>
+      <div style="margin-top:8px;">${orderStatusBadge(order.status)} ${order.motivo ? `<span class="section-sub">${escapeHtml(order.motivo)}</span>` : ''}</div>
       <div style="margin-top:10px; font-weight:700;">Produzido: ${orderProgress(order).pct}%</div>
       <div style="margin-top:6px;">${orderItems(order).map(function(item){
         const group = state.groups.find(function(entry){ return entry.id === item.grupoId; });
@@ -2077,7 +2126,7 @@ async function saveQuickMachine(){
     toast('Já existe uma máquina com este código.', 'error');
     return;
   }
-  const resource = { id: uid(), nome: nome, descricao: descricao, setor: 'Geral', restricao: '', status: 'Parada', funcionarios: [], grupos: [] };
+  const resource = { id: uid(), nome: nome, descricao: descricao, setor: '', restricao: '', status: 'Parada', funcionarios: [], grupos: [] };
   if(apFuncionarioId) resource.funcionarios.push(apFuncionarioId);
   state.resources.push(resource);
   await persist();
@@ -2785,19 +2834,17 @@ async function changeOrderStatus(id, next, selectEl){
     if(selectEl) selectEl.value = previous;
     return;
   }
-  let setor = order.setor || '';
   let motivo = order.motivo || '';
   if(next === 'Iniciado/Parado' || next === 'Bloqueado'){
-    setor = window.prompt('Setor', setor) || '';
     motivo = window.prompt('Motivo', motivo) || '';
-    if(!setor.trim() || !motivo.trim()){
-      toast('Informe o setor e o motivo.', 'error');
+    if(!motivo.trim()){
+      toast('Informe o motivo.', 'error');
       if(selectEl) selectEl.value = previous;
       return;
     }
   }
   order.status = next;
-  order.setor = setor.trim();
+  order.setor = orderSector(order);
   order.motivo = motivo.trim();
   await persist();
   if(activeTab === 'ordens') renderOrdensTable();

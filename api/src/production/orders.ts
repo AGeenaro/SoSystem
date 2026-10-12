@@ -37,7 +37,7 @@ export function changeOrderStatus(
   const status = normalizeOrderStatus(raw);
   const setor = String(detail.setor ?? "").trim();
   const motivo = String(detail.motivo ?? "").trim();
-  if (orderStatusNeedsReason(status) && (!setor || !motivo)) {
+  if (orderStatusNeedsReason(status) && !motivo) {
     if (Object.prototype.hasOwnProperty.call(LEGACY, raw)) {
       return {
         status,
@@ -45,7 +45,7 @@ export function changeOrderStatus(
         motivo: motivo || "Status anterior sem detalhe."
       };
     }
-    throw new Error("Informe o setor e o motivo.");
+    throw new Error("Informe o motivo.");
   }
   return { status, setor, motivo };
 }
