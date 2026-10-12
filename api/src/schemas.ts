@@ -5,8 +5,8 @@ import { PRODUCTION_KINDS } from "./production/merge.js";
 
 const roleSchema = z.enum(USER_ROLES);
 const permissionsSchema = z.object({
-  view: z.array(z.enum(PRODUCTION_MODULES)).max(PRODUCTION_MODULES.length),
-  edit: z.array(z.enum(PRODUCTION_MODULES)).max(PRODUCTION_MODULES.length)
+  view: z.array(z.enum(PRODUCTION_MODULES)).max(32),
+  edit: z.array(z.enum(PRODUCTION_MODULES)).max(32)
 }).strict();
 
 const passwordSchema = z.string().max(72).refine(isStrongPassword, PASSWORD_HINT);
@@ -27,9 +27,10 @@ export const loginSchema = z.object({
 export const createUserSchema = z.object({
   name: nameSchema,
   email: emailSchema,
+  password: passwordSchema.optional(),
   role: roleSchema.optional(),
   permissions: permissionsSchema.optional(),
-  companyId: z.string().uuid().optional()
+  companyId: z.string().uuid().nullable().optional()
 }).strict();
 
 export const updateUserSchema = z.object({

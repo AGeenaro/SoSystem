@@ -199,6 +199,29 @@ describe("API de usuários", () => {
     expect(created.status).toBe(201);
     expect(created.body.data.password).toBeUndefined();
 
+    const manual = await request(app)
+      .post("/api/users")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({
+        name: "Diego Manual",
+        email: "diego@fabrica.com",
+        role: "operador",
+        companyId,
+        password: "Senha-manual1!",
+        permissions: {
+          view: ["engenharia", "engenharia", "ordens"],
+          edit: ["engenharia", "engenharia", "ordens"]
+        }
+      });
+    expect(manual.status).toBe(201);
+    expect(manual.body.data.provisionalPassword).toBe("Senha-manual1!");
+    expect(manual.body.data.mustChangePassword).toBe(true);
+    const manualLogin = await request(app).post("/api/auth/login").send({
+      email: "diego@fabrica.com",
+      password: "Senha-manual1!"
+    });
+    expect(manualLogin.status).toBe(200);
+
     const selfUpdate = await request(app)
       .put(`/api/users/${userId}`)
       .set("Authorization", `Bearer ${userToken}`)

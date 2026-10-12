@@ -2511,7 +2511,8 @@ async function accountApi(path, options){
   const text = await response.text();
   const payload = text ? JSON.parse(text) : null;
   if(!response.ok){
-    const error = new Error(payload && payload.error ? payload.error.message : 'Falha na API.');
+    const detail = payload && payload.error && Array.isArray(payload.error.details) && payload.error.details[0] && payload.error.details[0].message;
+    const error = new Error(detail || (payload && payload.error ? payload.error.message : 'Falha na API.'));
     error.status = response.status;
     throw error;
   }
@@ -2519,7 +2520,7 @@ async function accountApi(path, options){
 }
 function selectedPermissions(role){
   const boxes = Array.prototype.slice.call(document.querySelectorAll('#userPerms input:checked'));
-  const chosen = boxes.map(function(box){ return box.value; });
+  const chosen = boxes.map(function(box){ return box.value; }).filter(function(value, index, list){ return list.indexOf(value) === index; });
   if(role === 'visualizador') return { view: chosen, edit: [] };
   if(role === 'operador') return { view: chosen, edit: chosen };
   return undefined;
@@ -2594,7 +2595,12 @@ function renderSettingsPanel(){
           <div class="field"><label>E-mail</label><input id="userEmail" type="email" required></div>
         </div>
         <div class="field-row">
-          <div class="field"><label>Senha provisória</label><input id="userPassword" disabled placeholder="Gerada ao salvar e mostrada uma vez"></div>
+          <div class="field"><label>Senha provisória</label>
+            <div class="password-field">
+              <input id="userPassword" type="password" maxlength="72" autocomplete="new-password" placeholder="Opcional. Vazio gera uma senha ao criar.">
+              <button class="eye-btn" type="button" onclick="togglePassword('userPassword', this)">mostrar</button>
+            </div>
+          </div>
           <div class="field"><label>Perfil de acesso</label>
             <select id="userRole" onchange="renderPermissionChoices()">${roles.map(function(role){ return `<option value="${role}">${ROLE_LABELS[role]}</option>`; }).join('')}</select>
           </div>
@@ -2714,37 +2720,35 @@ async function saveAccessUser(event){
     email: document.getElementById('userEmail').value,
     role: role
   };
-  const password = document.getElementById('userPassword').value;
+  const password = document.getElementById('userPassword').value.trim();
+  if(password && (password.length < 8 || !/[A-Z]/.test(password) || !/\d/.test(password) || !/[^A-Za-z0-9]/.test(password))){
+    toast('A senha precisa ter 8 caracteres, uma maiúscula, um número e um caractere especial.', 'error');
+    return;
+  }
   const permissions = selectedPermissions(role);
   if(permissions) body.permissions = permissions;
   try{
-    if(sessionUser.role === 'administrador_suporte'){
-      if(role === 'administrador_suporte') body.companyId = null;
-      else{
-        body.companyId = document.getElementById('userCompany').value;
-        if(!body.companyId){
-          toast('Escolha a empresa do usuário.', 'error');
-          return;
-        }
-      }
-    }
-    if(id){
-      if(password) body.password = password;
-      await accountApi('/api/users/' + id, { method:'PUT', body: body });
-      toast('Usuário salvo.', 'success');
-    }else{
-      if(role !== 'administrador_suporte' && sessionUser.role === 'administrador_suporte' && !body.companyId){
+    if(sessionUser.role === 'administrador_suporte' && role !== 'administrador_suporte'){
+      body.companyId = document.getElementById('userCompany').value;
+      if(!body.companyId){
         toast('Escolha a empresa do usuário.', 'error');
         return;
       }
+    }
+    if(password) body.password = password;
+    if(id){
+      await accountApi('/api/users/' + id, { method:'PUT', body: body });
+      toast('Usuário salvo.', 'success');
+    }else{
       const created = await accountApi('/api/users', { method:'POST', body: body });
-      window.alert('Senha provisória, mostrada uma vez:\n' + created.data.provisionalPassword + '\nA pessoa troca no primeiro acesso.');
-      toast('Usuário criado. A senha provisória foi mostrada nesta tela.', 'success');
+      if(!password && created.data.provisionalPassword){
+        window.alert('Senha provisória, mostrada uma vez:\n' + created.data.provisionalPassword + '\nA pessoa troca no primeiro acesso.');
+      }
+      toast(password ? 'Usuário criado. No primeiro acesso a pessoa troca essa senha.' : 'Usuário criado. A senha provisória foi mostrada nesta tela.', 'success');
     }
     event.target.reset();
     document.getElementById('editingUserId').value = '';
     renderPermissionChoices();
-    toast('Usuário salvo.', 'success');
     await loadAccessUsers();
   }catch(error){
     toast(error.message, 'error');

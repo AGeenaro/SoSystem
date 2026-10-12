@@ -414,7 +414,7 @@ export function createApp(options: AppOptions): Express {
         throw new HttpError(403, "LIMIT_USERS", "A empresa atingiu o limite de usuários.");
       }
     }
-    const provisionalPassword = generateProvisionalPassword();
+    const provisionalPassword = input.password ?? generateProvisionalPassword();
     const user = await options.users.create({
       name: input.name,
       email,
@@ -467,7 +467,7 @@ export function createApp(options: AppOptions): Express {
     if (input.email !== undefined) patch.email = input.email.toLowerCase();
     if (input.password) {
       patch.passwordHash = await bcrypt.hash(input.password, bcryptRounds);
-      patch.mustChangePassword = false;
+      patch.mustChangePassword = !self;
     }
     const nextRole = input.role ?? target.role;
     if (!self && input.role !== undefined) patch.role = input.role;
