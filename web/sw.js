@@ -1,4 +1,4 @@
-const CACHE = "prodfy-shell-v10";
+const CACHE = "prodfy-shell-v11";
 const FILES = ["./", "./index.html", "./conta.html", "./css/app.css", "./js/app.js", "./js/config.js", "./js/conta.js", "./js/study.js"];
 
 self.addEventListener("install", (event) => {
@@ -17,17 +17,14 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
   event.respondWith(
-    caches.match(request).then((cached) => {
-      const update = fetch(request)
-        .then((response) => {
-          if (response && response.ok) {
-            const copy = response.clone();
-            caches.open(CACHE).then((cache) => cache.put(request, copy));
-          }
-          return response;
-        })
-        .catch(() => cached);
-      return cached || update;
-    })
+    fetch(request)
+      .then((response) => {
+        if (response && response.ok) {
+          const copy = response.clone();
+          caches.open(CACHE).then((cache) => cache.put(request, copy));
+        }
+        return response;
+      })
+      .catch(() => caches.match(request))
   );
 });

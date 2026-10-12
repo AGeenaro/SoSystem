@@ -2836,16 +2836,33 @@ async function changeOrderStatus(id, next, selectEl){
   }
   let motivo = order.motivo || '';
   if(next === 'Iniciado/Parado' || next === 'Bloqueado'){
-    motivo = window.prompt('Motivo', motivo) || '';
-    if(!motivo.trim()){
-      toast('Informe o motivo.', 'error');
-      if(selectEl) selectEl.value = previous;
-      return;
-    }
+    showStatusReason(order, next, selectEl);
+    return;
   }
+  await commitOrderStatus(order, next, motivo);
+}
+function showStatusReason(order, next, selectEl){
+  const cell = selectEl && selectEl.closest ? selectEl.closest('td') : null;
+  if(!cell) return;
+  const existing = cell.querySelector('.status-reason');
+  if(existing) existing.remove();
+  const box = document.createElement('div');
+  box.className = 'status-reason';
+  box.style.marginTop = '6px';
+  box.innerHTML = `<input placeholder="Motivo" value="${escapeHtml(order.motivo || '')}" style="margin-bottom:6px;"><button type="button" class="btn btn-sm btn-primary">Salvar</button>`;
+  cell.appendChild(box);
+  const input = box.querySelector('input');
+  box.querySelector('button').onclick = async function(){
+    const motivo = input.value.trim();
+    if(!motivo){ toast('Informe o motivo.', 'error'); input.focus(); return; }
+    await commitOrderStatus(order, next, motivo);
+  };
+  if(input) input.focus();
+}
+async function commitOrderStatus(order, next, motivo){
   order.status = next;
   order.setor = orderSector(order);
-  order.motivo = motivo.trim();
+  order.motivo = (motivo || '').trim();
   await persist();
   if(activeTab === 'ordens') renderOrdensTable();
   if(activeTab === 'acompanhamento') renderAcompTable();
