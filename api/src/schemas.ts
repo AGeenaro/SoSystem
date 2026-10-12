@@ -70,7 +70,6 @@ export const companyCreateSchema = z.object({
 
 export const companyUpdateSchema = z.object({
   name: z.string().trim().min(2).max(80).optional(),
-  logo: z.string().max(400_000).optional(),
   maxUsers: z.number().int().min(1).max(100_000).optional(),
   maxMachines: z.number().int().min(1).max(100_000).optional(),
   maxRegistrations: z.number().int().min(1).max(1_000_000).optional(),

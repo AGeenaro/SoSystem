@@ -30,7 +30,6 @@ export function createMemoryPlatformRepository(): PlatformRepository {
       const company: CompanyRecord = {
         id: randomUUID(),
         name: input.name,
-        logo: input.logo ?? "",
         maxUsers: input.maxUsers ?? 50,
         maxMachines: input.maxMachines ?? 50,
         maxRegistrations: input.maxRegistrations ?? 500,

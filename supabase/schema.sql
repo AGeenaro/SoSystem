@@ -95,7 +95,6 @@ alter table public.users add constraint users_role_check check (role in ('visual
 create table if not exists public.companies (
   id uuid primary key default gen_random_uuid(),
   name text not null,
-  logo text not null default '',
   max_users integer not null default 50 check (max_users > 0),
   max_machines integer not null default 50 check (max_machines > 0),
   max_registrations integer not null default 500 check (max_registrations > 0),
@@ -104,6 +103,8 @@ create table if not exists public.companies (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.companies drop column if exists logo;
 
 alter table public.companies enable row level security;
 revoke all on table public.companies from anon, authenticated;

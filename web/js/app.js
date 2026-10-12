@@ -2905,14 +2905,6 @@ async function commitOrderStatus(order, next, motivo){
   if(activeTab === 'acompanhamento') renderAcompTable();
   toast('Status atualizado.', 'success');
 }
-function readImageFile(input, done){
-  const file = input.files && input.files[0];
-  if(!file){ done(''); return; }
-  if(file.size > 180000){ toast('Use uma imagem de até 180 KB.', 'error'); input.value = ''; return; }
-  const reader = new FileReader();
-  reader.onload = function(){ done(String(reader.result || '')); };
-  reader.readAsDataURL(file);
-}
 function renderCatalogs(){
   const groups = document.getElementById('groupCatalog');
   const families = document.getElementById('familyCatalog');
@@ -3151,9 +3143,7 @@ async function renderCompanySettings(){
       ${suporte ? `<div class="field"><label>Empresa ativa</label><select id="activeCompany" onchange="selectCompany(this.value)"><option value="">Escolha</option>${companies.map(function(company){ return `<option value="${company.id}" ${company.id===selected?'selected':''}>${escapeHtml(company.name)}</option>`; }).join('')}</select></div>
         <form onsubmit="createCompany(event)"><div class="field-row"><div class="field"><label>Nova empresa</label><input id="newCompanyName" required minlength="2"></div></div><button class="btn btn-primary" type="submit">Criar empresa</button></form>` : ''}
       ${current ? `<form onsubmit="saveCompany(event, '${current.id}')">
-        ${current.logo ? `<img class="logo-preview" alt="Logo" src="${current.logo}">` : ''}
         <div class="field"><label>Nome</label><input id="companyName" value="${escapeHtml(current.name)}" ${manager ? '' : 'disabled'}></div>
-        <div class="field"><label>Logo</label><input id="companyLogo" type="file" accept="image/*" ${manager ? '' : 'disabled'}></div>
         ${suporte ? `<div class="field-row">
           <div class="field"><label>Máximo de usuários</label><input id="maxUsers" type="number" min="1" value="${current.maxUsers}"></div>
           <div class="field"><label>Máximo de máquinas</label><input id="maxMachines" type="number" min="1" value="${current.maxMachines}"></div>
@@ -3196,17 +3186,11 @@ async function saveCompany(event, id){
     body.maxRegistrations = Number(document.getElementById('maxRegistrations').value);
     body.usageUntil = document.getElementById('usageUntil').value || null;
   }
-  const file = document.getElementById('companyLogo').files && document.getElementById('companyLogo').files[0];
-  const send = async function(logo){
-    if(logo) body.logo = logo;
-    try{
-      await accountApi('/api/companies/' + id, { method:'PUT', body: body });
-      toast('Empresa salva.', 'success');
-      await renderCompanySettings();
-    }catch(error){ toast(error.message, 'error'); }
-  };
-  if(file) readImageFile(document.getElementById('companyLogo'), send);
-  else send('');
+  try{
+    await accountApi('/api/companies/' + id, { method:'PUT', body: body });
+    toast('Empresa salva.', 'success');
+    await renderCompanySettings();
+  }catch(error){ toast(error.message, 'error'); }
 }
 async function toggleCompanyBlock(id, blocked){
   try{

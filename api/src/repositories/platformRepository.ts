@@ -1,7 +1,6 @@
 export type CompanyRecord = {
   id: string;
   name: string;
-  logo: string;
   maxUsers: number;
   maxMachines: number;
   maxRegistrations: number;
@@ -13,7 +12,6 @@ export type CompanyRecord = {
 
 export type NewCompany = {
   name: string;
-  logo?: string;
   maxUsers?: number;
   maxMachines?: number;
   maxRegistrations?: number;

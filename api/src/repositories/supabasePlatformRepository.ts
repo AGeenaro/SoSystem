@@ -12,7 +12,6 @@ import type {
 type CompanyRow = {
   id: string;
   name: string;
-  logo: string | null;
   max_users: number;
   max_machines: number;
   max_registrations: number;
@@ -51,7 +50,6 @@ function companyFrom(row: CompanyRow): CompanyRecord {
   return {
     id: row.id,
     name: row.name,
-    logo: row.logo ?? "",
     maxUsers: row.max_users,
     maxMachines: row.max_machines,
     maxRegistrations: row.max_registrations,
@@ -99,7 +97,6 @@ export function createSupabasePlatformRepository(url: string, serviceRoleKey: st
     async createCompany(input: NewCompany) {
       const payload = {
         name: input.name,
-        logo: input.logo ?? "",
         max_users: input.maxUsers ?? 50,
         max_machines: input.maxMachines ?? 50,
         max_registrations: input.maxRegistrations ?? 500,
@@ -113,7 +110,6 @@ export function createSupabasePlatformRepository(url: string, serviceRoleKey: st
     async updateCompany(id, patch: CompanyPatch) {
       const payload: Record<string, unknown> = {};
       if (patch.name !== undefined) payload.name = patch.name;
-      if (patch.logo !== undefined) payload.logo = patch.logo;
       if (patch.maxUsers !== undefined) payload.max_users = patch.maxUsers;
       if (patch.maxMachines !== undefined) payload.max_machines = patch.maxMachines;
       if (patch.maxRegistrations !== undefined) payload.max_registrations = patch.maxRegistrations;
