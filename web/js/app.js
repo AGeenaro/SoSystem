@@ -334,7 +334,18 @@ async function syncNow(){
       setSyncPill('Entre de novo para sincronizar', true);
       return;
     }
-    if(!response.ok) throw new Error('Falha ao sincronizar');
+    if(!response.ok){
+      let payload = null;
+      try{ payload = await response.json(); }catch(err){ payload = null; }
+      const failure = new Error(payload && payload.error ? payload.error.message : 'Falha ao sincronizar');
+      failure.code = payload && payload.error ? payload.error.code : '';
+      if(kickIfCompanyClosed(failure)) return;
+      if(failure.code === 'COMPANY_BLOCKED' || failure.code === 'COMPANY_EXPIRED'){
+        setSyncPill(failure.message, true);
+        return;
+      }
+      throw failure;
+    }
     const body = await response.json();
     applySnapshot(body.data || {});
     saveCache();
@@ -613,7 +624,7 @@ function renderCompanyFoot(){
   if(sessionUser.role === 'administrador_suporte'){
     const selected = activeCompanyId();
     const options = knownCompanies.map(function(company){
-      return `<option value="${company.id}" ${company.id===selected?'selected':''}>${escapeHtml(company.name)}</option>`;
+      return `<option value="${company.id}" ${company.id===selected?'selected':''}>${escapeHtml(company.name)}${company.blocked ? ' — bloqueada' : ''}</option>`;
     }).join('');
     foot.innerHTML = `<b>Empresa</b><select class="company-switch" onchange="selectCompany(this.value)"><option value="" ${selected?'':'selected'} disabled>Escolha a empresa</option>${options}</select>`;
     return;
@@ -2506,6 +2517,18 @@ function hideLogin(){
   if(gate) gate.hidden = true;
   if(app) app.classList.remove('is-locked');
 }
+function kickIfCompanyClosed(error){
+  if(!error || (error.code !== 'COMPANY_BLOCKED' && error.code !== 'COMPANY_EXPIRED')) return false;
+  if(sessionUser && sessionUser.role === 'administrador_suporte') return false;
+  localStorage.removeItem('prodfy_jwt');
+  knownCompanies = [];
+  companyListLoaded = false;
+  companyListReady = false;
+  rememberSession(null);
+  showLogin(false);
+  showLoginMessage(error.message);
+  return true;
+}
 async function accountApi(path, options){
   options = options || {};
   const headers = Object.assign({ 'Content-Type': 'application/json' }, companyHeaders(), options.headers || {});
@@ -2521,6 +2544,8 @@ async function accountApi(path, options){
     const detail = payload && payload.error && Array.isArray(payload.error.details) && payload.error.details[0] && payload.error.details[0].message;
     const error = new Error(detail || (payload && payload.error ? payload.error.message : 'Falha na API.'));
     error.status = response.status;
+    error.code = payload && payload.error ? payload.error.code : '';
+    kickIfCompanyClosed(error);
     throw error;
   }
   return payload;
@@ -3285,7 +3310,8 @@ async function renderCompanySettings(){
     <div class="card" style="margin-top:14px;">
       <div class="section-title" style="font-size:16px;">Dados da empresa</div>
       <div class="section-sub">Versão ${escapeHtml((window.PRODIFY_CONFIG && window.PRODIFY_CONFIG.version) || '')}</div>
-      ${suporte ? `<div class="field"><label>Empresa ativa</label><select id="activeCompany" onchange="selectCompany(this.value)"><option value="">Escolha</option>${companies.map(function(company){ return `<option value="${company.id}" ${company.id===selected?'selected':''}>${escapeHtml(company.name)}</option>`; }).join('')}</select></div>
+      ${current && current.blocked ? '<div class="section-sub" style="color:var(--red-dark);font-weight:700;">Esta empresa está bloqueada. Quem pertence a ela não entra, e a produção fica parada.</div>' : ''}
+      ${suporte ? `<div class="field"><label>Empresa ativa</label><select id="activeCompany" onchange="selectCompany(this.value)"><option value="">Escolha</option>${companies.map(function(company){ return `<option value="${company.id}" ${company.id===selected?'selected':''}>${escapeHtml(company.name)}${company.blocked ? ' — bloqueada' : ''}</option>`; }).join('')}</select></div>
         <form onsubmit="createCompany(event)"><div class="field-row"><div class="field"><label>Nova empresa</label><input id="newCompanyName" required minlength="2"></div></div><button class="btn btn-primary" type="submit">Criar empresa</button></form>` : ''}
       ${current ? `<form onsubmit="saveCompany(event, '${current.id}')">
         <div class="field"><label>Nome</label><input id="companyName" value="${escapeHtml(current.name)}" ${manager ? '' : 'disabled'}></div>
@@ -3345,6 +3371,7 @@ async function toggleCompanyBlock(id, blocked){
   try{
     await accountApi('/api/companies/' + id, { method:'PUT', body:{ blocked: blocked } });
     toast(blocked ? 'Empresa bloqueada.' : 'Empresa desbloqueada.', 'success');
+    await refreshCompanyFoot();
     await renderCompanySettings();
   }catch(error){ toast(error.message, 'error'); }
 }

@@ -90,6 +90,18 @@ describe("pedidos, bloqueios e empresas", () => {
     const companyLogin = await request(api).post("/api/auth/login").send({ email: "carla@fabrica.com", password: "Senha-admin1!" });
     expect(companyLogin.status).toBe(403);
     expect(companyLogin.body.error.code).toBe("COMPANY_BLOCKED");
+    const frozen = await request(api).post("/api/production/sync").set({
+      Authorization: `Bearer ${token}`,
+      "x-company-id": north.body.data.id
+    }).send({ records: [] });
+    expect(frozen.status).toBe(403);
+    expect(frozen.body.error.code).toBe("COMPANY_BLOCKED");
+    await request(api).put(`/api/companies/${north.body.data.id}`).set(auth).send({ blocked: false });
+    const reopened = await request(api).post("/api/production/sync").set({
+      Authorization: `Bearer ${token}`,
+      "x-company-id": north.body.data.id
+    }).send({ records: [] });
+    expect(reopened.status).toBe(200);
   });
 
   it("entrega o pedido de senha ao administrador da empresa e o do administrador ao suporte", async () => {

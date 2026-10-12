@@ -173,12 +173,21 @@ export function createApp(options: AppOptions): Express {
       if (!requested) throw new HttpError(422, "COMPANY_REQUIRED", "Escolha a empresa.");
       const company = await platform.findCompany(requested);
       if (!company) throw new HttpError(404, "NOT_FOUND", "Empresa não encontrada.");
+      assertCompanyUsable(company);
       return company;
     }
     if (!actor.companyId) throw new HttpError(403, "NO_COMPANY", "Sua conta não está vinculada a uma empresa.");
     const company = await platform.findCompany(actor.companyId);
     if (!company) throw new HttpError(403, "NO_COMPANY", "Sua conta não está vinculada a uma empresa.");
+    assertCompanyUsable(company);
     return company;
+  }
+
+  function assertCompanyUsable(company: CompanyRecord) {
+    if (company.blocked) throw new HttpError(403, "COMPANY_BLOCKED", "O acesso desta empresa está bloqueado.");
+    if (company.usageUntil && company.usageUntil < todayISO()) {
+      throw new HttpError(403, "COMPANY_EXPIRED", "A data limite de uso desta empresa passou.");
+    }
   }
 
   function assertWithinLimits(snapshot: ReturnType<typeof snapshotOf>, company: CompanyRecord) {
