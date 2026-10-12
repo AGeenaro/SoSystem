@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { PRODUCTION_MODULES, USER_ROLES } from "./access.js";
+import { isStrongPassword, PASSWORD_HINT } from "./passwordPolicy.js";
+import { PRODUCTION_KINDS } from "./production/merge.js";
 
 const roleSchema = z.enum(USER_ROLES);
 const permissionsSchema = z.object({
@@ -7,7 +9,7 @@ const permissionsSchema = z.object({
   edit: z.array(z.enum(PRODUCTION_MODULES)).max(PRODUCTION_MODULES.length)
 }).strict();
 
-const passwordSchema = z.string().min(8, "A senha precisa ter pelo menos 8 caracteres.").max(72);
+const passwordSchema = z.string().max(72).refine(isStrongPassword, PASSWORD_HINT);
 const emailSchema = z.string().trim().email("E-mail inválido.").max(160);
 const nameSchema = z.string().trim().min(2, "O nome precisa ter pelo menos 2 caracteres.").max(80);
 
@@ -22,9 +24,12 @@ export const loginSchema = z.object({
   password: z.string().min(1, "Informe a senha.").max(72)
 }).strict();
 
-export const createUserSchema = registerSchema.extend({
+export const createUserSchema = z.object({
+  name: nameSchema,
+  email: emailSchema,
   role: roleSchema.optional(),
-  permissions: permissionsSchema.optional()
+  permissions: permissionsSchema.optional(),
+  companyId: z.string().uuid().optional()
 }).strict();
 
 export const updateUserSchema = z.object({
@@ -43,7 +48,7 @@ export const idParamSchema = z.object({
 
 export const productionSyncSchema = z.object({
   records: z.array(z.object({
-    kind: z.enum(["employee", "product", "order", "punch", "resource"]),
+    kind: z.enum(PRODUCTION_KINDS),
     id: z.string().trim().min(1).max(120),
     payload: z.record(z.string(), z.unknown()),
     updatedAt: z.string().datetime({ offset: true }),
@@ -57,3 +62,31 @@ export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type CreateUserInput = z.infer<typeof createUserSchema>;
 export type UpdateUserInput = z.infer<typeof updateUserSchema>;
+
+export const companyCreateSchema = z.object({
+  name: z.string().trim().min(2).max(80)
+}).strict();
+
+export const companyUpdateSchema = z.object({
+  name: z.string().trim().min(2).max(80).optional(),
+  logo: z.string().max(400_000).optional(),
+  maxUsers: z.number().int().min(1).max(100_000).optional(),
+  maxMachines: z.number().int().min(1).max(100_000).optional(),
+  maxRegistrations: z.number().int().min(1).max(1_000_000).optional(),
+  usageUntil: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
+  blocked: z.boolean().optional()
+}).strict().refine((value) => Object.keys(value).length > 0, {
+  message: "Informe ao menos um campo para atualizar."
+});
+
+export const passwordRequestSchema = z.object({
+  email: emailSchema
+}).strict();
+
+export const resolvePasswordRequestSchema = z.object({
+  action: z.enum(["reset", "reject"])
+}).strict();
+
+export const blockUserSchema = z.object({
+  blocked: z.boolean()
+}).strict();

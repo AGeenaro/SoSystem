@@ -21,7 +21,7 @@ async function register(app: ReturnType<typeof buildApp>, email = "ana@fabrica.c
   const response = await request(app).post("/api/auth/register").send({
     name,
     email,
-    password: "senha-segura"
+    password: "Senha-segura1"
   });
   return response;
 }
@@ -96,7 +96,7 @@ describe("API de usuários", () => {
 
     const login = await request(app).post("/api/auth/login").send({
       email: "ana@fabrica.com",
-      password: "senha-segura"
+      password: "Senha-segura1"
     });
     expect(login.status).toBe(200);
     const token = login.body.data.accessToken;
@@ -118,17 +118,35 @@ describe("API de usuários", () => {
     expect(closed.status).toBe(403);
     expect(closed.body.error.code).toBe("REGISTRATION_CLOSED");
 
+    const company = await request(app)
+      .post("/api/companies")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ name: "Fábrica Norte" });
+    expect(company.status).toBe(201);
+    const companyId = company.body.data.id;
+
     const second = await request(app)
       .post("/api/users")
       .set("Authorization", `Bearer ${adminToken}`)
-      .send({ name: "Bruno Lima", email: "bruno@fabrica.com", password: "senha-segura", role: "operador" });
+      .send({ name: "Bruno Lima", email: "bruno@fabrica.com", role: "operador", companyId });
     expect(second.status).toBe(201);
     expect(second.body.data.role).toBe("operador");
+    expect(second.body.data.provisionalPassword).toMatch(/[A-Z]/);
+    expect(second.body.data.mustChangePassword).toBe(true);
     const loginSecond = await request(app).post("/api/auth/login").send({
       email: "bruno@fabrica.com",
-      password: "senha-segura"
+      password: second.body.data.provisionalPassword
     });
-    const userToken = loginSecond.body.data.accessToken;
+    const freshToken = loginSecond.body.data.accessToken;
+    const blockedUntilChange = await request(app).get("/api/users").set("Authorization", `Bearer ${freshToken}`);
+    expect(blockedUntilChange.status).toBe(403);
+    expect(blockedUntilChange.body.error.code).toBe("PASSWORD_CHANGE_REQUIRED");
+    const changedPassword = await request(app)
+      .put(`/api/users/${second.body.data.id}`)
+      .set("Authorization", `Bearer ${freshToken}`)
+      .send({ password: "Senha-nova1!" });
+    expect(changedPassword.status).toBe(200);
+    const userToken = freshToken;
     const userId = second.body.data.id;
 
     const forbiddenList = await request(app).get("/api/users").set("Authorization", `Bearer ${userToken}`);
@@ -141,7 +159,7 @@ describe("API de usuários", () => {
     const created = await request(app)
       .post("/api/users")
       .set("Authorization", `Bearer ${adminToken}`)
-      .send({ name: "Carla Dias", email: "carla@fabrica.com", password: "senha-segura", role: "visualizador" });
+      .send({ name: "Carla Dias", email: "carla@fabrica.com", role: "visualizador", companyId });
     expect(created.status).toBe(201);
     expect(created.body.data.password).toBeUndefined();
 
@@ -171,8 +189,8 @@ describe("API de usuários", () => {
 
     const supportDenied = await request(app)
       .post("/api/users")
-      .set("Authorization", `Bearer ${promoted.body.data.role === "administrador" ? (await request(app).post("/api/auth/login").send({ email: "bruno@fabrica.com", password: "senha-segura" })).body.data.accessToken : adminToken}`)
-      .send({ name: "Suporte Extra", email: "suporte-extra@fabrica.com", password: "senha-segura", role: "administrador_suporte" });
+      .set("Authorization", `Bearer ${promoted.body.data.role === "administrador" ? (await request(app).post("/api/auth/login").send({ email: "bruno@fabrica.com", password: "Senha-nova1!" })).body.data.accessToken : adminToken}`)
+      .send({ name: "Suporte Extra", email: "suporte-extra@fabrica.com", role: "administrador_suporte" });
     expect(supportDenied.status).toBe(403);
 
     const missingUser = await request(app)
@@ -216,7 +234,14 @@ describe("produção compartilhada", () => {
     expect(anon.status).toBe(401);
 
     const session = await register(app, "op@fabrica.com", "Operador");
-    const auth = { Authorization: `Bearer ${session.body.data.accessToken}` };
+    const createdCompany = await request(app)
+      .post("/api/companies")
+      .set("Authorization", `Bearer ${session.body.data.accessToken}`)
+      .send({ name: "Fábrica Sul" });
+    const auth = {
+      Authorization: `Bearer ${session.body.data.accessToken}`,
+      "x-company-id": createdCompany.body.data.id
+    };
 
     const phone = await request(app).post("/api/production/sync").set(auth).send({
       records: [{

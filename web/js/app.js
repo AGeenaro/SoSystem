@@ -75,7 +75,9 @@ const PRODUCTION_COLLECTIONS = [
   ['product', 'products', item => item.codigo],
   ['order', 'orders', item => item.id],
   ['punch', 'punches', item => item.id],
-  ['resource', 'resources', item => item.id]
+  ['resource', 'resources', item => item.id],
+  ['group', 'groups', item => item.id],
+  ['family', 'families', item => item.id]
 ];
 let fingerprints = {};
 let pendingDeletes = [];
@@ -145,7 +147,20 @@ function employeeMiniChipHTML(id){
   return `<span class="employee-mini-chip">${employeeAvatarHTML(e,'inline-avatar-small')}<span>${e.nome} ${e.sobrenome}</span></span>`;
 }
 function emptyState(){
-  return { employees:[], products:[], orders:[], punches:[], resources:[], nextOrderNum:1, nextEmployeeNum:1 };
+  return { employees:[], products:[], orders:[], punches:[], resources:[], groups:[], families:[], nextOrderNum:1, nextEmployeeNum:1 };
+}
+function activeCompanyId(){
+  if(sessionUser && sessionUser.companyId) return sessionUser.companyId;
+  try { return localStorage.getItem('prodfy_company') || ''; } catch(e){ return ''; }
+}
+function cacheStorageKey(){
+  return CACHE_KEY + '_' + (activeCompanyId() || 'local');
+}
+function companyHeaders(){
+  const headers = {};
+  const companyId = activeCompanyId();
+  if(companyId) headers['x-company-id'] = companyId;
+  return headers;
 }
 function authToken(){
   try { return localStorage.getItem('prodfy_jwt') || ''; } catch(e){ return ''; }
@@ -193,7 +208,7 @@ function rebuildFingerprints(){
 }
 function saveCache(){
   try{
-    localStorage.setItem(CACHE_KEY, JSON.stringify({ state, fingerprints, pendingDeletes }));
+    localStorage.setItem(cacheStorageKey(), JSON.stringify({ state, fingerprints, pendingDeletes }));
     localStorage.removeItem(LEGACY_KEY);
     localStorage.removeItem(STORAGE_KEY);
   }catch(e){
@@ -209,7 +224,7 @@ function loadCache(){
   fingerprints = {};
   pendingDeletes = [];
   try{
-    const raw = localStorage.getItem(CACHE_KEY);
+    const raw = localStorage.getItem(cacheStorageKey());
     if(!raw) return;
     const parsed = JSON.parse(raw);
     state = Object.assign(emptyState(), parsed.state || {});
@@ -288,9 +303,13 @@ async function syncNow(){
   setSyncPill('Sincronizando…');
   try{
     const viewing = sessionUser && sessionUser.role === 'visualizador';
+    if(sessionUser && sessionUser.role === 'administrador_suporte' && !activeCompanyId()){
+      setSyncPill('Escolha a empresa em Configurações', true);
+      return;
+    }
     const response = await fetch(apiBase() + (viewing ? '/api/production' : '/api/production/sync'), {
       method: viewing ? 'GET' : 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      headers: Object.assign({ 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token }, companyHeaders()),
       body: viewing ? undefined : JSON.stringify(buildChanges())
     });
     if(response.status === 401){
@@ -523,7 +542,7 @@ function applyAccess(){
   });
 }
 function navBadge(id){
-  if(id==='ordens') return state.orders.filter(o=>o.status!=='Concluída').length;
+  if(id==='ordens') return state.orders.filter(o=>!orderIsClosed(o)).length;
   if(id==='apontamento') return state.punches.filter(p=>p.status==='Aberto').length;
   if(id==='funcionarios') return state.employees.length;
   if(id==='recursos') return state.resources.length;
@@ -542,6 +561,8 @@ function renderNav(){
   if(foot && sessionUser){
     foot.innerHTML = `<div style="color:#fff; font-weight:700;">${escapeHtml(sessionUser.name)}</div><div>${escapeHtml(ROLE_LABELS[sessionUser.role] || sessionUser.role)}</div><button class="btn btn-sm" style="margin-top:8px;" type="button" onclick="logout()">Sair</button>`;
   }
+  const version = document.getElementById('versionFoot');
+  if(version) version.textContent = 'Versão ' + ((window.PRODIFY_CONFIG && window.PRODIFY_CONFIG.version) || '');
 }
 function setTab(id, options){
   options = options || {};
@@ -586,17 +607,44 @@ function punchOrderLabel(punch){ const order = orderById(punch && punch.ordemId)
 function resourceById(id){ return state.resources.find(r=>r.id===id); }
 function orderProducedQty(orderId){ return state.punches.filter(p=>p.ordemId===orderId).reduce((s,p)=>s+(Number(p.quantidadeProduzida)||0), 0); }
 function orderScrapQty(orderId){ return state.punches.filter(p=>p.ordemId===orderId).reduce((s,p)=>s+(Number(p.quantidadeRefugada)||0), 0); }
+const ORDER_STATUSES = ['Não iniciado','Iniciado/Parado','Bloqueado','Finalizado/Em Pintura','Finalizado/Em montagem','Finalizado','Encaminhado Expedição'];
+function normalizeOrderStatus(status){
+  if(status==='Aberta') return 'Não iniciado';
+  if(status==='Em Produção') return 'Iniciado/Parado';
+  if(status==='Concluída') return 'Finalizado';
+  return ORDER_STATUSES.indexOf(status) >= 0 ? status : 'Não iniciado';
+}
+function orderIsClosed(order){
+  const status = normalizeOrderStatus(order && order.status);
+  return status === 'Finalizado' || status === 'Encaminhado Expedição';
+}
 function orderStatusBadge(status){
-  if(status==='Aberta') return '<span class="badge badge-gray"><span class="dot"></span>Aberta</span>';
-  if(status==='Em Produção') return '<span class="badge badge-amber"><span class="dot"></span>Em Produção</span>';
-  return '<span class="badge badge-green"><span class="dot"></span>Concluída</span>';
+  const label = normalizeOrderStatus(status);
+  const tone = label === 'Não iniciado' ? 'badge-gray' : (label === 'Bloqueado' ? 'badge-red' : (orderIsClosed({status:label}) ? 'badge-green' : 'badge-amber'));
+  const extra = label === 'Iniciado/Parado' || label === 'Bloqueado' ? '' : '';
+  return '<span class="badge '+tone+'"><span class="dot"></span>'+escapeHtml(label)+extra+'</span>';
+}
+function orderItems(order){
+  if(order.itens && order.itens.length) return order.itens;
+  return [{ id: order.id + '-item', descricao: order.descricao || order.codigo, grupoId: order.grupoId || '', familiaId: order.familiaId || '', quantidade: Number(order.quantidadePlanejada)||0, produzida: orderProducedQty(order.id) }];
+}
+function groupProgress(order){
+  const buckets = {};
+  orderItems(order).forEach(function(item){
+    const group = state.groups.find(function(entry){ return entry.id === item.grupoId; });
+    const name = group ? group.nome : 'Sem grupo';
+    if(!buckets[name]) buckets[name] = { quantidade: 0, produzida: 0 };
+    buckets[name].quantidade += Number(item.quantidade) || 0;
+    buckets[name].produzida += Number(item.produzida) || 0;
+  });
+  return Object.keys(buckets).map(function(name){
+    const row = buckets[name];
+    const pct = row.quantidade > 0 ? Math.round((row.produzida / row.quantidade) * 1000) / 10 : 0;
+    return { name: name, pct: pct, quantidade: row.quantidade, produzida: row.produzida };
+  });
 }
 function recalcOrderStatus(order){
-  const produced = orderProducedQty(order.id);
-  const hasOpen = state.punches.some(p=>p.ordemId===order.id && p.status==='Aberto');
-  if(produced >= order.quantidadePlanejada) order.status = 'Concluída';
-  else if(hasOpen || produced > 0) order.status = 'Em Produção';
-  else order.status = 'Aberta';
+  order.status = normalizeOrderStatus(order.status);
 }
 function recalcAllOrderStatuses(){ state.orders.forEach(recalcOrderStatus); }
 function isOnVacation(emp){
@@ -629,7 +677,7 @@ function renderDashboard(){
   const el = document.getElementById('panel-dashboard');
   const totalCelulas = state.resources.length;
   const produzindo = state.resources.filter(r=>r.status==='Produzindo').length;
-  const emAndamento = state.orders.filter(o=>o.status==='Em Produção').length;
+  const emAndamento = state.orders.filter(o=>!orderIsClosed(o) && normalizeOrderStatus(o.status)!=='Não iniciado').length;
   const todaysPunchesKpi = state.punches.filter(p=>isTodayBR(p.inicio));
   const producedKpi = todaysPunchesKpi.reduce((s,p)=>s+(Number(p.quantidadeProduzida)||0),0);
   const scrapKpi = todaysPunchesKpi.reduce((s,p)=>s+(Number(p.quantidadeRefugada)||0),0);
@@ -865,9 +913,9 @@ function renderRankingAndCharts(){
 
   const dh = document.getElementById('statusDonutHolder');
   if(dh){
-    const abertas = state.orders.filter(o=>o.status==='Aberta').length;
-    const andamento = state.orders.filter(o=>o.status==='Em Produção').length;
-    const concluidas = state.orders.filter(o=>o.status==='Concluída').length;
+    const abertas = state.orders.filter(o=>normalizeOrderStatus(o.status)==='Não iniciado').length;
+    const andamento = state.orders.filter(o=>!orderIsClosed(o) && normalizeOrderStatus(o.status)!=='Não iniciado').length;
+    const concluidas = state.orders.filter(orderIsClosed).length;
     dh.innerHTML = donutSVG(abertas, andamento, concluidas);
   }
 }
@@ -900,9 +948,9 @@ function donutSVG(abertas, andamento, concluidas){
         <div class="donut-inner"><div class="donut-total">${total}</div><div class="donut-sub">ordens</div></div>
       </div>
       <div class="donut-legend">
-        <div class="donut-legend-row"><span class="donut-legend-dot" style="background:${colors.aberta};"></span>Aberta<span class="donut-legend-val">${abertas}</span></div>
-        <div class="donut-legend-row"><span class="donut-legend-dot" style="background:${colors.andamento};"></span>Em Produção<span class="donut-legend-val">${andamento}</span></div>
-        <div class="donut-legend-row"><span class="donut-legend-dot" style="background:${colors.concluida};"></span>Concluída<span class="donut-legend-val">${concluidas}</span></div>
+        <div class="donut-legend-row"><span class="donut-legend-dot" style="background:${colors.aberta};"></span>Não iniciado<span class="donut-legend-val">${abertas}</span></div>
+        <div class="donut-legend-row"><span class="donut-legend-dot" style="background:${colors.andamento};"></span>Em andamento<span class="donut-legend-val">${andamento}</span></div>
+        <div class="donut-legend-row"><span class="donut-legend-dot" style="background:${colors.concluida};"></span>Finalizado<span class="donut-legend-val">${concluidas}</span></div>
       </div>
     </div>`;
 }
@@ -917,11 +965,13 @@ function openResourceModal(id){
     document.getElementById('resNome').value = r.nome;
     document.getElementById('resDescricao').value = r.descricao;
     document.getElementById('resSetor').value = r.setor;
+    document.getElementById('resRestricao').value = r.restricao || '';
   } else {
     document.getElementById('resModalTitle').textContent = 'Nova Célula / Recurso';
     document.getElementById('resNome').value = '';
     document.getElementById('resDescricao').value = '';
     document.getElementById('resSetor').value = '';
+    document.getElementById('resRestricao').value = '';
   }
   openModal('modalResource');
 }
@@ -931,9 +981,10 @@ async function saveResource(){
   const nome = document.getElementById('resNome').value.trim();
   const descricao = document.getElementById('resDescricao').value.trim();
   const setor = document.getElementById('resSetor').value.trim() || 'Geral';
+  const restricao = document.getElementById('resRestricao').value.trim();
   if(!nome || !descricao){ toast('Preencha código e descrição.', 'error'); return; }
-  if(id){ Object.assign(resourceById(id), {nome,descricao,setor}); }
-  else{ state.resources.push({id:uid(), nome, descricao, setor, status:'Parada', funcionarios:[]}); }
+  if(id){ Object.assign(resourceById(id), {nome,descricao,setor,restricao}); }
+  else{ state.resources.push({id:uid(), nome, descricao, setor, restricao, status:'Parada', funcionarios:[], grupos:[]}); }
   await persist();
   closeModal('modalResource');
   populateSetorSelect();
@@ -1085,6 +1136,7 @@ function renderOrdensTable(){
       <td class="mono">${o.tempoEstimadoTotalMin.toFixed(0)} min</td>
       <td>${orderStatusBadge(o.status)}</td>
       <td style="white-space:nowrap;">
+        <button class="btn btn-sm btn-ghost" data-edit="ordens" onclick="openOrderStatus('${o.id}')">Status</button>
         <button class="btn btn-sm btn-ghost" onclick="showOrderQR('${o.id}')">${icon('qrscan',13)} QR Code</button>
         <button class="icon-btn" onclick="printOrder('${o.id}')" title="Imprimir Ordem">${icon('printer',15)}</button>
       </td>
@@ -1123,7 +1175,8 @@ async function saveOrder(shouldPrint){
   const numero = formatOrderNumber(state.nextOrderNum);
   const opId = uid();
   state.nextOrderNum++;
-  state.orders.push({ id: opId, numero, codigo: prod.codigo, descricao: prod.descricao, quantidadePlanejada: qtd, tempoEstimadoTotalMin: prod.tempoFabricacaoMin*qtd, status:'Aberta', criadoEm: nowISO(), geradoPor });
+  const familia = state.families.find(function(item){ return item.id === prod.familiaId; });
+  state.orders.push({ id: opId, numero, codigo: prod.codigo, descricao: prod.descricao, quantidadePlanejada: qtd, tempoEstimadoTotalMin: prod.tempoFabricacaoMin*qtd, status:'Não iniciado', setor:'', motivo:'', criadoEm: nowISO(), geradoPor, itens:[{ id: uid(), descricao: prod.descricao, grupoId: familia ? familia.grupoId : '', familiaId: prod.familiaId || '', quantidade: qtd, produzida: 0 }] });
   await persist();
   closeModal('modalOrder');
   toast('Ordem ' + numero + ' gerada com sucesso.', 'success');
@@ -1139,7 +1192,8 @@ function showOrderInfo(orderId){
     <div style="margin-bottom:14px;">
       <div style="font-size:20px; font-weight:800;">${orderLabel(order)}</div>
       <div style="color:var(--text-muted); font-size:13px;">${order.codigo} — ${order.descricao}</div>
-      <div style="margin-top:8px;">${orderStatusBadge(order.status)}</div>
+      <div style="margin-top:8px;">${orderStatusBadge(order.status)} ${order.motivo ? `<span class="section-sub">${escapeHtml(order.setor || '')} · ${escapeHtml(order.motivo)}</span>` : ''}</div>
+      <div style="margin-top:10px;">${groupProgress(order).map(function(row){ return `<div>${escapeHtml(row.name)}: ${row.pct}%${row.pct < 100 ? ' · pendente' : ''}</div>`; }).join('')}</div>
     </div>
     <div class="card" style="box-shadow:none; background:var(--surface-2); margin-bottom:14px;">
       <div class="grid grid-2" style="gap:14px;">
@@ -1223,12 +1277,18 @@ function renderEngenharia(){
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th style="width:17%;">Código ERP</th><th style="width:10%;">Classificação</th><th>Descrição</th><th style="width:20%;">Tempo Fabricação (min/peça)</th><th style="width:60px;"></th></tr></thead>
+        <thead><tr><th style="width:16%;">Código ERP</th><th style="width:10%;">Classificação</th><th>Descrição</th><th style="width:16%;">Tempo (min/peça)</th><th style="width:16%;">Família</th><th style="width:60px;"></th></tr></thead>
         <tbody id="engTbody"></tbody>
       </table>
     </div>
+    <div class="grid grid-2" style="margin-top:18px;">
+      <div class="card" id="groupCatalog"></div>
+      <div class="card" id="familyCatalog"></div>
+    </div>
+    <div class="card" id="groupItems" style="margin-top:14px;"></div>
   `;
   renderEngenhariaTable();
+  renderCatalogs();
 }
 function renderEngenhariaTable(){
   const tbody = document.getElementById('engTbody');
@@ -1245,6 +1305,7 @@ function renderEngenhariaTable(){
       </select></td>
       <td class="editable-td"><input data-edit="engenharia" value="${p.descricao}" onchange="updateProduct(${realIdx},'descricao',this.value)"></td>
       <td class="editable-td"><input data-edit="engenharia" type="number" step="0.1" min="0" value="${p.tempoFabricacaoMin}" onchange="updateProduct(${realIdx},'tempoFabricacaoMin',this.value)"></td>
+      <td class="editable-td"><select data-edit="engenharia" onchange="updateProduct(${realIdx},'familiaId',this.value)"><option value="">Família</option>${state.families.map(function(family){ return `<option value="${family.id}" ${p.familiaId===family.id?'selected':''}>${escapeHtml(family.nome)}</option>`; }).join('')}</select></td>
       <td><button class="icon-btn danger" data-edit="engenharia" onclick="removeProduct(${realIdx})" title="Remover">${icon('trash',14)}</button></td>
     </tr>`;
   }).join('') : `<tr class="empty-row"><td colspan="5">Nenhum código cadastrado. Clique em "Novo Código" para começar.</td></tr>`;
@@ -1742,8 +1803,12 @@ function renderAcompanhamento(){
       </table>
     </div>
     <div id="acompDetail" style="margin-top:20px;"></div>
+    <div id="taskBoard"></div>
+    <div id="studyBoard"></div>
   `;
   renderAcompTable();
+  renderTaskBoard();
+  renderStudyBoard();
 }
 function renderAcompTable(){
   const tbody = document.getElementById('acompTbody');
@@ -1817,6 +1882,10 @@ function showLogin(needsSetup){
   const login = document.getElementById('loginForm');
   if(setup) setup.hidden = !needsSetup;
   if(login) login.hidden = !!needsSetup;
+  const forgot = document.getElementById('forgotForm');
+  const force = document.getElementById('forcePasswordForm');
+  if(forgot) forgot.hidden = true;
+  if(force) force.hidden = true;
   const hint = document.getElementById('loginHint');
   if(hint) hint.textContent = needsSetup
     ? 'Ainda não existe conta. A primeira pessoa vira administrador suporte e tem acesso completo.'
@@ -1834,7 +1903,7 @@ function hideLogin(){
 }
 async function accountApi(path, options){
   options = options || {};
-  const headers = Object.assign({ 'Content-Type': 'application/json' }, options.headers || {});
+  const headers = Object.assign({ 'Content-Type': 'application/json' }, companyHeaders(), options.headers || {});
   if(authToken()) headers.Authorization = 'Bearer ' + authToken();
   const response = await fetch(apiBase() + path, {
     method: options.method || 'GET',
@@ -1885,7 +1954,12 @@ function renderConfiguracoes(){
         <div class="field"><label>Nome</label><input id="cfgName" required minlength="2" maxlength="80" value="${escapeHtml(sessionUser.name)}"></div>
         <div class="field"><label>E-mail</label><input id="cfgEmail" type="email" required value="${escapeHtml(sessionUser.email)}"></div>
       </div>
-      <div class="field"><label>Nova senha</label><input id="cfgPassword" type="password" minlength="8" maxlength="72" autocomplete="new-password" placeholder="Deixe em branco para manter"></div>
+      <div class="field"><label>Nova senha</label>
+        <div class="password-field">
+          <input id="cfgPassword" type="password" minlength="8" maxlength="72" autocomplete="new-password" placeholder="Deixe em branco para manter">
+          <button class="eye-btn" type="button" onclick="togglePassword('cfgPassword', this)">mostrar</button>
+        </div>
+      </div>
       <button class="btn btn-primary" type="submit">Salvar perfil</button>
     </form>
     ${canManageUsers() ? `
@@ -1898,7 +1972,7 @@ function renderConfiguracoes(){
         <div class="field"><label>E-mail</label><input id="userEmail" type="email" required></div>
       </div>
       <div class="field-row">
-        <div class="field"><label>Senha</label><input id="userPassword" type="password" minlength="8" maxlength="72"></div>
+        <div class="field"><label>Senha provisória</label><input id="userPassword" disabled placeholder="Gerada ao salvar e mostrada uma vez"></div>
         <div class="field"><label>Perfil</label>
           <select id="userRole" onchange="renderPermissionChoices()">${roles.map(function(role){ return `<option value="${role}">${ROLE_LABELS[role]}</option>`; }).join('')}</select>
         </div>
@@ -1915,6 +1989,10 @@ function renderConfiguracoes(){
     renderPermissionChoices();
     loadAccessUsers();
   }
+  const extra = document.createElement('div');
+  extra.id = 'companySettings';
+  el.appendChild(extra);
+  renderCompanySettings();
 }
 function renderPermissionChoices(current){
   const holder = document.getElementById('permissionChoices');
@@ -1935,6 +2013,7 @@ async function loadAccessUsers(){
         <td>${escapeHtml(ROLE_LABELS[user.role] || user.role)}</td>
         <td>
           <button class="icon-btn" type="button" onclick="editAccessUser('${user.id}')" title="Editar">${icon('edit',14)}</button>
+          ${mine ? '' : `<button class="btn btn-sm" type="button" onclick="toggleUserBlock('${user.id}', ${user.blocked ? 'false' : 'true'})">${user.blocked ? 'Desbloquear' : 'Bloquear'}</button>`}
           <button class="icon-btn danger" type="button" onclick="deleteAccessUser('${user.id}')" ${mine ? 'disabled' : ''} title="Excluir">${icon('trash',14)}</button>
         </td>
       </tr>`;
@@ -1988,13 +2067,19 @@ async function saveAccessUser(event){
   const permissions = selectedPermissions(role);
   if(permissions) body.permissions = permissions;
   try{
+    if(sessionUser.role === 'administrador_suporte') body.companyId = activeCompanyId();
     if(id){
       if(password) body.password = password;
       await accountApi('/api/users/' + id, { method:'PUT', body: body });
+      toast('Usuário salvo.', 'success');
     }else{
-      if(!password){ toast('Informe uma senha para a conta nova.', 'error'); return; }
-      body.password = password;
-      await accountApi('/api/users', { method:'POST', body: body });
+      if(role !== 'administrador_suporte' && !activeCompanyId() && sessionUser.role === 'administrador_suporte'){
+        toast('Escolha a empresa antes de criar o usuário.', 'error');
+        return;
+      }
+      const created = await accountApi('/api/users', { method:'POST', body: body });
+      window.alert('Senha provisória, mostrada uma vez:\n' + created.data.provisionalPassword + '\nA pessoa troca no primeiro acesso.');
+      toast('Usuário criado. A senha provisória foi mostrada nesta tela.', 'success');
     }
     event.target.reset();
     document.getElementById('editingUserId').value = '';
@@ -2021,6 +2106,10 @@ async function logout(){
   showLogin(false);
 }
 async function enterApp(){
+  if(sessionUser && sessionUser.mustChangePassword){
+    showForcePassword();
+    return;
+  }
   hideLogin();
   renderShell();
   renderNav();
@@ -2091,6 +2180,29 @@ function bindLoginForms(){
       showLoginMessage(error.message);
     }
   });
+  const forgot = document.getElementById('forgotForm');
+  if(forgot) forgot.addEventListener('submit', async function(event){
+    event.preventDefault();
+    showLoginMessage('');
+    try{
+      const result = await accountApi('/api/auth/password-requests', { method:'POST', body:{ email: document.getElementById('forgotEmail').value } });
+      showLoginMessage(result.data.message);
+    }catch(error){
+      showLoginMessage(error.message);
+    }
+  });
+  const force = document.getElementById('forcePasswordForm');
+  if(force) force.addEventListener('submit', async function(event){
+    event.preventDefault();
+    showLoginMessage('');
+    try{
+      const updated = await accountApi('/api/users/' + sessionUser.id, { method:'PUT', body:{ password: document.getElementById('forcePassword').value } });
+      rememberSession(Object.assign({}, sessionUser, updated.data, { mustChangePassword:false }));
+      await enterApp();
+    }catch(error){
+      showLoginMessage(error.message);
+    }
+  });
   if(setup) setup.addEventListener('submit', async function(event){
     event.preventDefault();
     showLoginMessage('');
@@ -2117,6 +2229,346 @@ async function init(){
   bindLoginForms();
   await boot();
   setInterval(()=>{ if(activeTab==='dashboard') renderRankingAndCharts(); if(activeTab==='apontamento'){ renderApontamento(); applyAccess(); } }, 15000);
+}
+
+function showForgotPassword(open){
+  const forgot = document.getElementById('forgotForm');
+  const login = document.getElementById('loginForm');
+  if(!forgot || !login) return;
+  const visible = open !== false;
+  forgot.hidden = !visible;
+  login.hidden = visible;
+}
+function showForcePassword(){
+  const gate = document.getElementById('loginGate');
+  const app = document.getElementById('prodfy-app');
+  if(gate) gate.hidden = false;
+  if(app) app.classList.add('is-locked');
+  ['loginForm','setupForm','forgotForm'].forEach(function(id){
+    const form = document.getElementById(id);
+    if(form) form.hidden = true;
+  });
+  const force = document.getElementById('forcePasswordForm');
+  if(force) force.hidden = false;
+}
+function togglePassword(id, button){
+  const input = document.getElementById(id);
+  if(!input) return;
+  const show = input.type === 'password';
+  input.type = show ? 'text' : 'password';
+  button.textContent = show ? 'ocultar' : 'mostrar';
+}
+async function openOrderStatus(id){
+  if(deny('ordens')) return;
+  const order = orderById(id);
+  if(!order) return;
+  const next = window.prompt('Novo status:\n' + ORDER_STATUSES.join('\n'), normalizeOrderStatus(order.status));
+  if(!next) return;
+  if(ORDER_STATUSES.indexOf(next) < 0){ toast('Status desconhecido.', 'error'); return; }
+  let setor = order.setor || '';
+  let motivo = order.motivo || '';
+  if(next === 'Iniciado/Parado' || next === 'Bloqueado'){
+    setor = window.prompt('Setor', setor) || '';
+    motivo = window.prompt('Motivo', motivo) || '';
+    if(!setor.trim() || !motivo.trim()){ toast('Informe o setor e o motivo.', 'error'); return; }
+  }
+  order.status = next;
+  order.setor = setor.trim();
+  order.motivo = motivo.trim();
+  await persist();
+  if(activeTab === 'ordens') renderOrdens();
+  if(activeTab === 'acompanhamento') renderAcompanhamento();
+}
+function readImageFile(input, done){
+  const file = input.files && input.files[0];
+  if(!file){ done(''); return; }
+  if(file.size > 180000){ toast('Use uma imagem de até 180 KB.', 'error'); input.value = ''; return; }
+  const reader = new FileReader();
+  reader.onload = function(){ done(String(reader.result || '')); };
+  reader.readAsDataURL(file);
+}
+function renderCatalogs(){
+  const groups = document.getElementById('groupCatalog');
+  const families = document.getElementById('familyCatalog');
+  if(!groups || !families) return;
+  groups.innerHTML = `<div class="section-title" style="font-size:16px;">Grupos</div>
+    <div class="section-sub">Ex.: Usinagem, Chaparia, Pintura, Almoxarifado.</div>
+    <div class="field"><label>Nome</label><input id="groupName" data-edit="engenharia"></div>
+    <div class="field"><label>Imagem</label><input id="groupImage" type="file" accept="image/*" data-edit="engenharia"></div>
+    <button class="btn btn-primary" data-edit="engenharia" type="button" onclick="saveGroup()">Salvar grupo</button>
+    <div style="margin-top:12px;">${state.groups.map(function(group){
+      return `<button class="btn btn-sm" type="button" style="margin:4px;" onclick="showGroupItems('${group.id}')">${group.imagem ? `<img alt="" src="${group.imagem}" style="width:22px;height:22px;object-fit:cover;border-radius:4px;vertical-align:middle;"> ` : ''}${escapeHtml(group.nome)}</button>`;
+    }).join('') || '<div class="section-sub">Nenhum grupo.</div>'}</div>`;
+  families.innerHTML = `<div class="section-title" style="font-size:16px;">Famílias</div>
+    <div class="section-sub">Ex.: Ponteiras, Chapas, Tubos, Arruelas.</div>
+    <div class="field"><label>Nome</label><input id="familyName" data-edit="engenharia"></div>
+    <div class="field"><label>Grupo</label><select id="familyGroup" data-edit="engenharia">${state.groups.map(function(group){ return `<option value="${group.id}">${escapeHtml(group.nome)}</option>`; }).join('')}</select></div>
+    <div class="field"><label>Imagem</label><input id="familyImage" type="file" accept="image/*" data-edit="engenharia"></div>
+    <button class="btn btn-primary" data-edit="engenharia" type="button" onclick="saveFamily()">Salvar família</button>
+    <div style="margin-top:12px;">${state.families.map(function(family){
+      return `<button class="btn btn-sm" type="button" style="margin:4px;" onclick="showFamilyModels('${family.id}')">${escapeHtml(family.nome)}</button>`;
+    }).join('') || '<div class="section-sub">Nenhuma família.</div>'}</div>`;
+}
+async function saveGroup(){
+  if(deny('engenharia')) return;
+  const nome = document.getElementById('groupName').value.trim();
+  if(!nome){ toast('Informe o nome do grupo.', 'error'); return; }
+  readImageFile(document.getElementById('groupImage'), async function(imagem){
+    state.groups.push({ id: uid(), nome: nome, imagem: imagem });
+    await persist();
+    renderCatalogs();
+    applyAccess();
+  });
+}
+async function saveFamily(){
+  if(deny('engenharia')) return;
+  const nome = document.getElementById('familyName').value.trim();
+  const grupoId = document.getElementById('familyGroup').value;
+  if(!nome || !grupoId){ toast('Informe a família e o grupo.', 'error'); return; }
+  readImageFile(document.getElementById('familyImage'), async function(imagem){
+    state.families.push({ id: uid(), nome: nome, grupoId: grupoId, imagem: imagem });
+    await persist();
+    renderCatalogs();
+    renderEngenhariaTable();
+    applyAccess();
+  });
+}
+function showGroupItems(groupId){
+  const group = state.groups.find(function(item){ return item.id === groupId; });
+  const box = document.getElementById('groupItems');
+  if(!group || !box) return;
+  const families = state.families.filter(function(item){ return item.grupoId === groupId; });
+  const familyIds = families.map(function(item){ return item.id; });
+  const models = state.products.filter(function(item){ return familyIds.indexOf(item.familiaId) >= 0; });
+  box.innerHTML = `<div class="section-title" style="font-size:16px;">${escapeHtml(group.nome)}</div>
+    <div class="section-sub">Famílias e modelos vinculados.</div>
+    <div>${families.map(function(item){ return escapeHtml(item.nome); }).join(', ') || 'Nenhuma família.'}</div>
+    <div style="margin-top:8px;">${models.map(function(item){ return `<div>${escapeHtml(item.codigo)} — ${escapeHtml(item.descricao)}</div>`; }).join('') || 'Nenhum modelo.'}</div>`;
+}
+function showFamilyModels(familyId){
+  const family = state.families.find(function(item){ return item.id === familyId; });
+  const box = document.getElementById('groupItems');
+  if(!family || !box) return;
+  const models = state.products.filter(function(item){ return item.familiaId === familyId; });
+  box.innerHTML = `<div class="section-title" style="font-size:16px;">${escapeHtml(family.nome)}</div>
+    ${models.map(function(item){ return `<div>${escapeHtml(item.codigo)} — ${escapeHtml(item.descricao)}</div>`; }).join('') || '<div>Nenhum modelo nesta família.</div>'}`;
+}
+function renderTaskBoard(){
+  const board = document.getElementById('taskBoard');
+  if(!board) return;
+  const byOperator = {};
+  const byMachine = {};
+  state.orders.filter(function(order){ return !orderIsClosed(order); }).forEach(function(order){
+    orderItems(order).forEach(function(item){
+      const produced = Number(item.produzida) || 0;
+      const planned = Number(item.quantidade) || 0;
+      if(planned && produced >= planned) return;
+      const line = `${orderLabel(order)} · ${item.descricao || order.descricao} · falta ${Math.max(planned - produced, 0)}`;
+      const operator = item.funcionarioNome || 'Sem operador';
+      const machine = item.recursoNome || 'Sem máquina';
+      if(!byOperator[operator]) byOperator[operator] = [];
+      if(!byMachine[machine]) byMachine[machine] = [];
+      byOperator[operator].push(line);
+      byMachine[machine].push(line);
+    });
+  });
+  function column(title, groups){
+    return `<div class="card"><div class="section-title" style="font-size:16px;">${title}</div>${Object.keys(groups).map(function(name){
+      return `<div style="margin-top:8px;"><b>${escapeHtml(name)}</b>${groups[name].map(function(line){ return `<div>${escapeHtml(line)}</div>`; }).join('')}</div>`;
+    }).join('') || '<div class="section-sub">Nenhuma tarefa aberta.</div>'}</div>`;
+  }
+  board.innerHTML = `<div class="section-title" style="margin-top:18px;">Lista de tarefas</div>
+    <button class="btn btn-sm" type="button" onclick="printTasks()">Imprimir</button>
+    <div class="grid grid-2" style="margin-top:10px;">${column('Por operador', byOperator)}${column('Por máquina', byMachine)}</div>`;
+}
+function printTasks(){
+  const board = document.getElementById('taskBoard');
+  const printArea = document.getElementById('printArea');
+  if(!board || !printArea) return;
+  printArea.innerHTML = `<div class="print-page"><div class="print-brand">PRODFY</div><div class="print-doc-title">Lista de tarefas PPCP</div>${board.innerHTML}</div>`;
+  setTimeout(function(){ window.print(); }, 100);
+}
+let pendingStudy = null;
+function renderStudyBoard(){
+  const board = document.getElementById('studyBoard');
+  if(!board) return;
+  const options = state.orders.filter(function(order){ return !orderIsClosed(order); }).map(function(order){
+    return `<option value="${order.id}">${escapeHtml(orderLabel(order))} — ${escapeHtml(order.descricao || '')}</option>`;
+  }).join('');
+  const result = pendingStudy ? `<div class="card" style="margin-top:10px;">
+      <div class="section-title" style="font-size:16px;">Sugestão</div>
+      ${(pendingStudy.gargalos || []).map(function(item){ return `<div>${escapeHtml(item.orderLabel)} · ${escapeHtml(item.itemLabel)} · ${item.percentual}% · ${escapeHtml(item.motivo)}</div>`; }).join('')}
+      ${(pendingStudy.suggestions || []).map(function(item){ return `<div style="margin-top:6px;"><b>${item.prioridade}. ${escapeHtml(item.orderLabel)}</b> · ${escapeHtml(item.itemLabel)} · ${escapeHtml(item.recursoNome)} · ${escapeHtml(item.funcionarioNome)}<div class="section-sub">${escapeHtml(item.motivo)}</div></div>`; }).join('') || '<div>Nenhuma sugestão com as máquinas e operadores atuais.</div>'}
+      <div style="margin-top:10px;">
+        <button class="btn btn-primary" data-edit="ordens" type="button" onclick="applyStudy()">OK — aplicar</button>
+        <button class="btn" type="button" onclick="discardStudy()">Descartar</button>
+      </div>
+    </div>` : '';
+  board.innerHTML = `<div class="card" style="margin-top:14px;">
+      <div class="section-title" style="font-size:16px;">Estudo por IA</div>
+      <div class="section-sub">Sugere máquina e operador para entregar um pedido e ocupar as máquinas. Nada muda no sistema até o OK.</div>
+      <div class="field"><label>Pedido prioritário</label><select id="studyOrder">${options}</select></div>
+      <button class="btn btn-primary" data-edit="ordens" type="button" onclick="createStudy()">Gerar estudo</button>
+    </div>${result}`;
+}
+function createStudy(){
+  if(deny('ordens')) return;
+  const select = document.getElementById('studyOrder');
+  if(!select || !select.value || !window.ProdifyStudy){ toast('Não há pedido para estudar.', 'error'); return; }
+  const orders = state.orders.map(function(order){
+    return Object.assign({}, order, { itens: orderItems(order) });
+  });
+  pendingStudy = window.ProdifyStudy.buildProductionStudy({
+    targetOrderId: select.value,
+    orders: orders,
+    employees: state.employees,
+    resources: state.resources,
+    today: new Date().toISOString().slice(0, 10)
+  });
+  renderStudyBoard();
+  applyAccess();
+}
+async function applyStudy(){
+  if(deny('ordens')) return;
+  if(!pendingStudy) return;
+  if(sessionUser && sessionUser.role === 'visualizador'){ toast('O visualizador não aplica o estudo.', 'error'); return; }
+  pendingStudy.suggestions.forEach(function(item){
+    const order = orderById(item.orderId);
+    if(!order) return;
+    if(!order.itens) order.itens = orderItems(order);
+    const target = order.itens.find(function(entry){ return entry.id === item.itemId; }) || order.itens[0];
+    if(!target) return;
+    target.recursoId = item.recursoId;
+    target.recursoNome = item.recursoNome;
+    target.funcionarioId = item.funcionarioId;
+    target.funcionarioNome = item.funcionarioNome;
+  });
+  pendingStudy = null;
+  await persist();
+  toast('Estudo aplicado.', 'success');
+  renderAcompanhamento();
+}
+function discardStudy(){
+  pendingStudy = null;
+  renderStudyBoard();
+  toast('Estudo descartado.', 'success');
+}
+async function renderCompanySettings(){
+  const box = document.getElementById('companySettings');
+  if(!box || !sessionUser) return;
+  let companies = [];
+  try{ companies = (await accountApi('/api/companies')).data || []; }catch(e){ companies = []; }
+  const selected = activeCompanyId();
+  const current = companies.find(function(company){ return company.id === selected; }) || companies[0] || null;
+  const suporte = sessionUser.role === 'administrador_suporte';
+  const manager = canManageUsers();
+  box.innerHTML = `
+    <div class="card" style="margin-top:14px;">
+      <div class="section-title" style="font-size:16px;">Empresa</div>
+      <div class="section-sub">Versão ${escapeHtml((window.PRODIFY_CONFIG && window.PRODIFY_CONFIG.version) || '')}</div>
+      ${suporte ? `<div class="field"><label>Empresa ativa</label><select id="activeCompany" onchange="selectCompany(this.value)"><option value="">Escolha</option>${companies.map(function(company){ return `<option value="${company.id}" ${company.id===selected?'selected':''}>${escapeHtml(company.name)}</option>`; }).join('')}</select></div>
+        <form onsubmit="createCompany(event)"><div class="field-row"><div class="field"><label>Nova empresa</label><input id="newCompanyName" required minlength="2"></div></div><button class="btn btn-primary" type="submit">Criar empresa</button></form>` : ''}
+      ${current ? `<form onsubmit="saveCompany(event, '${current.id}')">
+        ${current.logo ? `<img class="logo-preview" alt="Logo" src="${current.logo}">` : ''}
+        <div class="field"><label>Nome</label><input id="companyName" value="${escapeHtml(current.name)}" ${manager ? '' : 'disabled'}></div>
+        <div class="field"><label>Logo</label><input id="companyLogo" type="file" accept="image/*" ${manager ? '' : 'disabled'}></div>
+        ${suporte ? `<div class="field-row">
+          <div class="field"><label>Máximo de usuários</label><input id="maxUsers" type="number" min="1" value="${current.maxUsers}"></div>
+          <div class="field"><label>Máximo de máquinas</label><input id="maxMachines" type="number" min="1" value="${current.maxMachines}"></div>
+          <div class="field"><label>Máximo de cadastros</label><input id="maxRegistrations" type="number" min="1" value="${current.maxRegistrations}"></div>
+        </div>
+        <div class="field"><label>Data limite de uso</label><input id="usageUntil" type="date" value="${current.usageUntil || ''}"></div>
+        <button class="btn" type="button" onclick="toggleCompanyBlock('${current.id}', ${current.blocked ? 'false' : 'true'})">${current.blocked ? 'Desbloquear empresa' : 'Bloquear empresa'}</button>` : ''}
+        ${manager ? '<button class="btn btn-primary" type="submit">Salvar empresa</button>' : ''}
+      </form>` : '<div class="section-sub">Nenhuma empresa cadastrada.</div>'}
+    </div>
+    ${manager ? '<div class="card" style="margin-top:14px;" id="passwordRequestList">Carregando pedidos de senha…</div>' : ''}
+    <div class="card" style="margin-top:14px;" id="logList">Carregando logs…</div>`;
+  if(manager) loadPasswordRequests();
+  loadOwnLogs();
+}
+async function selectCompany(id){
+  localStorage.setItem('prodfy_company', id || '');
+  state = emptyState();
+  fingerprints = {};
+  pendingDeletes = [];
+  await renderCompanySettings();
+  await syncNow();
+  renderNav();
+}
+async function createCompany(event){
+  event.preventDefault();
+  try{
+    const created = await accountApi('/api/companies', { method:'POST', body:{ name: document.getElementById('newCompanyName').value } });
+    localStorage.setItem('prodfy_company', created.data.id);
+    toast('Empresa criada.', 'success');
+    await renderCompanySettings();
+  }catch(error){ toast(error.message, 'error'); }
+}
+async function saveCompany(event, id){
+  event.preventDefault();
+  const body = { name: document.getElementById('companyName').value };
+  if(sessionUser.role === 'administrador_suporte'){
+    body.maxUsers = Number(document.getElementById('maxUsers').value);
+    body.maxMachines = Number(document.getElementById('maxMachines').value);
+    body.maxRegistrations = Number(document.getElementById('maxRegistrations').value);
+    body.usageUntil = document.getElementById('usageUntil').value || null;
+  }
+  const file = document.getElementById('companyLogo').files && document.getElementById('companyLogo').files[0];
+  const send = async function(logo){
+    if(logo) body.logo = logo;
+    try{
+      await accountApi('/api/companies/' + id, { method:'PUT', body: body });
+      toast('Empresa salva.', 'success');
+      await renderCompanySettings();
+    }catch(error){ toast(error.message, 'error'); }
+  };
+  if(file) readImageFile(document.getElementById('companyLogo'), send);
+  else send('');
+}
+async function toggleCompanyBlock(id, blocked){
+  try{
+    await accountApi('/api/companies/' + id, { method:'PUT', body:{ blocked: blocked } });
+    toast(blocked ? 'Empresa bloqueada.' : 'Empresa desbloqueada.', 'success');
+    await renderCompanySettings();
+  }catch(error){ toast(error.message, 'error'); }
+}
+async function loadPasswordRequests(){
+  const box = document.getElementById('passwordRequestList');
+  if(!box) return;
+  try{
+    const result = await accountApi('/api/password-requests');
+    box.innerHTML = `<div class="section-title" style="font-size:16px;">Pedidos de senha</div>` + (result.data.length ? result.data.map(function(item){
+      return `<div style="margin-top:8px;">${escapeHtml(item.email)} · ${escapeHtml(ROLE_LABELS[item.role] || item.role)}
+        <button class="btn btn-sm" type="button" onclick="resolvePasswordRequest('${item.id}')">Gerar senha provisória</button></div>`;
+    }).join('') : '<div class="section-sub">Nenhum pedido pendente.</div>');
+  }catch(error){ box.textContent = error.message; }
+}
+async function resolvePasswordRequest(id){
+  try{
+    const result = await accountApi('/api/password-requests/' + id + '/resolve', { method:'POST', body:{ action:'reset' } });
+    window.alert('Senha provisória, mostrada uma vez:\n' + result.data.provisionalPassword);
+    await loadPasswordRequests();
+  }catch(error){ toast(error.message, 'error'); }
+}
+async function loadOwnLogs(){
+  const box = document.getElementById('logList');
+  if(!box) return;
+  try{
+    const result = await accountApi('/api/logs');
+    const title = sessionUser.role === 'administrador_suporte' ? 'Logs do sistema' : 'Meus logs';
+    box.innerHTML = `<div class="section-title" style="font-size:16px;">${title}</div>` + (result.data.length ? result.data.slice(0, 40).map(function(entry){
+      return `<div style="margin-top:8px;"><b>${escapeHtml(entry.action)}</b> · ${escapeHtml(entry.entityKind)} · ${escapeHtml(entry.createdAt)}
+        <pre style="white-space:pre-wrap; font-size:12px;">${escapeHtml(JSON.stringify({ valor_anterior: entry.valorAnterior, valor_atual: entry.valorAtual }))}</pre></div>`;
+    }).join('') : '<div class="section-sub">Nenhum evento ainda.</div>');
+  }catch(error){ box.textContent = error.message; }
+}
+async function toggleUserBlock(id, blocked){
+  try{
+    await accountApi('/api/users/' + id + '/block', { method:'POST', body:{ blocked: blocked } });
+    toast(blocked ? 'Usuário bloqueado.' : 'Usuário desbloqueado.', 'success');
+    await loadAccessUsers();
+  }catch(error){ toast(error.message, 'error'); }
 }
 
 window.setTab = setTab;
@@ -2174,6 +2626,23 @@ window.openAssignModal = openAssignModal;
 window.confirmAssign = confirmAssign;
 window.openEmployeePhoto = openEmployeePhoto;
 window.closeEmployeePhoto = closeEmployeePhoto;
+window.showForgotPassword = showForgotPassword;
+window.togglePassword = togglePassword;
+window.openOrderStatus = openOrderStatus;
+window.saveGroup = saveGroup;
+window.saveFamily = saveFamily;
+window.showGroupItems = showGroupItems;
+window.showFamilyModels = showFamilyModels;
+window.printTasks = printTasks;
+window.createStudy = createStudy;
+window.applyStudy = applyStudy;
+window.discardStudy = discardStudy;
+window.selectCompany = selectCompany;
+window.createCompany = createCompany;
+window.saveCompany = saveCompany;
+window.toggleCompanyBlock = toggleCompanyBlock;
+window.resolvePasswordRequest = resolvePasswordRequest;
+window.toggleUserBlock = toggleUserBlock;
 window.logout = logout;
 window.saveProfile = saveProfile;
 window.saveAccessUser = saveAccessUser;

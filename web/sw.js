@@ -1,5 +1,5 @@
-const CACHE = "prodfy-shell-v1";
-const FILES = ["./", "./index.html", "./conta.html", "./css/app.css", "./js/app.js", "./js/config.js", "./js/conta.js"];
+const CACHE = "prodfy-shell-v2";
+const FILES = ["./", "./index.html", "./conta.html", "./css/app.css", "./js/app.js", "./js/config.js", "./js/conta.js", "./js/study.js"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(FILES)).then(() => self.skipWaiting()));

@@ -10,6 +10,10 @@ type UserRow = {
   password_hash: string;
   role: string;
   permissions?: UserPermissions | null;
+  company_id?: string | null;
+  must_change_password?: boolean | null;
+  blocked?: boolean | null;
+  blocked_by_role?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -22,6 +26,10 @@ function toRecord(row: UserRow): UserRecord {
     passwordHash: row.password_hash,
     role: normalizeRole(row.role),
     permissions: row.permissions?.view ? row.permissions : defaultPermissions(normalizeRole(row.role)),
+    companyId: row.company_id ?? null,
+    mustChangePassword: Boolean(row.must_change_password),
+    blocked: Boolean(row.blocked),
+    blockedByRole: row.blocked_by_role ? normalizeRole(row.blocked_by_role) : null,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
@@ -66,7 +74,11 @@ export function createSupabaseUserRepository(url: string, serviceRoleKey: string
         email: input.email.toLowerCase(),
         password_hash: input.passwordHash,
         role: input.role,
-        permissions: input.permissions ?? defaultPermissions(input.role)
+        permissions: input.permissions ?? defaultPermissions(input.role),
+        company_id: input.companyId ?? null,
+        must_change_password: input.mustChangePassword ?? false,
+        blocked: input.blocked ?? false,
+        blocked_by_role: input.blockedByRole ?? null
       };
       if (input.id) payload.id = input.id;
       const { data, error } = await supabase.from("users").insert(payload).select("*").single();
@@ -80,6 +92,10 @@ export function createSupabaseUserRepository(url: string, serviceRoleKey: string
       if (patch.passwordHash !== undefined) payload.password_hash = patch.passwordHash;
       if (patch.role !== undefined) payload.role = patch.role;
       if (patch.permissions !== undefined) payload.permissions = patch.permissions;
+      if (patch.companyId !== undefined) payload.company_id = patch.companyId;
+      if (patch.mustChangePassword !== undefined) payload.must_change_password = patch.mustChangePassword;
+      if (patch.blocked !== undefined) payload.blocked = patch.blocked;
+      if (patch.blockedByRole !== undefined) payload.blocked_by_role = patch.blockedByRole;
       const { data, error } = await supabase.from("users").update(payload).eq("id", id).select("*").maybeSingle();
       if (error) raise(error);
       return data ? toRecord(data as UserRow) : null;

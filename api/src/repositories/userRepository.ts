@@ -9,6 +9,10 @@ export type UserRecord = {
   passwordHash: string;
   role: UserRole;
   permissions: UserPermissions;
+  companyId: string | null;
+  mustChangePassword: boolean;
+  blocked: boolean;
+  blockedByRole: UserRole | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -20,9 +24,13 @@ export type NewUser = {
   passwordHash: string;
   role: UserRole;
   permissions?: UserPermissions;
+  companyId?: string | null;
+  mustChangePassword?: boolean;
+  blocked?: boolean;
+  blockedByRole?: UserRole | null;
 };
 
-export type UserPatch = Partial<Pick<UserRecord, "name" | "email" | "passwordHash" | "role" | "permissions">>;
+export type UserPatch = Partial<Pick<UserRecord, "name" | "email" | "passwordHash" | "role" | "permissions" | "companyId" | "mustChangePassword" | "blocked" | "blockedByRole">>;
 
 export interface UserRepository {
   count(): Promise<number>;
@@ -43,6 +51,10 @@ export function toPublicUser(user: UserRecord): PublicUser {
     email: user.email,
     role: user.role,
     permissions: user.permissions,
+    companyId: user.companyId,
+    mustChangePassword: user.mustChangePassword,
+    blocked: user.blocked,
+    blockedByRole: user.blockedByRole,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt
   };

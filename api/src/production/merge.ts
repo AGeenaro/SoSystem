@@ -1,4 +1,4 @@
-export const PRODUCTION_KINDS = ["employee", "product", "order", "punch", "resource"] as const;
+export const PRODUCTION_KINDS = ["employee", "product", "order", "punch", "resource", "group", "family"] as const;
 
 export type ProductionKind = (typeof PRODUCTION_KINDS)[number];
 
@@ -16,6 +16,8 @@ export type ProductionSnapshot = {
   orders: Record<string, unknown>[];
   punches: Record<string, unknown>[];
   resources: Record<string, unknown>[];
+  groups: Record<string, unknown>[];
+  families: Record<string, unknown>[];
   tombstones: { kind: ProductionKind; id: string; updatedAt: string }[];
   nextOrderNum: number;
   nextEmployeeNum: number;
@@ -26,7 +28,9 @@ const COLLECTIONS: Record<ProductionKind, keyof ProductionSnapshot> = {
   product: "products",
   order: "orders",
   punch: "punches",
-  resource: "resources"
+  resource: "resources",
+  group: "groups",
+  family: "families"
 };
 
 export function mergeRecords(current: ProductionRecord[], incoming: ProductionRecord[]): ProductionRecord[] {
@@ -56,6 +60,8 @@ export function toSnapshot(
     orders: [],
     punches: [],
     resources: [],
+    groups: [],
+    families: [],
     tombstones: [],
     nextOrderNum,
     nextEmployeeNum

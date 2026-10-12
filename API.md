@@ -221,14 +221,26 @@ Envia o que mudou neste aparelho e devolve o estado mesclado. Um registro novo c
 }
 ```
 
-`kind` aceita `employee`, `product`, `order`, `punch` e `resource`. No máximo 5000 registros por pedido.
+`kind` aceita `employee`, `product`, `order`, `punch`, `resource`, `group` e `family`. No máximo 5000 registros por pedido. O cabeçalho `x-company-id` escolhe a empresa quando quem chama é o administrador suporte. Os demais usuários ficam na própria empresa.
+
+Senha nova: 8 caracteres, uma maiúscula, um número e um caractere especial. Conta criada por um administrador recebe senha provisória, mostrada uma vez na resposta (`provisionalPassword`), e precisa trocá-la no primeiro acesso.
+
+`POST /api/auth/password-requests` com `{ "email" }` registra o pedido sem dizer se o e-mail existe. Operador e visualizador aparecem para o administrador da empresa. Administrador aparece para o administrador suporte. `POST /api/password-requests/{id}/resolve` com `{ "action": "reset" }` devolve a senha provisória uma vez.
+
+`POST /api/users/{id}/block` com `{ "blocked": true }` bloqueia. Se o administrador suporte bloqueou, o administrador da empresa não desbloqueia.
+
+`GET /api/companies` e `PUT /api/companies/{id}` cuidam de nome, logo, limites, data limite de uso e bloqueio da empresa. Limites e bloqueio só o administrador suporte altera.
+
+`GET /api/logs` devolve os próprios eventos. O administrador suporte vê todos, com `valorAnterior` e `valorAtual`.
+
+Status de pedido: `Não iniciado`, `Iniciado/Parado`, `Bloqueado`, `Finalizado/Em Pintura`, `Finalizado/Em montagem`, `Finalizado`, `Encaminhado Expedição`. Parado e bloqueado exigem setor e motivo.
 
 ## Exemplo com curl
 
 ```bash
 curl -s http://localhost:3000/api/auth/register \
   -H "Content-Type: application/json" \
-  -d "{\"name\":\"Ana Souza\",\"email\":\"ana@fabrica.com\",\"password\":\"senha-segura\"}"
+  -d "{\"name\":\"Ana Souza\",\"email\":\"ana@fabrica.com\",\"password\":\"Senha-segura1\"}"
 
 curl -s http://localhost:3000/api/users \
   -H "Authorization: Bearer SEU_TOKEN"

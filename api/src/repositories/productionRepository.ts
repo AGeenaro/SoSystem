@@ -1,4 +1,4 @@
-import type { ProductionRecord, ProductionSnapshot } from "../production/merge.js";
+import type { ProductionRecord } from "../production/merge.js";
 
 export type ProductionSyncInput = {
   records: ProductionRecord[];
@@ -6,7 +6,13 @@ export type ProductionSyncInput = {
   nextEmployeeNum?: number;
 };
 
+export type ProductionBucket = {
+  records: ProductionRecord[];
+  nextOrderNum: number;
+  nextEmployeeNum: number;
+};
+
 export interface ProductionRepository {
-  snapshot(): Promise<ProductionSnapshot>;
-  sync(input: ProductionSyncInput): Promise<ProductionSnapshot>;
+  load(companyId: string): Promise<ProductionBucket>;
+  save(companyId: string, bucket: ProductionBucket): Promise<void>;
 }

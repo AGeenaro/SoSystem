@@ -28,6 +28,10 @@ export function createMemoryUserRepository(): UserRepository {
         passwordHash: input.passwordHash,
         role: input.role,
         permissions: input.permissions ?? defaultPermissions(input.role),
+        companyId: input.companyId ?? null,
+        mustChangePassword: input.mustChangePassword ?? false,
+        blocked: input.blocked ?? false,
+        blockedByRole: input.blockedByRole ?? null,
         createdAt: now,
         updatedAt: now
       };
