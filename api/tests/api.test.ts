@@ -1,4 +1,5 @@
 import request from "supertest";
+import bcrypt from "bcryptjs";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createApp, type AppOptions } from "../src/app.js";
 import { createMemoryUserRepository } from "../src/repositories/memoryUserRepository.js";
@@ -125,6 +126,13 @@ describe("API de usuários", () => {
     expect(company.status).toBe(201);
     const companyId = company.body.data.id;
 
+    const missingCompany = await request(app)
+      .post("/api/users")
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({ name: "Sem Empresa", email: "sem@fabrica.com", role: "operador" });
+    expect(missingCompany.status).toBe(422);
+    expect(missingCompany.body.error.code).toBe("COMPANY_REQUIRED");
+
     const second = await request(app)
       .post("/api/users")
       .set("Authorization", `Bearer ${adminToken}`)
@@ -155,6 +163,34 @@ describe("API de usuários", () => {
     const list = await request(app).get("/api/users").set("Authorization", `Bearer ${adminToken}`);
     expect(list.status).toBe(200);
     expect(list.body.data).toHaveLength(2);
+
+    const users = createMemoryUserRepository();
+    const orphanApp = buildApp({ users });
+    const suporte = await register(orphanApp, "suporte@fabrica.com", "Suporte");
+    const suporteToken = suporte.body.data.accessToken;
+    const orphanCompany = await request(orphanApp)
+      .post("/api/companies")
+      .set("Authorization", `Bearer ${suporteToken}`)
+      .send({ name: "Fábrica Sul" });
+    const orphan = await users.create({
+      name: "Conta antiga",
+      email: "antiga@fabrica.com",
+      passwordHash: await bcrypt.hash("Senha-segura1", 4),
+      role: "operador",
+      companyId: null
+    });
+    const orphanLogin = await request(orphanApp).post("/api/auth/login").send({
+      email: "antiga@fabrica.com",
+      password: "Senha-segura1"
+    });
+    expect(orphanLogin.status).toBe(403);
+    expect(orphanLogin.body.error.code).toBe("NO_COMPANY");
+    const linked = await request(orphanApp)
+      .put(`/api/users/${orphan.id}`)
+      .set("Authorization", `Bearer ${suporteToken}`)
+      .send({ companyId: orphanCompany.body.data.id });
+    expect(linked.status).toBe(200);
+    expect(linked.body.data.companyId).toBe(orphanCompany.body.data.id);
 
     const created = await request(app)
       .post("/api/users")

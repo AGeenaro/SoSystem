@@ -37,7 +37,8 @@ export const updateUserSchema = z.object({
   email: emailSchema.optional(),
   password: passwordSchema.optional(),
   role: roleSchema.optional(),
-  permissions: permissionsSchema.optional()
+  permissions: permissionsSchema.optional(),
+  companyId: z.string().uuid().nullable().optional()
 }).strict().refine((value) => Object.keys(value).length > 0, {
   message: "Informe ao menos um campo para atualizar."
 });

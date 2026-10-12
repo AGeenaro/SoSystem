@@ -2539,12 +2539,16 @@ function renderConfiguracoes(){
           <select id="userRole" onchange="renderPermissionChoices()">${roles.map(function(role){ return `<option value="${role}">${ROLE_LABELS[role]}</option>`; }).join('')}</select>
         </div>
       </div>
+      <div class="field" id="userCompanyField">
+        <label>Empresa</label>
+        <select id="userCompany"><option value="">Escolha a empresa</option></select>
+      </div>
       <div id="permissionChoices"></div>
       <button class="btn btn-primary" type="submit">Salvar usuário</button>
     </form>
     <div class="card"><div class="table-wrap"><table>
-      <thead><tr><th>Nome</th><th>E-mail</th><th>Perfil</th><th style="width:140px;"></th></tr></thead>
-      <tbody id="accessUsersBody"><tr class="empty-row"><td colspan="4">Carregando contas…</td></tr></tbody>
+      <thead><tr><th>Nome</th><th>E-mail</th><th>Perfil</th><th>Empresa</th><th style="width:140px;"></th></tr></thead>
+      <tbody id="accessUsersBody"><tr class="empty-row"><td colspan="5">Carregando contas…</td></tr></tbody>
     </table></div></div>` : `<div class="card">Seu perfil consulta e, quando permitido, altera a produção. Contas novas são criadas por um administrador.</div>`}
   `;
   if(canManageUsers()){
@@ -2556,32 +2560,55 @@ function renderConfiguracoes(){
   el.appendChild(extra);
   renderCompanySettings();
 }
+let accessCompanies = [];
+function userCompanyLabel(user){
+  if(user.role === 'administrador_suporte') return 'Todas';
+  const company = accessCompanies.find(function(item){ return item.id === user.companyId; });
+  return company ? company.name : 'Sem empresa';
+}
+function fillUserCompanySelect(selectedId){
+  const select = document.getElementById('userCompany');
+  const field = document.getElementById('userCompanyField');
+  const role = document.getElementById('userRole');
+  if(!select || !field || !role) return;
+  const show = sessionUser && sessionUser.role === 'administrador_suporte' && role.value !== 'administrador_suporte';
+  field.style.display = show ? '' : 'none';
+  const current = selectedId !== undefined ? selectedId : select.value;
+  select.innerHTML = '<option value="">Escolha a empresa</option>' + accessCompanies.map(function(company){
+    return `<option value="${company.id}" ${company.id===current?'selected':''}>${escapeHtml(company.name)}</option>`;
+  }).join('');
+}
 function renderPermissionChoices(current){
   const holder = document.getElementById('permissionChoices');
   const role = document.getElementById('userRole');
   if(!holder || !role) return;
   holder.innerHTML = permissionChecks(role.value, current);
+  fillUserCompanySelect();
 }
 async function loadAccessUsers(){
   const body = document.getElementById('accessUsersBody');
   if(!body) return;
   try{
+    try{ accessCompanies = (await accountApi('/api/companies')).data || []; }catch(e){ accessCompanies = []; }
+    fillUserCompanySelect();
     const result = await accountApi('/api/users');
     body.innerHTML = result.data.map(function(user){
       const mine = sessionUser && sessionUser.id === user.id;
+      const missing = user.role !== 'administrador_suporte' && !user.companyId;
       return `<tr>
         <td>${escapeHtml(user.name)}</td>
         <td>${escapeHtml(user.email)}</td>
         <td>${escapeHtml(ROLE_LABELS[user.role] || user.role)}</td>
+        <td${missing ? ' style="color:var(--red-dark); font-weight:700;"' : ''}>${escapeHtml(userCompanyLabel(user))}</td>
         <td>
           <button class="icon-btn" type="button" onclick="editAccessUser('${user.id}')" title="Editar">${icon('edit',14)}</button>
           ${mine ? '' : `<button class="btn btn-sm" type="button" onclick="toggleUserBlock('${user.id}', ${user.blocked ? 'false' : 'true'})">${user.blocked ? 'Desbloquear' : 'Bloquear'}</button>`}
           <button class="icon-btn danger" type="button" onclick="deleteAccessUser('${user.id}')" ${mine ? 'disabled' : ''} title="Excluir">${icon('trash',14)}</button>
         </td>
       </tr>`;
-    }).join('') || `<tr class="empty-row"><td colspan="4">Nenhuma conta.</td></tr>`;
+    }).join('') || `<tr class="empty-row"><td colspan="5">Nenhuma conta.</td></tr>`;
   }catch(error){
-    body.innerHTML = `<tr class="empty-row"><td colspan="4">${escapeHtml(error.message)}</td></tr>`;
+    body.innerHTML = `<tr class="empty-row"><td colspan="5">${escapeHtml(error.message)}</td></tr>`;
   }
 }
 async function editAccessUser(id){
@@ -2594,6 +2621,7 @@ async function editAccessUser(id){
     document.getElementById('userPassword').value = '';
     document.getElementById('userRole').value = user.role;
     renderPermissionChoices(user.permissions);
+    fillUserCompanySelect(user.companyId || '');
   }catch(error){
     toast(error.message, 'error');
   }
@@ -2629,14 +2657,23 @@ async function saveAccessUser(event){
   const permissions = selectedPermissions(role);
   if(permissions) body.permissions = permissions;
   try{
-    if(sessionUser.role === 'administrador_suporte') body.companyId = activeCompanyId();
+    if(sessionUser.role === 'administrador_suporte'){
+      if(role === 'administrador_suporte') body.companyId = null;
+      else{
+        body.companyId = document.getElementById('userCompany').value;
+        if(!body.companyId){
+          toast('Escolha a empresa do usuário.', 'error');
+          return;
+        }
+      }
+    }
     if(id){
       if(password) body.password = password;
       await accountApi('/api/users/' + id, { method:'PUT', body: body });
       toast('Usuário salvo.', 'success');
     }else{
-      if(role !== 'administrador_suporte' && !activeCompanyId() && sessionUser.role === 'administrador_suporte'){
-        toast('Escolha a empresa antes de criar o usuário.', 'error');
+      if(role !== 'administrador_suporte' && sessionUser.role === 'administrador_suporte' && !body.companyId){
+        toast('Escolha a empresa do usuário.', 'error');
         return;
       }
       const created = await accountApi('/api/users', { method:'POST', body: body });

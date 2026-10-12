@@ -129,7 +129,8 @@ export function createApp(options: AppOptions): Express {
   }
 
   async function assertCompanyOpen(user: UserRecord) {
-    if (user.role === "administrador_suporte" || !user.companyId) return;
+    if (user.role === "administrador_suporte") return;
+    if (!user.companyId) throw new HttpError(403, "NO_COMPANY", "Sua conta não está vinculada a uma empresa.");
     const company = await platform.findCompany(user.companyId);
     if (!company) throw new HttpError(403, "NO_COMPANY", "Sua conta não está vinculada a uma empresa.");
     if (company.blocked) throw new HttpError(403, "COMPANY_BLOCKED", "O acesso desta empresa está bloqueado.");
@@ -472,6 +473,26 @@ export function createApp(options: AppOptions): Express {
     if (!self && input.role !== undefined) patch.role = input.role;
     if (!self && (input.permissions !== undefined || input.role !== undefined)) {
       patch.permissions = sanitizePermissions(nextRole, input.permissions ?? target.permissions);
+    }
+    if (!self) {
+      if (nextRole === "administrador_suporte") {
+        patch.companyId = null;
+      } else {
+        const companyId = input.companyId !== undefined ? input.companyId : target.companyId;
+        if (!companyId) throw new HttpError(422, "COMPANY_REQUIRED", "Escolha a empresa do usuário.");
+        if (actor.role === "administrador" && companyId !== actor.companyId) {
+          throw new HttpError(403, "FORBIDDEN", "Você só vincula usuários da sua empresa.");
+        }
+        const company = await platform.findCompany(companyId);
+        if (!company) throw new HttpError(404, "NOT_FOUND", "Empresa não encontrada.");
+        if (companyId !== target.companyId) {
+          const occupied = (await options.users.list()).filter((user) => user.companyId === companyId).length;
+          if (occupied >= company.maxUsers) {
+            throw new HttpError(403, "LIMIT_USERS", "A empresa atingiu o limite de usuários.");
+          }
+        }
+        patch.companyId = companyId;
+      }
     }
     const updated = await options.users.update(id, patch);
     if (!updated) throw new HttpError(404, "NOT_FOUND", "Usuário não encontrado.");
