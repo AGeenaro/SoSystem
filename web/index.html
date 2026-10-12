@@ -134,15 +134,25 @@
       <button class="modal-close" onclick="closeModal('modalOrder')">×</button>
     </div>
     <div class="field">
-      <label>Código da Peça</label>
+      <label>Grupo</label>
+      <select id="ordGrupo" onchange="fillOrderFamilies()"></select>
+    </div>
+    <div class="field">
+      <label>Família</label>
+      <select id="ordFamilia" onchange="fillOrderItems()"></select>
+    </div>
+    <div class="field">
+      <label>Item</label>
       <select id="ordProduto" onchange="renderOrderPreview()"></select>
     </div>
-    <div class="field"><label>Quantidade Planejada</label><input type="number" min="1" id="ordQtd" value="100" oninput="renderOrderPreview()"></div>
-    <div class="field">
+    <div class="field"><label>Quantidade</label><input type="number" min="1" id="ordQtd" value="1" oninput="renderOrderPreview()"></div>
+    <button class="btn btn-ghost btn-block" type="button" onclick="addOrderItem()">Adicionar item ao pedido</button>
+    <div class="card" id="ordPreview" style="background:var(--surface-2); font-size:12.5px; box-shadow:none; margin-top:10px;"></div>
+    <div id="ordItemList" style="margin-top:10px;"></div>
+    <div class="field" style="margin-top:12px;">
       <label>Gerado por</label>
       <select id="ordGeradoPor"></select>
     </div>
-    <div class="card" id="ordPreview" style="background:var(--surface-2); font-size:12.5px; box-shadow:none;"></div>
     <button class="btn btn-primary btn-block" style="margin-top:14px;" onclick="saveOrder(false)">Gerar Ordem de Produção</button>
     <button class="btn btn-ghost btn-block" style="margin-top:8px;" onclick="saveOrder(true)"><svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 8V3h10v5"/><rect x="4" y="8" width="16" height="9" rx="1.5"/><path d="M7 13h10v8H7z"/><line x1="8" y1="17" x2="16" y2="17"/></svg> Gerar e Imprimir</button>
   </div>

@@ -338,6 +338,7 @@ function refreshAfterSync(){
   if(activeTab==='ordens' && typeof renderOrdens === 'function') renderOrdens();
   if(activeTab==='apontamento' && typeof renderApontamento === 'function') renderApontamento();
   if(activeTab==='recursos' && typeof renderRecursos === 'function') renderRecursos();
+  if(activeTab==='cadastro' && typeof renderCadastro === 'function') renderCadastro();
   if(activeTab==='engenharia' && typeof renderEngenharia === 'function') renderEngenharia();
   if(activeTab==='funcionarios' && typeof renderFuncionarios === 'function') renderFuncionarios();
   if(activeTab==='acompanhamento' && typeof renderAcompanhamento === 'function') renderAcompanhamento();
@@ -470,6 +471,7 @@ const NAV = [
   {id:'ordens', module:'ordens', path:'/ordens_producao', label:'Ordens de Produção', icn:'clipboard'},
   {id:'apontamento', module:'apontamento', path:'/apontamento', label:'Apontamento', icn:'clock'},
   {id:'recursos', module:'recursos', path:'/recursos', label:'Recursos', icn:'wrench'},
+  {id:'cadastro', module:'engenharia', path:'/cadastro', label:'Cadastro', icn:'plus'},
   {id:'engenharia', module:'engenharia', path:'/engenharia', label:'Engenharia de Produto', icn:'gear'},
   {id:'funcionarios', module:'funcionarios', path:'/funcionarios', label:'Funcionários', icn:'users'},
   {id:'acompanhamento', module:'acompanhamento', path:'/acompanhamento', label:'Acompanhamento', icn:'search'},
@@ -590,6 +592,7 @@ function renderActiveTab(){
   else if(activeTab==='ordens') renderOrdens();
   else if(activeTab==='apontamento') renderApontamento();
   else if(activeTab==='recursos') renderRecursos();
+  else if(activeTab==='cadastro') renderCadastro();
   else if(activeTab==='engenharia') renderEngenharia();
   else if(activeTab==='funcionarios') renderFuncionarios();
   else if(activeTab==='acompanhamento') renderAcompanhamento();
@@ -608,6 +611,14 @@ function orderById(id){ return state.orders.find(o=>o.id===id || o.numero===id);
 function punchOrderLabel(punch){ const order = orderById(punch && punch.ordemId); return order ? orderLabel(order) : ((punch && punch.ordemId) || ''); }
 function resourceById(id){ return state.resources.find(r=>r.id===id); }
 function orderProducedQty(orderId){ return state.punches.filter(p=>p.ordemId===orderId).reduce((s,p)=>s+(Number(p.quantidadeProduzida)||0), 0); }
+function orderProgress(order){
+  const items = orderItems(order);
+  const planned = items.reduce(function(sum, item){ return sum + (Number(item.quantidade) || 0); }, 0) || Number(order.quantidadePlanejada) || 0;
+  const marked = items.reduce(function(sum, item){ return sum + (Number(item.produzida) || 0); }, 0);
+  const produced = Math.max(orderProducedQty(order.id), marked);
+  const pct = planned > 0 ? Math.round((produced / planned) * 1000) / 10 : 0;
+  return { planned: planned, produced: produced, pct: pct };
+}
 function orderScrapQty(orderId){ return state.punches.filter(p=>p.ordemId===orderId).reduce((s,p)=>s+(Number(p.quantidadeRefugada)||0), 0); }
 const ORDER_STATUSES = ['Não iniciado','Iniciado/Parado','Bloqueado','Finalizado/Em Pintura','Finalizado/Em montagem','Finalizado','Encaminhado Expedição'];
 function normalizeOrderStatus(status){
@@ -665,6 +676,7 @@ function renderShell(){
     <div class="tab-panel" id="panel-ordens"></div>
     <div class="tab-panel" id="panel-apontamento"></div>
     <div class="tab-panel" id="panel-recursos"></div>
+    <div class="tab-panel" id="panel-cadastro"></div>
     <div class="tab-panel" id="panel-engenharia"></div>
     <div class="tab-panel" id="panel-funcionarios"></div>
     <div class="tab-panel" id="panel-acompanhamento"></div>
@@ -1108,14 +1120,14 @@ function renderOrdens(){
   const el = document.getElementById('panel-ordens');
   el.innerHTML = `
     <div class="section-title">${icon('clipboard',19)} Ordens de Produção</div>
-    <div class="section-sub">Gere ordens com base nos códigos cadastrados na Engenharia de Produto e seus tempos de fabricação.</div>
+    <div class="section-sub">O pedido reúne grupo, família e itens. A porcentagem produzida aparece nesta lista e no Acompanhamento.</div>
     <div class="toolbar">
       <div class="search-box"><span class="search-ic">${icon('search',15)}</span><input placeholder="Buscar por OP ou código..." oninput="ordensSearch=this.value; renderOrdensTable();"></div>
       <button class="btn btn-primary" data-edit="ordens" onclick="openOrderModal()">${icon('plus',14)} Nova Ordem de Produção</button>
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Ordem</th><th>Código</th><th>Descrição</th><th>Qtd. Planejada</th><th>Produzido</th><th>Tempo Estimado</th><th>Status</th><th></th></tr></thead>
+        <thead><tr><th>Pedido</th><th>Grupo</th><th>Itens</th><th>Qtd.</th><th>Produzido</th><th>Status</th><th></th></tr></thead>
         <tbody id="ordensTbody"></tbody>
       </table>
     </div>
@@ -1128,14 +1140,21 @@ function renderOrdensTable(){
   const q = ordensSearch.trim().toLowerCase();
   const list = state.orders.filter(o => !q || orderLabel(o).toLowerCase().includes(q) || o.codigo.toLowerCase().includes(q)).sort((a,b)=> b.criadoEm.localeCompare(a.criadoEm));
   tbody.innerHTML = list.length ? list.map(o=>{
-    const produced = orderProducedQty(o.id);
+    const progress = orderProgress(o);
+    const items = orderItems(o);
+    const groupNames = Array.from(new Set(items.map(function(item){
+      const group = state.groups.find(function(entry){ return entry.id === item.grupoId; });
+      return group ? group.nome : '';
+    }).filter(Boolean)));
     return `<tr>
       <td style="color:var(--blue); font-weight:700;">${orderLabel(o)}</td>
-      <td>${o.codigo}</td>
-      <td>${o.descricao}</td>
-      <td class="mono">${o.quantidadePlanejada}</td>
-      <td class="mono">${produced}</td>
-      <td class="mono">${o.tempoEstimadoTotalMin.toFixed(0)} min</td>
+      <td>${escapeHtml(groupNames.join(', ') || '—')}</td>
+      <td>${items.length}</td>
+      <td class="mono">${progress.planned}</td>
+      <td style="min-width:120px;">
+        <div class="progress-track" style="margin-bottom:4px;"><div class="progress-fill" style="width:${Math.min(progress.pct, 100)}%;"></div></div>
+        <div style="font-size:10.5px; color:var(--text-faint);">${progress.pct}% · ${progress.produced}/${progress.planned}</div>
+      </td>
       <td>${orderStatusBadge(o.status)}</td>
       <td style="white-space:nowrap;">
         <button class="btn btn-sm btn-ghost" data-edit="ordens" onclick="openOrderStatus('${o.id}')">Status</button>
@@ -1143,42 +1162,95 @@ function renderOrdensTable(){
         <button class="icon-btn" onclick="printOrder('${o.id}')" title="Imprimir Ordem">${icon('printer',15)}</button>
       </td>
     </tr>`;
-  }).join('') : `<tr class="empty-row"><td colspan="8">Nenhuma ordem de produção encontrada. Clique em "Nova Ordem de Produção" para começar.</td></tr>`;
+  }).join('') : `<tr class="empty-row"><td colspan="7">Nenhum pedido encontrado. Clique em "Nova Ordem de Produção" para começar.</td></tr>`;
 }
+let orderDraftItems = [];
 function openOrderModal(){
   if(deny('ordens')) return;
-  const sel = document.getElementById('ordProduto');
-  if(!state.products.length){ toast('Cadastre ao menos um código na Engenharia de Produto primeiro.', 'error'); return; }
-  sel.innerHTML = state.products.map(p=>`<option value="${p.codigo}">${p.codigo} — ${p.descricao} (${p.classificacao})</option>`).join('');
+  if(!state.groups.length || !state.families.length || !state.products.length){
+    toast('Cadastre grupo, família e produto antes de abrir o pedido.', 'error');
+    return;
+  }
+  orderDraftItems = [];
+  document.getElementById('ordGrupo').innerHTML = state.groups.map(function(group){
+    return `<option value="${group.id}">${escapeHtml(group.nome)}</option>`;
+  }).join('');
+  document.getElementById('ordQtd').value = 1;
   const geradoSel = document.getElementById('ordGeradoPor');
   geradoSel.innerHTML = state.employees.length ? state.employees.map(e=>`<option value="${e.nome} ${e.sobrenome}">${e.nome} ${e.sobrenome}</option>`).join('') : '<option value="">Nenhum funcionário cadastrado</option>';
-  document.getElementById('ordQtd').value = 100;
-  renderOrderPreview();
+  fillOrderFamilies();
+  renderOrderDraft();
   openModal('modalOrder');
 }
+function fillOrderFamilies(){
+  const groupId = document.getElementById('ordGrupo').value;
+  const families = state.families.filter(function(family){ return family.grupoId === groupId; });
+  document.getElementById('ordFamilia').innerHTML = families.length
+    ? families.map(function(family){ return `<option value="${family.id}">${escapeHtml(family.nome)}</option>`; }).join('')
+    : '<option value="">Nenhuma família neste grupo</option>';
+  fillOrderItems();
+}
+function fillOrderItems(){
+  const familyId = document.getElementById('ordFamilia').value;
+  const products = state.products.filter(function(product){ return product.familiaId === familyId; });
+  document.getElementById('ordProduto').innerHTML = products.length
+    ? products.map(function(product){ return `<option value="${product.codigo}">${escapeHtml(product.codigo)} — ${escapeHtml(product.descricao)}</option>`; }).join('')
+    : '<option value="">Nenhum item nesta família</option>';
+  renderOrderPreview();
+}
 function renderOrderPreview(){
-  const codigo = document.getElementById('ordProduto').value;
-  const qtd = Number(document.getElementById('ordQtd').value) || 0;
+  const codigo = document.getElementById('ordProduto') && document.getElementById('ordProduto').value;
+  const qtd = Number(document.getElementById('ordQtd') && document.getElementById('ordQtd').value) || 0;
   const prod = productByCode(codigo);
   const prev = document.getElementById('ordPreview');
-  if(!prod){ prev.innerHTML=''; return; }
-  const total = prod.tempoFabricacaoMin * qtd;
-  prev.innerHTML = `<div><b>${prod.descricao}</b> <span class="badge ${prod.classificacao==='PI'?'badge-purple':'badge-green'}">${prod.classificacao}</span></div>
-    <div style="margin-top:6px; color:var(--text-muted);">Tempo unitário: ${prod.tempoFabricacaoMin} min/peça</div>
-    <div style="color:var(--blue); font-weight:700;">Tempo total estimado: ${total.toFixed(0)} min (${(total/60).toFixed(1)} h)</div>`;
+  if(!prev) return;
+  if(!prod){ prev.innerHTML = 'Escolha um item da família.'; return; }
+  const total = (Number(prod.tempoFabricacaoMin) || 0) * qtd;
+  prev.innerHTML = `<div><b>${escapeHtml(prod.descricao)}</b></div>
+    <div style="margin-top:6px; color:var(--text-muted);">Tempo deste item: ${total.toFixed(0)} min</div>`;
 }
-async function saveOrder(shouldPrint){
-  if(deny('ordens')) return;
+function addOrderItem(){
   const codigo = document.getElementById('ordProduto').value;
   const qtd = Number(document.getElementById('ordQtd').value);
   const prod = productByCode(codigo);
+  const familia = state.families.find(function(item){ return item.id === (prod && prod.familiaId); });
+  if(!prod || !familia || !qtd || qtd <= 0){ toast('Escolha grupo, família, item e quantidade.', 'error'); return; }
+  const existing = orderDraftItems.find(function(item){ return item.codigo === prod.codigo; });
+  if(existing) existing.quantidade += qtd;
+  else orderDraftItems.push({ id: uid(), codigo: prod.codigo, descricao: prod.descricao, grupoId: familia.grupoId, familiaId: familia.id, quantidade: qtd, produzida: 0, tempo: Number(prod.tempoFabricacaoMin) || 0 });
+  renderOrderDraft();
+}
+function removeOrderDraftItem(id){
+  orderDraftItems = orderDraftItems.filter(function(item){ return item.id !== id; });
+  renderOrderDraft();
+}
+function renderOrderDraft(){
+  const box = document.getElementById('ordItemList');
+  if(!box) return;
+  box.innerHTML = orderDraftItems.length ? orderDraftItems.map(function(item){
+    const group = state.groups.find(function(entry){ return entry.id === item.grupoId; });
+    const family = state.families.find(function(entry){ return entry.id === item.familiaId; });
+    return `<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;margin-top:6px;">
+      <span>${escapeHtml(group ? group.nome : '—')} · ${escapeHtml(family ? family.nome : '—')} · <b>${escapeHtml(item.codigo)}</b> · ${item.quantidade}</span>
+      <button class="icon-btn danger" type="button" onclick="removeOrderDraftItem('${item.id}')" title="Tirar item">${icon('trash',14)}</button>
+    </div>`;
+  }).join('') : '<div class="section-sub">Nenhum item no pedido.</div>';
+}
+async function saveOrder(shouldPrint){
+  if(deny('ordens')) return;
   const geradoPor = document.getElementById('ordGeradoPor').value || 'Não informado';
-  if(!prod || !qtd || qtd<=0){ toast('Informe uma quantidade válida.', 'error'); return; }
+  if(!orderDraftItems.length){ toast('Adicione ao menos um item ao pedido.', 'error'); return; }
   const numero = formatOrderNumber(state.nextOrderNum);
   const opId = uid();
   state.nextOrderNum++;
-  const familia = state.families.find(function(item){ return item.id === prod.familiaId; });
-  state.orders.push({ id: opId, numero, codigo: prod.codigo, descricao: prod.descricao, quantidadePlanejada: qtd, tempoEstimadoTotalMin: prod.tempoFabricacaoMin*qtd, status:'Não iniciado', setor:'', motivo:'', criadoEm: nowISO(), geradoPor, itens:[{ id: uid(), descricao: prod.descricao, grupoId: familia ? familia.grupoId : '', familiaId: prod.familiaId || '', quantidade: qtd, produzida: 0 }] });
+  const itens = orderDraftItems.map(function(item){
+    return { id: item.id, codigo: item.codigo, descricao: item.descricao, grupoId: item.grupoId, familiaId: item.familiaId, quantidade: item.quantidade, produzida: 0 };
+  });
+  const quantidade = itens.reduce(function(sum, item){ return sum + item.quantidade; }, 0);
+  const tempo = orderDraftItems.reduce(function(sum, item){ return sum + (item.tempo * item.quantidade); }, 0);
+  const first = itens[0];
+  state.orders.push({ id: opId, numero, codigo: first.codigo, descricao: itens.length > 1 ? itens.length + ' itens' : first.descricao, quantidadePlanejada: quantidade, tempoEstimadoTotalMin: tempo, status:'Não iniciado', setor:'', motivo:'', criadoEm: nowISO(), geradoPor, itens: itens });
+  orderDraftItems = [];
   await persist();
   closeModal('modalOrder');
   toast('Ordem ' + numero + ' gerada com sucesso.', 'success');
@@ -1195,7 +1267,12 @@ function showOrderInfo(orderId){
       <div style="font-size:20px; font-weight:800;">${orderLabel(order)}</div>
       <div style="color:var(--text-muted); font-size:13px;">${order.codigo} — ${order.descricao}</div>
       <div style="margin-top:8px;">${orderStatusBadge(order.status)} ${order.motivo ? `<span class="section-sub">${escapeHtml(order.setor || '')} · ${escapeHtml(order.motivo)}</span>` : ''}</div>
-      <div style="margin-top:10px;">${groupProgress(order).map(function(row){ return `<div>${escapeHtml(row.name)}: ${row.pct}%${row.pct < 100 ? ' · pendente' : ''}</div>`; }).join('')}</div>
+      <div style="margin-top:10px; font-weight:700;">Produzido: ${orderProgress(order).pct}%</div>
+      <div style="margin-top:6px;">${orderItems(order).map(function(item){
+        const group = state.groups.find(function(entry){ return entry.id === item.grupoId; });
+        const family = state.families.find(function(entry){ return entry.id === item.familiaId; });
+        return `<div>${escapeHtml(group ? group.nome : 'Sem grupo')} · ${escapeHtml(family ? family.nome : 'Sem família')} · ${escapeHtml(item.descricao || item.codigo || '')} · ${Number(item.quantidade) || 0} peças</div>`;
+      }).join('')}</div>
     </div>
     <div class="card" style="box-shadow:none; background:var(--surface-2); margin-bottom:14px;">
       <div class="grid grid-2" style="gap:14px;">
@@ -1283,14 +1360,80 @@ function renderEngenharia(){
         <tbody id="engTbody"></tbody>
       </table>
     </div>
-    <div class="grid grid-2" style="margin-top:18px;">
+  `;
+  renderEngenhariaTable();
+}
+function renderCadastro(){
+  const el = document.getElementById('panel-cadastro');
+  if(!el) return;
+  el.innerHTML = `
+    <div class="section-title">${icon('plus',19)} Cadastro</div>
+    <div class="section-sub">Produtos, grupos e famílias usados nas ordens de produção.</div>
+    <div class="card" id="productCatalog" style="margin-bottom:14px;"></div>
+    <div class="grid grid-2">
       <div class="card" id="groupCatalog"></div>
       <div class="card" id="familyCatalog"></div>
     </div>
     <div class="card" id="groupItems" style="margin-top:14px;"></div>
   `;
-  renderEngenhariaTable();
+  renderProductCatalog();
   renderCatalogs();
+}
+function renderProductCatalog(){
+  const box = document.getElementById('productCatalog');
+  if(!box) return;
+  const families = state.families.map(function(family){
+    const group = state.groups.find(function(item){ return item.id === family.grupoId; });
+    const label = group ? family.nome + ' · ' + group.nome : family.nome;
+    return `<option value="${family.id}">${escapeHtml(label)}</option>`;
+  }).join('');
+  box.innerHTML = `
+    <div class="section-title" style="font-size:16px;">Cadastro Produto/Item</div>
+    <form onsubmit="saveProductItem(event)">
+      <div class="field-row">
+        <div class="field"><label>Nome do item</label><input id="itemDescricao" data-edit="engenharia" required maxlength="120" placeholder="Ex: Ponteira 20mm"></div>
+        <div class="field"><label>Código</label><input id="itemCodigo" data-edit="engenharia" placeholder="Em branco gera um código"></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Classificação</label>
+          <select id="itemClasse" data-edit="engenharia"><option value="PI">PI — intermediário</option><option value="PF" selected>PF — final</option></select>
+        </div>
+        <div class="field"><label>Tempo (min/peça)</label><input id="itemTempo" data-edit="engenharia" type="number" min="0" step="0.1" value="1"></div>
+        <div class="field"><label>Família</label>
+          <select id="itemFamilia" data-edit="engenharia"><option value="">Sem família</option>${families}</select>
+        </div>
+      </div>
+      <button class="btn btn-primary" data-edit="engenharia" type="submit">Salvar produto</button>
+    </form>
+    <div style="margin-top:12px;">${state.products.length ? state.products.map(function(product){
+      const family = state.families.find(function(item){ return item.id === product.familiaId; });
+      const idx = state.products.indexOf(product);
+      return `<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;margin-top:6px;">
+        <span><b>${escapeHtml(product.codigo)}</b> — ${escapeHtml(product.descricao || '')}${family ? ' · ' + escapeHtml(family.nome) : ''}</span>
+        <button class="icon-btn danger" data-edit="engenharia" type="button" onclick="removeProduct(${idx})" title="Excluir produto">${icon('trash',14)}</button>
+      </div>`;
+    }).join('') : '<div class="section-sub">Nenhum produto cadastrado.</div>'}</div>`;
+}
+async function saveProductItem(event){
+  event.preventDefault();
+  if(deny('engenharia')) return;
+  const descricao = document.getElementById('itemDescricao').value.trim();
+  const classificacao = document.getElementById('itemClasse').value || 'PF';
+  let codigo = document.getElementById('itemCodigo').value.trim();
+  const tempo = Math.max(0, Number(document.getElementById('itemTempo').value) || 0);
+  const familiaId = document.getElementById('itemFamilia').value;
+  if(!descricao){ toast('Informe o nome do produto.', 'error'); return; }
+  if(!codigo) codigo = genErpCode(classificacao);
+  if(state.products.some(function(product){ return product.codigo === codigo; })){
+    toast('Já existe um produto com este código.', 'error');
+    return;
+  }
+  state.products.push({ codigo: codigo, descricao: descricao, tempoFabricacaoMin: tempo || 1, classificacao: classificacao, familiaId: familiaId });
+  await persist();
+  event.target.reset();
+  renderProductCatalog();
+  applyAccess();
+  toast('Produto cadastrado.', 'success');
 }
 function renderEngenhariaTable(){
   const tbody = document.getElementById('engTbody');
@@ -1340,10 +1483,11 @@ async function updateClassificacao(idx, newClass){
 }
 async function removeProduct(idx){
   if(deny('engenharia')) return;
-  if(!confirm('Remover este código da Engenharia de Produto?')) return;
+  if(!confirm('Excluir este produto?')) return;
   state.products.splice(idx,1);
   await persist();
   renderEngenhariaTable();
+  if(typeof renderProductCatalog === 'function') renderProductCatalog();
 }
 
 /* ===================== FUNCIONÁRIOS ===================== */
@@ -1818,16 +1962,17 @@ function renderAcompTable(){
   const q = acompSearch.trim().toLowerCase();
   const list = state.orders.filter(o=> !q || orderLabel(o).toLowerCase().includes(q) || o.codigo.toLowerCase().includes(q)).sort((a,b)=>b.criadoEm.localeCompare(a.criadoEm));
   tbody.innerHTML = list.length ? list.map(o=>{
-    const produced = orderProducedQty(o.id);
+    const progress = orderProgress(o);
+    const produced = progress.produced;
     const scrap = orderScrapQty(o.id);
-    const pct = Math.min(100, (produced/o.quantidadePlanejada)*100);
+    const pct = Math.min(100, progress.pct);
     return `<tr style="cursor:pointer;" onclick="showAcompDetail('${o.id}')">
       <td style="color:var(--blue); font-weight:700;">${orderLabel(o)}</td>
       <td>${o.codigo}</td>
       <td>${o.descricao}</td>
       <td style="min-width:140px;">
         <div class="progress-track" style="margin-bottom:4px;"><div class="progress-fill" style="width:${pct}%;"></div></div>
-        <div style="font-size:10.5px; color:var(--text-faint);">${produced}/${o.quantidadePlanejada}</div>
+        <div style="font-size:10.5px; color:var(--text-faint);">${progress.pct}% · ${produced}/${progress.planned}</div>
       </td>
       <td>${orderStatusBadge(o.status)}</td>
       <td class="mono">${scrap}</td>
@@ -2293,20 +2438,26 @@ function renderCatalogs(){
   const groups = document.getElementById('groupCatalog');
   const families = document.getElementById('familyCatalog');
   if(!groups || !families) return;
-  groups.innerHTML = `<div class="section-title" style="font-size:16px;">Grupos</div>
+  groups.innerHTML = `<div class="section-title" style="font-size:16px;">Cadastro Grupo</div>
     <div class="section-sub">Ex.: Usinagem, Chaparia, Pintura, Almoxarifado.</div>
     <div class="field"><label>Nome</label><input id="groupName" data-edit="engenharia"></div>
     <button class="btn btn-primary" data-edit="engenharia" type="button" onclick="saveGroup()">Salvar grupo</button>
     <div style="margin-top:12px;">${state.groups.map(function(group){
-      return `<button class="btn btn-sm" type="button" style="margin:4px;" onclick="showGroupItems('${group.id}')">${escapeHtml(group.nome)}</button>`;
+      return `<span style="display:inline-flex;align-items:center;gap:4px;margin:4px;">
+        <button class="btn btn-sm" type="button" onclick="showGroupItems('${group.id}')">${escapeHtml(group.nome)}</button>
+        <button class="icon-btn danger" data-edit="engenharia" type="button" onclick="deleteGroup('${group.id}')" title="Excluir grupo">${icon('trash',14)}</button>
+      </span>`;
     }).join('') || '<div class="section-sub">Nenhum grupo.</div>'}</div>`;
-  families.innerHTML = `<div class="section-title" style="font-size:16px;">Famílias</div>
+  families.innerHTML = `<div class="section-title" style="font-size:16px;">Cadastro Família</div>
     <div class="section-sub">Ex.: Ponteiras, Chapas, Tubos, Arruelas.</div>
     <div class="field"><label>Nome</label><input id="familyName" data-edit="engenharia"></div>
     <div class="field"><label>Grupo</label><select id="familyGroup" data-edit="engenharia">${state.groups.map(function(group){ return `<option value="${group.id}">${escapeHtml(group.nome)}</option>`; }).join('')}</select></div>
     <button class="btn btn-primary" data-edit="engenharia" type="button" onclick="saveFamily()">Salvar família</button>
     <div style="margin-top:12px;">${state.families.map(function(family){
-      return `<button class="btn btn-sm" type="button" style="margin:4px;" onclick="showFamilyModels('${family.id}')">${escapeHtml(family.nome)}</button>`;
+      return `<span style="display:inline-flex;align-items:center;gap:4px;margin:4px;">
+        <button class="btn btn-sm" type="button" onclick="showFamilyModels('${family.id}')">${escapeHtml(family.nome)}</button>
+        <button class="icon-btn danger" data-edit="engenharia" type="button" onclick="deleteFamily('${family.id}')" title="Excluir família">${icon('trash',14)}</button>
+      </span>`;
     }).join('') || '<div class="section-sub">Nenhuma família.</div>'}</div>`;
 }
 async function saveGroup(){
@@ -2326,8 +2477,64 @@ async function saveFamily(){
   state.families.push({ id: uid(), nome: nome, grupoId: grupoId });
   await persist();
   renderCatalogs();
+  renderProductCatalog();
   renderEngenhariaTable();
   applyAccess();
+}
+function dropLinkedOrders(familyIds, productCodes, groupIds){
+  const removed = state.orders.filter(function(order){
+    const items = order.itens || [];
+    if(productCodes.indexOf(order.codigo) >= 0) return true;
+    return items.some(function(item){
+      return familyIds.indexOf(item.familiaId) >= 0 || groupIds.indexOf(item.grupoId) >= 0;
+    });
+  }).map(function(order){ return order.id; });
+  state.orders = state.orders.filter(function(order){ return removed.indexOf(order.id) < 0; });
+  state.punches = state.punches.filter(function(punch){ return removed.indexOf(punch.ordemId) < 0; });
+}
+async function deleteGroup(id){
+  if(deny('engenharia')) return;
+  const group = state.groups.find(function(item){ return item.id === id; });
+  if(!group) return;
+  const families = state.families.filter(function(item){ return item.grupoId === id; });
+  const familyIds = families.map(function(item){ return item.id; });
+  const models = state.products.filter(function(item){ return familyIds.indexOf(item.familiaId) >= 0; });
+  const confirmed = confirm('Excluir o grupo ' + group.nome + '?\n\nTudo que estiver vinculado será excluído: ' + families.length + ' família(s), ' + models.length + ' modelo(s) e as ordens desses modelos.');
+  if(!confirmed) return;
+  dropLinkedOrders(familyIds, models.map(function(item){ return item.codigo; }), [id]);
+  state.products = state.products.filter(function(item){ return familyIds.indexOf(item.familiaId) < 0; });
+  state.families = state.families.filter(function(item){ return item.grupoId !== id; });
+  state.groups = state.groups.filter(function(item){ return item.id !== id; });
+  state.resources.forEach(function(resource){
+    if(Array.isArray(resource.grupos)) resource.grupos = resource.grupos.filter(function(groupId){ return groupId !== id; });
+  });
+  await persist();
+  renderCatalogs();
+  if(typeof renderProductCatalog === 'function') renderProductCatalog();
+  if(typeof renderEngenhariaTable === 'function') renderEngenhariaTable();
+  const box = document.getElementById('groupItems');
+  if(box) box.innerHTML = '';
+  applyAccess();
+  toast('Grupo excluído com os vínculos.', 'success');
+}
+async function deleteFamily(id){
+  if(deny('engenharia')) return;
+  const family = state.families.find(function(item){ return item.id === id; });
+  if(!family) return;
+  const models = state.products.filter(function(item){ return item.familiaId === id; });
+  const confirmed = confirm('Excluir a família ' + family.nome + '?\n\nTudo que estiver vinculado será excluído: ' + models.length + ' modelo(s) e as ordens desses modelos.');
+  if(!confirmed) return;
+  dropLinkedOrders([id], models.map(function(item){ return item.codigo; }), []);
+  state.products = state.products.filter(function(item){ return item.familiaId !== id; });
+  state.families = state.families.filter(function(item){ return item.id !== id; });
+  await persist();
+  renderCatalogs();
+  if(typeof renderProductCatalog === 'function') renderProductCatalog();
+  if(typeof renderEngenhariaTable === 'function') renderEngenhariaTable();
+  const box = document.getElementById('groupItems');
+  if(box) box.innerHTML = '';
+  applyAccess();
+  toast('Família excluída com os vínculos.', 'success');
 }
 function showGroupItems(groupId){
   const group = state.groups.find(function(item){ return item.id === groupId; });
@@ -2625,6 +2832,13 @@ window.closeEmployeePhoto = closeEmployeePhoto;
 window.showForgotPassword = showForgotPassword;
 window.togglePassword = togglePassword;
 window.openOrderStatus = openOrderStatus;
+window.deleteGroup = deleteGroup;
+window.deleteFamily = deleteFamily;
+window.fillOrderFamilies = fillOrderFamilies;
+window.fillOrderItems = fillOrderItems;
+window.addOrderItem = addOrderItem;
+window.removeOrderDraftItem = removeOrderDraftItem;
+window.saveProductItem = saveProductItem;
 window.saveGroup = saveGroup;
 window.saveFamily = saveFamily;
 window.showGroupItems = showGroupItems;
