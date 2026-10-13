@@ -460,6 +460,8 @@ tr.row-vacation td{ color:#7A1F24; }
   display:inline-flex; align-items:center; justify-content:center;
 }
 .eye-btn:hover{ color:var(--text); background:var(--surface-3); }
+.csv-actions{ display:flex; gap:6px; align-items:center; }
+.csv-actions[hidden]{ display:none !important; }
 .notif-wrap{ position:relative; }
 .notif-btn{ position:relative; width:36px; height:36px; border:1px solid var(--border); background:var(--surface); }
 .notif-badge{

@@ -656,6 +656,7 @@ function renderNav(){
     companyListLoaded = true;
     refreshCompanyFoot();
   }
+  updateCsvActions();
 }
 let knownCompanies = [];
 let companyListLoaded = false;
@@ -3889,6 +3890,262 @@ async function updateSupportTicket(id, status){
   }catch(error){ toast(error.message, 'error'); }
 }
 
+const CSV_COLUMNS = ['modulo','codigo','nome','sobrenome','descricao','funcao','turno','vinculo','grupo','familia','classificacao','tempo_min','pintura','montagem','peca','quantidade','restricao','exemplo'];
+const CSV_EXAMPLES = [
+  ['grupo','','Usinagem','','','','','','','','','','','','','','','sim'],
+  ['familia','','Chapas','','','','','','Usinagem','','','','','','','','','sim'],
+  ['item','30.3000.0001','Ponteira 20mm','','','','','','Usinagem','Chapas','PF','1','nao','nao','','','','sim'],
+  ['funcionario','0001','Ana','Souza','','Operadora','1º Turno','Efetivo','','','','','','','','','','sim'],
+  ['recurso','C0001','','','Torno CNC','','','','Usinagem','','','','','','','','só tubos até 2 polegadas','sim'],
+  ['equipamento','','Decanter 183','','','','','','','','','','','','30.3000.0001','2','','sim']
+];
+function updateCsvActions(){
+  const box = document.getElementById('csvActions');
+  if(!box) return;
+  const visible = !!sessionUser && (canView('engenharia') || canView('funcionarios') || canView('recursos'));
+  box.hidden = !visible;
+  const importButton = document.getElementById('csvImportButton');
+  if(importButton) importButton.hidden = !(canEdit('engenharia') || canEdit('funcionarios') || canEdit('recursos'));
+}
+function csvEscape(value){
+  const text = value == null ? '' : String(value);
+  if(/[;"\n]/.test(text)) return '"' + text.replace(/"/g, '""') + '"';
+  return text;
+}
+function exportCadastroModelo(){
+  const lines = [CSV_COLUMNS.join(';')].concat(CSV_EXAMPLES.map(function(row){
+    return row.map(csvEscape).join(';');
+  }));
+  const blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = 'sosystem-cadastro.csv';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(function(){ URL.revokeObjectURL(link.href); }, 1000);
+  toast('Modelo baixado. Apague "sim" da coluna exemplo nas linhas que devem entrar.', 'success');
+}
+function parseCsv(text){
+  const source = String(text || '').replace(/^\uFEFF/, '');
+  const headerLine = (source.split(/\r?\n/)[0] || '');
+  const delimiter = (headerLine.match(/;/g) || []).length >= (headerLine.match(/,/g) || []).length ? ';' : ',';
+  const rows = [];
+  let row = [];
+  let cell = '';
+  let quoted = false;
+  for(let i = 0; i < source.length; i++){
+    const char = source[i];
+    if(quoted){
+      if(char === '"'){
+        if(source[i + 1] === '"'){ cell += '"'; i++; }
+        else quoted = false;
+      } else cell += char;
+    } else if(char === '"') quoted = true;
+    else if(char === delimiter){ row.push(cell); cell = ''; }
+    else if(char === '\n'){ row.push(cell); rows.push(row); row = []; cell = ''; }
+    else if(char !== '\r') cell += char;
+  }
+  if(cell.length || row.length){ row.push(cell); rows.push(row); }
+  if(!rows.length) return [];
+  const header = rows.shift().map(function(name){ return String(name || '').trim().toLowerCase(); });
+  return rows.filter(function(columns){ return columns.some(function(value){ return String(value || '').trim(); }); }).map(function(columns){
+    const record = {};
+    header.forEach(function(name, index){ record[name] = String(columns[index] == null ? '' : columns[index]).trim(); });
+    return record;
+  });
+}
+function csvModule(value){
+  const key = String(value || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const aliases = {
+    grupo:'grupo', grupos:'grupo',
+    familia:'familia', familias:'familia',
+    item:'item', produto:'item', produtos:'item', peca:'item',
+    funcionario:'funcionario', funcionarios:'funcionario', colaborador:'funcionario',
+    recurso:'recurso', recursos:'recurso', celula:'recurso', maquina:'recurso',
+    equipamento:'equipamento', equipamentos:'equipamento'
+  };
+  return aliases[key] || '';
+}
+function csvYes(value){
+  const key = String(value || '').trim().toLowerCase();
+  return key === 'sim' || key === 's' || key === '1' || key === 'true' || key === 'x' || key === 'yes';
+}
+function csvExample(row){
+  const flag = String(row.exemplo || '').trim().toLowerCase();
+  return flag === 'sim' || flag === 'exemplo' || flag === 'example';
+}
+function normalizeTurno(value){
+  const key = String(value || '').trim().toLowerCase();
+  if(!key) return '1º Turno';
+  if(key.indexOf('comercial') >= 0) return 'Turno Comercial';
+  if(key.indexOf('admin') >= 0) return 'Administrativo';
+  if(key.charAt(0) === '2') return '2º Turno';
+  if(key.charAt(0) === '3') return '3º Turno';
+  if(key.charAt(0) === '1') return '1º Turno';
+  return String(value).trim();
+}
+function findGroupByName(nome){
+  const key = String(nome || '').trim().toLowerCase();
+  return state.groups.find(function(group){ return String(group.nome || '').trim().toLowerCase() === key; }) || null;
+}
+function ensureGroup(nome, errors){
+  const clean = String(nome || '').trim();
+  if(!clean) return null;
+  let group = findGroupByName(clean);
+  if(group) return group;
+  if(!canEdit('engenharia')){ errors.push('Sem permissão para criar o grupo ' + clean + '.'); return null; }
+  group = { id: uid(), nome: clean };
+  state.groups.push(group);
+  return group;
+}
+function findFamily(nome, groupId){
+  const key = String(nome || '').trim().toLowerCase();
+  return state.families.find(function(family){
+    return String(family.nome || '').trim().toLowerCase() === key && (!groupId || family.grupoId === groupId);
+  }) || null;
+}
+async function importCadastroCsv(input){
+  const file = input.files && input.files[0];
+  input.value = '';
+  if(!file) return;
+  if(!(canEdit('engenharia') || canEdit('funcionarios') || canEdit('recursos'))){
+    toast('Seu perfil não importa cadastros.', 'error');
+    return;
+  }
+  let rows = [];
+  try{ rows = parseCsv(await file.text()); }
+  catch(error){ toast('Não foi possível ler o CSV.', 'error'); return; }
+  const order = { grupo: 1, familia: 2, item: 3, funcionario: 4, recurso: 5, equipamento: 6 };
+  rows.sort(function(a, b){ return (order[csvModule(a.modulo)] || 9) - (order[csvModule(b.modulo)] || 9); });
+  const counts = { grupo: 0, familia: 0, item: 0, funcionario: 0, recurso: 0, equipamento: 0 };
+  const errors = [];
+  let skipped = 0;
+  const equipmentRows = [];
+  rows.forEach(function(row){
+    if(csvExample(row)){ skipped++; return; }
+    const module = csvModule(row.modulo);
+    if(!module){ if(row.modulo) errors.push('Módulo desconhecido: ' + row.modulo + '.'); else skipped++; return; }
+    if(module === 'grupo'){
+      if(!canEdit('engenharia')){ errors.push('Sem permissão para grupos.'); return; }
+      if(!row.nome){ errors.push('Grupo sem nome.'); return; }
+      if(!findGroupByName(row.nome)){ state.groups.push({ id: uid(), nome: row.nome }); counts.grupo++; }
+      return;
+    }
+    if(module === 'familia'){
+      if(!canEdit('engenharia')){ errors.push('Sem permissão para famílias.'); return; }
+      if(!row.nome){ errors.push('Família sem nome.'); return; }
+      const group = ensureGroup(row.grupo, errors);
+      if(row.grupo && !group) return;
+      if(!findFamily(row.nome, group && group.id)){
+        state.families.push({ id: uid(), nome: row.nome, grupoId: group ? group.id : '' });
+        counts.familia++;
+      }
+      return;
+    }
+    if(module === 'item'){
+      if(!canEdit('engenharia')){ errors.push('Sem permissão para itens.'); return; }
+      const descricao = row.nome || row.descricao;
+      if(!descricao){ errors.push('Item sem nome.'); return; }
+      const group = ensureGroup(row.grupo, errors);
+      let family = row.familia ? findFamily(row.familia, group && group.id) : null;
+      if(row.familia && !family){
+        if(!canEdit('engenharia')){ errors.push('Família não encontrada: ' + row.familia + '.'); return; }
+        family = { id: uid(), nome: row.familia, grupoId: group ? group.id : '' };
+        state.families.push(family);
+        counts.familia++;
+      }
+      const classificacao = String(row.classificacao || 'PF').toUpperCase() === 'PI' ? 'PI' : 'PF';
+      let codigo = row.codigo;
+      if(!codigo) codigo = genErpCode(classificacao);
+      const existing = state.products.find(function(product){ return String(product.codigo).toLowerCase() === String(codigo).toLowerCase(); });
+      const payload = {
+        codigo: codigo,
+        descricao: descricao,
+        tempoFabricacaoMin: Number(String(row.tempo_min || '1').replace(',', '.')) || 1,
+        classificacao: classificacao,
+        familiaId: family ? family.id : '',
+        pintura: csvYes(row.pintura),
+        montagem: csvYes(row.montagem)
+      };
+      if(existing){
+        const oldCode = existing.codigo;
+        const oldDescricao = existing.descricao;
+        Object.assign(existing, payload);
+        syncProductOnOrders(oldCode, oldDescricao, existing);
+      } else state.products.push(payload);
+      counts.item++;
+      return;
+    }
+    if(module === 'funcionario'){
+      if(!canEdit('funcionarios')){ errors.push('Sem permissão para funcionários.'); return; }
+      if(!row.nome || !row.sobrenome){ errors.push('Funcionário sem nome e sobrenome.'); return; }
+      const current = state.employees.find(function(employee){ return row.codigo && (String(employee.numero) === row.codigo || String(employee.numero) === formatEmployeeNumber(parsePositiveInt(row.codigo))); });
+      const assigned = assignEmployeeNumber(row.codigo, current ? current.id : '');
+      if(assigned.error){ errors.push(assigned.error); return; }
+      const data = { numero: assigned.numero, nome: row.nome, sobrenome: row.sobrenome, funcao: row.funcao || 'Operador', turno: normalizeTurno(row.turno), vinculo: /terceir/i.test(row.vinculo) ? 'Terceiro' : 'Efetivo', ferias: current ? current.ferias : null };
+      if(current) Object.assign(current, data);
+      else state.employees.push(Object.assign({ id: uid() }, data));
+      counts.funcionario++;
+      return;
+    }
+    if(module === 'recurso'){
+      if(!canEdit('recursos')){ errors.push('Sem permissão para recursos.'); return; }
+      const codigo = row.codigo || nextResourceCode();
+      const descricao = row.descricao || row.nome || codigo;
+      const groupIds = String(row.grupo || '').split(/[|,]/).map(function(name){ return name.trim(); }).filter(Boolean).map(function(name){
+        const group = ensureGroup(name, errors);
+        return group ? group.id : '';
+      }).filter(Boolean);
+      const setor = groupIds.map(function(id){
+        const group = state.groups.find(function(item){ return item.id === id; });
+        return group ? group.nome : '';
+      }).filter(Boolean).join(', ');
+      const current = state.resources.find(function(resource){ return String(resource.nome).toLowerCase() === codigo.toLowerCase(); });
+      if(current) Object.assign(current, { nome: codigo, descricao: descricao, restricao: row.restricao || current.restricao || '', grupos: groupIds, setor: setor });
+      else state.resources.push({ id: uid(), nome: codigo, descricao: descricao, setor: setor, restricao: row.restricao || '', status: 'Parada', funcionarios: [], grupos: groupIds });
+      counts.recurso++;
+      return;
+    }
+    if(module === 'equipamento') equipmentRows.push(row);
+  });
+  const byEquipment = {};
+  equipmentRows.forEach(function(row){
+    if(!canEdit('engenharia')){ errors.push('Sem permissão para equipamentos.'); return; }
+    const nome = row.nome || row.codigo;
+    if(!nome){ errors.push('Equipamento sem nome.'); return; }
+    if(!byEquipment[nome]) byEquipment[nome] = [];
+    if(row.peca) byEquipment[nome].push({ codigo: row.peca, quantidade: Number(row.quantidade) || 1 });
+  });
+  Object.keys(byEquipment).forEach(function(nome){
+    const parts = byEquipment[nome].filter(function(part){
+      if(productByCode(part.codigo)) return true;
+      errors.push('Peça não cadastrada no equipamento ' + nome + ': ' + part.codigo + '.');
+      return false;
+    });
+    if(!parts.length) return;
+    const current = state.equipments.find(function(equipment){ return String(equipment.nome).toLowerCase() === nome.toLowerCase(); });
+    if(current){
+      parts.forEach(function(part){
+        const existing = (current.itens || []).find(function(item){ return item.codigo === part.codigo; });
+        if(existing) existing.quantidade = part.quantidade;
+        else current.itens.push(part);
+      });
+    } else state.equipments.push({ id: uid(), nome: nome, itens: parts });
+    counts.equipamento++;
+  });
+  const applied = counts.grupo + counts.familia + counts.item + counts.funcionario + counts.recurso + counts.equipamento;
+  if(!applied && !errors.length){ toast('Nenhuma linha nova. As linhas de exemplo ficam de fora.', 'error'); return; }
+  if(applied){
+    await persist();
+    renderActiveTab();
+    applyAccess();
+  }
+  const summary = ['grupos ' + counts.grupo, 'famílias ' + counts.familia, 'itens ' + counts.item, 'funcionários ' + counts.funcionario, 'recursos ' + counts.recurso, 'equipamentos ' + counts.equipamento].join(', ');
+  toast('Cadastros aplicados: ' + summary + (skipped ? '. Exemplos ignorados: ' + skipped + '.' : ''), errors.length ? 'error' : 'success');
+  if(errors.length) toast(errors.slice(0, 3).join(' '), 'error');
+}
+
 window.setTab = setTab;
 window.openSidebar = openSidebar;
 window.closeSidebar = closeSidebar;
@@ -3997,6 +4254,8 @@ window.openNotification = openNotification;
 window.markAllNotifications = markAllNotifications;
 window.createSupportTicket = createSupportTicket;
 window.updateSupportTicket = updateSupportTicket;
+window.exportCadastroModelo = exportCadastroModelo;
+window.importCadastroCsv = importCadastroCsv;
 
 init();
 })();
