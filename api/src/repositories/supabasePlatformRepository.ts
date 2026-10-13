@@ -5,8 +5,13 @@ import type {
   CompanyRecord,
   NewAuditLog,
   NewCompany,
+  NewNotification,
+  NewSupportTicket,
+  NotificationRecord,
   PasswordRequestRecord,
-  PlatformRepository
+  PlatformRepository,
+  SupportTicketPatch,
+  SupportTicketRecord
 } from "./platformRepository.js";
 
 type CompanyRow = {
@@ -74,7 +79,64 @@ function requestFrom(row: RequestRow): PasswordRequestRecord {
   };
 }
 
-function raise(error: { message: string }): never {
+type TicketRow = {
+  id: string;
+  company_id: string | null;
+  author_id: string;
+  author_name: string;
+  author_email: string;
+  subject: string;
+  message: string;
+  status: SupportTicketRecord["status"];
+  reply: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type NotificationRow = {
+  id: string;
+  user_id: string;
+  title: string;
+  body: string;
+  kind: string;
+  entity_id: string | null;
+  read_at: string | null;
+  created_at: string;
+};
+
+function ticketFrom(row: TicketRow): SupportTicketRecord {
+  return {
+    id: row.id,
+    companyId: row.company_id,
+    authorId: row.author_id,
+    authorName: row.author_name,
+    authorEmail: row.author_email,
+    subject: row.subject,
+    message: row.message,
+    status: row.status,
+    reply: row.reply,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function notificationFrom(row: NotificationRow): NotificationRecord {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    title: row.title,
+    body: row.body,
+    kind: row.kind,
+    entityId: row.entity_id,
+    readAt: row.read_at,
+    createdAt: row.created_at
+  };
+}
+
+function raise(error: { code?: string; message: string }): never {
+  if (error.code === "42P01" || error.code === "42703") {
+    throw new HttpError(503, "SCHEMA_PENDING", "Falta atualizar o banco. Rode o script supabase/schema.sql.");
+  }
   throw new HttpError(500, "DATABASE_ERROR", "Falha ao acessar o banco de dados.");
 }
 
@@ -197,6 +259,62 @@ export function createSupabasePlatformRepository(url: string, serviceRoleKey: st
         valorAtual: row.valor_atual,
         createdAt: row.created_at
       }));
+    },
+    async createSupportTicket(input: NewSupportTicket) {
+      const { data, error } = await supabase.from("support_tickets").insert({
+        company_id: input.companyId,
+        author_id: input.authorId,
+        author_name: input.authorName,
+        author_email: input.authorEmail,
+        subject: input.subject,
+        message: input.message
+      }).select("*").single();
+      if (error) raise(error);
+      return ticketFrom(data as TicketRow);
+    },
+    async listSupportTickets() {
+      const { data, error } = await supabase.from("support_tickets").select("*").order("updated_at", { ascending: false });
+      if (error) raise(error);
+      return ((data ?? []) as TicketRow[]).map(ticketFrom);
+    },
+    async findSupportTicket(id) {
+      const { data, error } = await supabase.from("support_tickets").select("*").eq("id", id).maybeSingle();
+      if (error) raise(error);
+      return data ? ticketFrom(data as TicketRow) : null;
+    },
+    async updateSupportTicket(id, patch: SupportTicketPatch) {
+      const payload: Record<string, unknown> = {};
+      if (patch.status !== undefined) payload.status = patch.status;
+      if (patch.reply !== undefined) payload.reply = patch.reply;
+      const { data, error } = await supabase.from("support_tickets").update(payload).eq("id", id).select("*").maybeSingle();
+      if (error) raise(error);
+      return data ? ticketFrom(data as TicketRow) : null;
+    },
+    async addNotification(input: NewNotification) {
+      const { data, error } = await supabase.from("notifications").insert({
+        user_id: input.userId,
+        title: input.title,
+        body: input.body,
+        kind: input.kind,
+        entity_id: input.entityId
+      }).select("*").single();
+      if (error) raise(error);
+      return notificationFrom(data as NotificationRow);
+    },
+    async listNotifications(userId) {
+      const { data, error } = await supabase.from("notifications").select("*").eq("user_id", userId).order("created_at", { ascending: false }).limit(40);
+      if (error) raise(error);
+      return ((data ?? []) as NotificationRow[]).map(notificationFrom);
+    },
+    async markNotificationRead(id, userId) {
+      const { data, error } = await supabase.from("notifications").update({ read_at: new Date().toISOString() }).eq("id", id).eq("user_id", userId).select("*").maybeSingle();
+      if (error) raise(error);
+      return data ? notificationFrom(data as NotificationRow) : null;
+    },
+    async markAllNotificationsRead(userId) {
+      const { data, error } = await supabase.from("notifications").update({ read_at: new Date().toISOString() }).eq("user_id", userId).is("read_at", null).select("id");
+      if (error) raise(error);
+      return data?.length ?? 0;
     }
   };
 }

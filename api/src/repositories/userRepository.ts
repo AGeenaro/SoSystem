@@ -13,6 +13,7 @@ export type UserRecord = {
   mustChangePassword: boolean;
   blocked: boolean;
   blockedByRole: UserRole | null;
+  sessionVersion: number;
   createdAt: string;
   updatedAt: string;
 };
@@ -28,9 +29,10 @@ export type NewUser = {
   mustChangePassword?: boolean;
   blocked?: boolean;
   blockedByRole?: UserRole | null;
+  sessionVersion?: number;
 };
 
-export type UserPatch = Partial<Pick<UserRecord, "name" | "email" | "passwordHash" | "role" | "permissions" | "companyId" | "mustChangePassword" | "blocked" | "blockedByRole">>;
+export type UserPatch = Partial<Pick<UserRecord, "name" | "email" | "passwordHash" | "role" | "permissions" | "companyId" | "mustChangePassword" | "blocked" | "blockedByRole" | "sessionVersion">>;
 
 export interface UserRepository {
   count(): Promise<number>;
@@ -42,7 +44,7 @@ export interface UserRepository {
   delete(id: string): Promise<boolean>;
 }
 
-export type PublicUser = Omit<UserRecord, "passwordHash">;
+export type PublicUser = Omit<UserRecord, "passwordHash" | "sessionVersion">;
 
 export function toPublicUser(user: UserRecord): PublicUser {
   return {

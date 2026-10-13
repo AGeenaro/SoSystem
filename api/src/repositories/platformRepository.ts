@@ -50,6 +50,39 @@ export type AuditLogRecord = {
 
 export type NewAuditLog = Omit<AuditLogRecord, "id" | "createdAt">;
 
+export type SupportStatus = "aberto" | "em_andamento" | "resolvido";
+
+export type SupportTicketRecord = {
+  id: string;
+  companyId: string | null;
+  authorId: string;
+  authorName: string;
+  authorEmail: string;
+  subject: string;
+  message: string;
+  status: SupportStatus;
+  reply: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type NewSupportTicket = Omit<SupportTicketRecord, "id" | "status" | "reply" | "createdAt" | "updatedAt">;
+
+export type SupportTicketPatch = Partial<Pick<SupportTicketRecord, "status" | "reply">>;
+
+export type NotificationRecord = {
+  id: string;
+  userId: string;
+  title: string;
+  body: string;
+  kind: string;
+  entityId: string | null;
+  readAt: string | null;
+  createdAt: string;
+};
+
+export type NewNotification = Omit<NotificationRecord, "id" | "readAt" | "createdAt">;
+
 export interface PlatformRepository {
   listCompanies(): Promise<CompanyRecord[]>;
   findCompany(id: string): Promise<CompanyRecord | null>;
@@ -61,4 +94,12 @@ export interface PlatformRepository {
   updatePasswordRequest(id: string, patch: Pick<PasswordRequestRecord, "status" | "resolvedAt" | "resolvedBy">): Promise<PasswordRequestRecord | null>;
   addLog(input: NewAuditLog): Promise<AuditLogRecord>;
   listLogs(): Promise<AuditLogRecord[]>;
+  createSupportTicket(input: NewSupportTicket): Promise<SupportTicketRecord>;
+  listSupportTickets(): Promise<SupportTicketRecord[]>;
+  findSupportTicket(id: string): Promise<SupportTicketRecord | null>;
+  updateSupportTicket(id: string, patch: SupportTicketPatch): Promise<SupportTicketRecord | null>;
+  addNotification(input: NewNotification): Promise<NotificationRecord>;
+  listNotifications(userId: string): Promise<NotificationRecord[]>;
+  markNotificationRead(id: string, userId: string): Promise<NotificationRecord | null>;
+  markAllNotificationsRead(userId: string): Promise<number>;
 }

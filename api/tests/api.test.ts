@@ -111,6 +111,61 @@ describe("API de usuários", () => {
     expect(me.body.data.email).toBe("ana@fabrica.com");
   });
 
+  it("encerra a sessão anterior quando a mesma conta entra de novo", async () => {
+    await register(app);
+    const first = await request(app).post("/api/auth/login").send({
+      email: "ana@fabrica.com",
+      password: "Senha-segura1"
+    });
+    const second = await request(app).post("/api/auth/login").send({
+      email: "ana@fabrica.com",
+      password: "Senha-segura1"
+    });
+    const oldSession = await request(app).get("/api/auth/me").set("Authorization", `Bearer ${first.body.data.accessToken}`);
+    expect(oldSession.status).toBe(401);
+    expect(oldSession.body.error.code).toBe("SESSION_REPLACED");
+    const current = await request(app).get("/api/auth/me").set("Authorization", `Bearer ${second.body.data.accessToken}`);
+    expect(current.status).toBe(200);
+  });
+
+  it("entrega chamado de suporte no quadro do administrador suporte e avisa a atualização", async () => {
+    const admin = await register(app);
+    const adminToken = admin.body.data.accessToken as string;
+    const company = await request(app).post("/api/companies").set("Authorization", `Bearer ${adminToken}`).send({ name: "Fábrica Sul" });
+    const created = await request(app).post("/api/users").set("Authorization", `Bearer ${adminToken}`).send({
+      name: "Carla Lima",
+      email: "carla@fabrica.com",
+      role: "operador",
+      companyId: company.body.data.id
+    });
+    const login = await request(app).post("/api/auth/login").send({
+      email: "carla@fabrica.com",
+      password: created.body.data.provisionalPassword
+    });
+    const operatorToken = login.body.data.accessToken as string;
+    await request(app).put(`/api/users/${created.body.data.id}`).set("Authorization", `Bearer ${operatorToken}`).send({ password: "Senha-nova1!" });
+    const ticket = await request(app).post("/api/support").set("Authorization", `Bearer ${operatorToken}`).send({
+      subject: "Máquina parada",
+      message: "A célula 2 não abre o apontamento."
+    });
+    expect(ticket.status).toBe(201);
+    const board = await request(app).get("/api/support").set("Authorization", `Bearer ${adminToken}`);
+    expect(board.status).toBe(200);
+    expect(board.body.data).toHaveLength(1);
+    expect(board.body.data[0].subject).toBe("Máquina parada");
+    const notes = await request(app).get("/api/notifications").set("Authorization", `Bearer ${adminToken}`);
+    expect(notes.body.data[0].title).toBe("Novo chamado de suporte");
+    const updated = await request(app).put(`/api/support/${ticket.body.data.id}`).set("Authorization", `Bearer ${adminToken}`).send({
+      status: "em_andamento",
+      reply: "Vamos olhar agora."
+    });
+    expect(updated.status).toBe(200);
+    const operatorNotes = await request(app).get("/api/notifications").set("Authorization", `Bearer ${operatorToken}`);
+    expect(operatorNotes.body.data[0].title).toBe("Chamado de suporte atualizado");
+    const denied = await request(app).put(`/api/support/${ticket.body.data.id}`).set("Authorization", `Bearer ${operatorToken}`).send({ status: "resolvido" });
+    expect(denied.status).toBe(403);
+  });
+
   it("executa o CRUD com as permissões de admin e usuário", async () => {
     const adminResponse = await register(app);
     const adminToken = adminResponse.body.data.accessToken;

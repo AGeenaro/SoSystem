@@ -14,6 +14,7 @@ type UserRow = {
   must_change_password?: boolean | null;
   blocked?: boolean | null;
   blocked_by_role?: string | null;
+  session_version?: number | null;
   created_at: string;
   updated_at: string;
 };
@@ -30,6 +31,7 @@ function toRecord(row: UserRow): UserRecord {
     mustChangePassword: Boolean(row.must_change_password),
     blocked: Boolean(row.blocked),
     blockedByRole: row.blocked_by_role ? normalizeRole(row.blocked_by_role) : null,
+    sessionVersion: Number(row.session_version ?? 0),
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
@@ -78,7 +80,8 @@ export function createSupabaseUserRepository(url: string, serviceRoleKey: string
         company_id: input.companyId ?? null,
         must_change_password: input.mustChangePassword ?? false,
         blocked: input.blocked ?? false,
-        blocked_by_role: input.blockedByRole ?? null
+        blocked_by_role: input.blockedByRole ?? null,
+        session_version: input.sessionVersion ?? 0
       };
       if (input.id) payload.id = input.id;
       const { data, error } = await supabase.from("users").insert(payload).select("*").single();
@@ -96,7 +99,19 @@ export function createSupabaseUserRepository(url: string, serviceRoleKey: string
       if (patch.mustChangePassword !== undefined) payload.must_change_password = patch.mustChangePassword;
       if (patch.blocked !== undefined) payload.blocked = patch.blocked;
       if (patch.blockedByRole !== undefined) payload.blocked_by_role = patch.blockedByRole;
+      if (patch.sessionVersion !== undefined) payload.session_version = patch.sessionVersion;
       const { data, error } = await supabase.from("users").update(payload).eq("id", id).select("*").maybeSingle();
+      if (error && patch.sessionVersion !== undefined && /session_version/i.test(error.message)) {
+        delete payload.session_version;
+        if (!Object.keys(payload).length) {
+          const existing = await supabase.from("users").select("*").eq("id", id).maybeSingle();
+          if (existing.error) raise(existing.error);
+          return existing.data ? toRecord(existing.data as UserRow) : null;
+        }
+        const retry = await supabase.from("users").update(payload).eq("id", id).select("*").maybeSingle();
+        if (retry.error) raise(retry.error);
+        return retry.data ? toRecord(retry.data as UserRow) : null;
+      }
       if (error) raise(error);
       return data ? toRecord(data as UserRow) : null;
     },

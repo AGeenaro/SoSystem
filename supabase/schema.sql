@@ -229,3 +229,46 @@ on conflict (company_id) do nothing;
 
 alter table public.production_counters enable row level security;
 revoke all on table public.production_counters from anon, authenticated;
+
+-- Sessão única, chamados de suporte e notificações.
+alter table public.users add column if not exists session_version integer not null default 0;
+
+create table if not exists public.support_tickets (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid,
+  author_id uuid not null references public.users(id) on delete cascade,
+  author_name text not null,
+  author_email text not null,
+  subject text not null,
+  message text not null,
+  status text not null default 'aberto' check (status in ('aberto', 'em_andamento', 'resolvido')),
+  reply text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists support_tickets_status_idx on public.support_tickets (status, updated_at desc);
+
+drop trigger if exists support_tickets_set_updated_at on public.support_tickets;
+create trigger support_tickets_set_updated_at
+before update on public.support_tickets
+for each row
+execute function public.set_updated_at();
+
+create table if not exists public.notifications (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.users(id) on delete cascade,
+  title text not null,
+  body text not null,
+  kind text not null,
+  entity_id text,
+  read_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists notifications_user_idx on public.notifications (user_id, created_at desc);
+
+alter table public.support_tickets enable row level security;
+alter table public.notifications enable row level security;
+revoke all on table public.support_tickets from anon, authenticated;
+revoke all on table public.notifications from anon, authenticated;

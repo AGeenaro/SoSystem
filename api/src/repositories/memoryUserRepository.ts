@@ -32,6 +32,7 @@ export function createMemoryUserRepository(): UserRepository {
         mustChangePassword: input.mustChangePassword ?? false,
         blocked: input.blocked ?? false,
         blockedByRole: input.blockedByRole ?? null,
+        sessionVersion: input.sessionVersion ?? 0,
         createdAt: now,
         updatedAt: now
       };

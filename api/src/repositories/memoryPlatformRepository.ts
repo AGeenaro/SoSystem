@@ -5,8 +5,13 @@ import type {
   CompanyRecord,
   NewAuditLog,
   NewCompany,
+  NewNotification,
+  NewSupportTicket,
+  NotificationRecord,
   PasswordRequestRecord,
-  PlatformRepository
+  PlatformRepository,
+  SupportTicketPatch,
+  SupportTicketRecord
 } from "./platformRepository.js";
 
 function now() {
@@ -17,6 +22,8 @@ export function createMemoryPlatformRepository(): PlatformRepository {
   const companies = new Map<string, CompanyRecord>();
   const requests = new Map<string, PasswordRequestRecord>();
   const logs: AuditLogRecord[] = [];
+  const tickets = new Map<string, SupportTicketRecord>();
+  const notifications = new Map<string, NotificationRecord>();
 
   return {
     async listCompanies() {
@@ -85,6 +92,59 @@ export function createMemoryPlatformRepository(): PlatformRepository {
     },
     async listLogs() {
       return [...logs].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    },
+    async createSupportTicket(input: NewSupportTicket) {
+      const stamp = now();
+      const ticket: SupportTicketRecord = {
+        ...input,
+        id: randomUUID(),
+        status: "aberto",
+        reply: null,
+        createdAt: stamp,
+        updatedAt: stamp
+      };
+      tickets.set(ticket.id, ticket);
+      return ticket;
+    },
+    async listSupportTickets() {
+      return [...tickets.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    },
+    async findSupportTicket(id) {
+      return tickets.get(id) ?? null;
+    },
+    async updateSupportTicket(id, patch: SupportTicketPatch) {
+      const current = tickets.get(id);
+      if (!current) return null;
+      const next = { ...current, ...patch, updatedAt: now() };
+      tickets.set(id, next);
+      return next;
+    },
+    async addNotification(input: NewNotification) {
+      const entry: NotificationRecord = { ...input, id: randomUUID(), readAt: null, createdAt: now() };
+      notifications.set(entry.id, entry);
+      return entry;
+    },
+    async listNotifications(userId) {
+      return [...notifications.values()]
+        .filter((entry) => entry.userId === userId)
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        .slice(0, 40);
+    },
+    async markNotificationRead(id, userId) {
+      const current = notifications.get(id);
+      if (!current || current.userId !== userId) return null;
+      const next = { ...current, readAt: current.readAt ?? now() };
+      notifications.set(id, next);
+      return next;
+    },
+    async markAllNotificationsRead(userId) {
+      let count = 0;
+      for (const entry of notifications.values()) {
+        if (entry.userId !== userId || entry.readAt) continue;
+        notifications.set(entry.id, { ...entry, readAt: now() });
+        count += 1;
+      }
+      return count;
     }
   };
 }

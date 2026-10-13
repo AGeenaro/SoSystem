@@ -91,3 +91,15 @@ export const resolvePasswordRequestSchema = z.object({
 export const blockUserSchema = z.object({
   blocked: z.boolean()
 }).strict();
+
+export const supportCreateSchema = z.object({
+  subject: z.string().trim().min(3, "O assunto precisa ter pelo menos 3 caracteres.").max(120),
+  message: z.string().trim().min(3, "Descreva o pedido com pelo menos 3 caracteres.").max(4000)
+}).strict();
+
+export const supportUpdateSchema = z.object({
+  status: z.enum(["aberto", "em_andamento", "resolvido"]).optional(),
+  reply: z.string().trim().max(4000).nullable().optional()
+}).strict().refine((value) => Object.keys(value).length > 0, {
+  message: "Informe o status ou a resposta."
+});

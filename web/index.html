@@ -22,7 +22,7 @@
       <div class="field"><label>Senha</label>
         <div class="password-field">
           <input id="loginPassword" type="password" required autocomplete="current-password">
-          <button class="eye-btn" type="button" onclick="togglePassword('loginPassword', this)" aria-label="Mostrar senha">mostrar</button>
+          <button class="eye-btn" type="button" onclick="togglePassword('loginPassword', this)" aria-label="Mostrar senha"><svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
         </div>
       </div>
       <button class="btn btn-primary" type="submit">Entrar</button>
@@ -39,7 +39,7 @@
       <div class="field"><label>Nova senha</label>
         <div class="password-field">
           <input id="forcePassword" type="password" required minlength="8" maxlength="72" autocomplete="new-password">
-          <button class="eye-btn" type="button" onclick="togglePassword('forcePassword', this)" aria-label="Mostrar senha">mostrar</button>
+          <button class="eye-btn" type="button" onclick="togglePassword('forcePassword', this)" aria-label="Mostrar senha"><svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
         </div>
       </div>
       <button class="btn btn-primary" type="submit">Salvar senha</button>
@@ -47,7 +47,12 @@
     <form id="setupForm" hidden>
       <div class="field"><label>Nome</label><input id="setupName" required minlength="2" maxlength="80" autocomplete="name"></div>
       <div class="field"><label>E-mail</label><input id="setupEmail" type="email" required autocomplete="username"></div>
-      <div class="field"><label>Senha</label><input id="setupPassword" type="password" required minlength="8" maxlength="72" autocomplete="new-password"></div>
+      <div class="field"><label>Senha</label>
+        <div class="password-field">
+          <input id="setupPassword" type="password" required minlength="8" maxlength="72" autocomplete="new-password">
+          <button class="eye-btn" type="button" onclick="togglePassword('setupPassword', this)" aria-label="Mostrar senha"><svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
+        </div>
+      </div>
       <button class="btn btn-primary" type="submit">Criar administrador suporte</button>
     </form>
   </div>
@@ -77,7 +82,13 @@
         <button class="hamburger" onclick="openSidebar()">☰</button>
         <div class="topbar-title"><span class="eyebrow" id="topEyebrow">SOSystem</span><span id="topTitle">Dashboard</span></div>
       </div>
-      <div class="topbar-right" id="topbarPills"></div>
+      <div class="topbar-right">
+        <div class="notif-wrap">
+          <button id="notifButton" class="icon-btn notif-btn" type="button" onclick="toggleNotifications()" aria-label="Notificações"></button>
+          <div id="notifPanel" class="notif-panel" hidden></div>
+        </div>
+        <div id="topbarPills"></div>
+      </div>
     </div>
     <div class="content" id="content"></div>
   </div>
@@ -92,9 +103,9 @@
       <button class="modal-close" onclick="closeModal('modalEmployee')">×</button>
     </div>
     <input type="hidden" id="empId">
-    <div class="field" id="empNumeroField" style="display:none;">
-      <label>Número do Funcionário</label>
-      <input id="empNumeroDisplay" disabled style="font-weight:800; color:var(--blue); background:var(--surface-2);">
+    <div class="field" id="empNumeroField">
+      <label>Número do Funcionário <span class="field-hint">automático, editável</span></label>
+      <input id="empNumero" inputmode="numeric" maxlength="8">
     </div>
     <div class="field-row">
       <div class="field"><label>Nome</label><input id="empNome" placeholder="Ex: Carlos"></div>
@@ -109,6 +120,7 @@
           <option>1º Turno</option>
           <option>2º Turno</option>
           <option>3º Turno</option>
+          <option>Turno Comercial</option>
           <option>Administrativo</option>
         </select>
       </div>
@@ -137,6 +149,10 @@
       <button class="modal-close" onclick="closeModal('modalOrder')">×</button>
     </div>
     <div class="field">
+      <label>Número da ordem <span class="field-hint">automático, editável</span></label>
+      <input id="ordNumero" maxlength="20">
+    </div>
+    <div class="field">
       <label>Equipamento</label>
       <select id="ordEquipamento" onchange="renderOrderPreview()"></select>
     </div>
@@ -161,7 +177,7 @@
       <button class="modal-close" onclick="closeModal('modalResource')">×</button>
     </div>
     <input type="hidden" id="resId">
-    <div class="field"><label>Código</label><input id="resNome" placeholder="Ex: CA01"></div>
+    <div class="field"><label>Código <span class="field-hint">automático, editável</span></label><input id="resNome" maxlength="40" placeholder="Ex: C0001"></div>
     <div class="field"><label>Descrição</label><input id="resDescricao" placeholder="Ex: Cabine de Pintura"></div>
     <div class="field"><label>Grupo</label><div class="section-sub" style="margin-bottom:8px;">O grupo é o setor. Pode deixar em branco.</div><div id="resGrupos" style="display:flex; flex-wrap:wrap;"></div></div>
     <div class="field"><label>Restrição</label><input id="resRestricao" placeholder="Ex: só tubos até 2 polegadas"></div>
@@ -269,7 +285,7 @@
 <script src="js/app.js"></script>
 <script>
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js?v=21').catch(function () {});
+  navigator.serviceWorker.register('sw.js?v=22').catch(function () {});
 }
 </script>
 </body>

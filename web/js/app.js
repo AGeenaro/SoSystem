@@ -42,7 +42,11 @@ const ICONS = {
   helmet: '<path d="M4 15a8 8 0 0 1 16 0v1H4v-1z"/><path d="M11 3.2A8 8 0 0 0 4.3 12"/><line x1="2" y1="16" x2="22" y2="16"/>',
   wrench: '<path d="M14.7 6.3a4 4 0 0 0-5.5 4.9L3 17.5 5.5 20l6.3-6.2a4 4 0 0 0 4.9-5.5l-2.7 2.7-2-2z"/>',
   info: '<circle cx="12" cy="12" r="9"/><line x1="12" y1="11" x2="12" y2="16"/><line x1="12" y1="7.5" x2="12" y2="7.51"/>',
-  printer: '<path d="M7 8V3h10v5"/><rect x="4" y="8" width="16" height="9" rx="1.5"/><path d="M7 13h10v8H7z"/><line x1="8" y1="17" x2="16" y2="17"/>'
+  printer: '<path d="M7 8V3h10v5"/><rect x="4" y="8" width="16" height="9" rx="1.5"/><path d="M7 13h10v8H7z"/><line x1="8" y1="17" x2="16" y2="17"/>',
+  eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+  eyeOff: '<path d="M3 3l18 18"/><path d="M10.6 6.2A10.7 10.7 0 0 1 12 6c6.5 0 10 6 10 6a18 18 0 0 1-3.2 3.8"/><path d="M6.1 6.1C3.6 7.8 2 12 2 12s3.5 7 10 7a10 10 0 0 0 4.2-.9"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>',
+  bell: '<path d="M6 16V11a6 6 0 0 1 12 0v5"/><path d="M4 16h16"/><path d="M10 19a2 2 0 0 0 4 0"/>',
+  message: '<path d="M4 6h16v10H7l-3 3V6z"/>'
 };
 function icon(name, size, extraClass){
   size = size || 18;
@@ -112,6 +116,47 @@ function genErpCode(classificacao){
 }
 function formatOrderNumber(n){ const s = String(n).padStart(6,'0'); return s.slice(0,3) + '.' + s.slice(3); }
 function formatEmployeeNumber(n){ return String(n).padStart(4,'0'); }
+function parsePositiveInt(value){
+  const digits = String(value || '').replace(/\D/g, '');
+  if(!digits) return 0;
+  const number = Number(digits);
+  return Number.isFinite(number) && number > 0 ? Math.floor(number) : 0;
+}
+function employeeNumberTaken(numero, exceptId){
+  const key = String(numero);
+  return state.employees.some(function(employee){
+    if(exceptId && employee.id === exceptId) return false;
+    return String(employee.numero) === key;
+  });
+}
+function assignEmployeeNumber(raw, exceptId){
+  const parsed = parsePositiveInt(raw);
+  const value = parsed || state.nextEmployeeNum;
+  const numero = formatEmployeeNumber(value);
+  if(employeeNumberTaken(numero, exceptId)) return { error: 'Este número de funcionário já existe.' };
+  if(value >= state.nextEmployeeNum) state.nextEmployeeNum = value + 1;
+  return { numero: numero };
+}
+function orderNumberTaken(numero){
+  return state.orders.some(function(order){ return String(order.numero) === String(numero); });
+}
+function assignOrderNumber(raw){
+  const typed = String(raw || '').trim();
+  const numero = typed || formatOrderNumber(state.nextOrderNum);
+  if(orderNumberTaken(numero)) return { error: 'Já existe uma ordem com este número.' };
+  const parsed = parsePositiveInt(numero);
+  if(parsed >= state.nextOrderNum) state.nextOrderNum = parsed + 1;
+  else if(!typed) state.nextOrderNum += 1;
+  return { numero: numero };
+}
+function nextResourceCode(){
+  let max = 0;
+  state.resources.forEach(function(resource){
+    const match = String(resource.nome || '').match(/(\d+)\s*$/);
+    if(match) max = Math.max(max, Number(match[1]));
+  });
+  return 'C' + String(max + 1).padStart(4, '0');
+}
 
 function openEmployeePhoto(employeeId, evt){
   if(evt){ evt.preventDefault(); evt.stopPropagation(); }
@@ -503,6 +548,7 @@ const NAV = [
   {id:'engenharia', module:'engenharia', path:'/engenharia', label:'Engenharia de Produto', icn:'gear'},
   {id:'funcionarios', module:'funcionarios', path:'/funcionarios', label:'Funcionários', icn:'users'},
   {id:'acompanhamento', module:'acompanhamento', path:'/acompanhamento', label:'Acompanhamento', icn:'search'},
+  {id:'suporte', module:'suporte', path:'/suporte', label:'Suporte', icn:'message'},
   {id:'configuracoes', module:'configuracoes', path:'/configuracoes', label:'Configurações', icn:'sliders'}
 ];
 const ROLE_LABELS = {
@@ -513,6 +559,10 @@ const ROLE_LABELS = {
 };
 const SESSION_KEY = 'prodfy_session';
 let sessionUser = null;
+let supportTickets = [];
+let notifications = [];
+let notifOpen = false;
+let unreadNotified = -1;
 let returnPath = '';
 function escapeHtml(value){
   return String(value == null ? '' : value).replace(/[&<>"']/g, function(char){
@@ -533,7 +583,7 @@ function moduleOf(id){
 }
 function permissionList(user){
   const all = [];
-  NAV.filter(function(entry){ return entry.module !== 'configuracoes'; }).forEach(function(entry){
+  NAV.filter(function(entry){ return entry.module !== 'configuracoes' && entry.module !== 'suporte'; }).forEach(function(entry){
     if(all.indexOf(entry.module) < 0) all.push(entry.module);
   });
   if(!user) return { view: [], edit: [] };
@@ -543,7 +593,7 @@ function permissionList(user){
   return { view: view, edit: edit };
 }
 function canView(module){
-  if(module === 'configuracoes') return true;
+  if(module === 'configuracoes' || module === 'suporte') return true;
   return permissionList(sessionUser).view.indexOf(module) >= 0;
 }
 function canEdit(module){
@@ -580,6 +630,10 @@ function navBadge(id){
   if(id==='apontamento') return state.punches.filter(p=>p.status==='Aberto').length;
   if(id==='funcionarios') return state.employees.length;
   if(id==='recursos') return state.resources.length;
+  if(id==='suporte') return supportTickets.filter(function(ticket){
+    if(sessionUser && sessionUser.role === 'administrador_suporte') return ticket.status !== 'resolvido';
+    return ticket.authorId === (sessionUser && sessionUser.id) && ticket.status !== 'resolvido';
+  }).length;
   return 0;
 }
 function renderNav(){
@@ -667,6 +721,7 @@ function renderActiveTab(){
   else if(activeTab==='engenharia') renderEngenharia();
   else if(activeTab==='funcionarios') renderFuncionarios();
   else if(activeTab==='acompanhamento') renderAcompanhamento();
+  else if(activeTab==='suporte') renderSuporte();
   else if(activeTab==='configuracoes') renderConfiguracoes();
 }
 function openSidebar(){ document.getElementById('sidebar').classList.add('open'); document.getElementById('sidebarScrim').classList.add('open'); }
@@ -908,6 +963,7 @@ function renderShell(){
     <div class="tab-panel" id="panel-engenharia"></div>
     <div class="tab-panel" id="panel-funcionarios"></div>
     <div class="tab-panel" id="panel-acompanhamento"></div>
+    <div class="tab-panel" id="panel-suporte"></div>
     <div class="tab-panel" id="panel-configuracoes"></div>
   `;
   document.getElementById('panel-'+activeTab).classList.add('active');
@@ -1217,7 +1273,7 @@ function openResourceModal(id){
     renderGroupChoices('resGrupos', resourceGroupIds(r));
   } else {
     document.getElementById('resModalTitle').textContent = 'Nova Célula / Recurso';
-    document.getElementById('resNome').value = '';
+    document.getElementById('resNome').value = nextResourceCode();
     document.getElementById('resDescricao').value = '';
     document.getElementById('resRestricao').value = '';
     renderGroupChoices('resGrupos', []);
@@ -1227,7 +1283,7 @@ function openResourceModal(id){
 async function saveResource(){
   if(deny('recursos')) return;
   const id = document.getElementById('resId').value;
-  const nome = document.getElementById('resNome').value.trim();
+  let nome = document.getElementById('resNome').value.trim();
   const descricao = document.getElementById('resDescricao').value.trim();
   const restricao = document.getElementById('resRestricao').value.trim();
   const groupIds = Array.from(document.querySelectorAll('#resGrupos input:checked')).map(function(input){ return input.value; });
@@ -1235,7 +1291,12 @@ async function saveResource(){
     const group = state.groups.find(function(item){ return item.id === id; });
     return group ? group.nome : '';
   }).filter(Boolean).join(', ');
-  if(!nome || !descricao){ toast('Preencha código e descrição.', 'error'); return; }
+  if(!nome) nome = nextResourceCode();
+  if(!descricao){ toast('Preencha a descrição.', 'error'); return; }
+  if(state.resources.some(function(resource){ return resource.id !== id && String(resource.nome).toLowerCase() === nome.toLowerCase(); })){
+    toast('Já existe um recurso com este código.', 'error');
+    return;
+  }
   if(id){ Object.assign(resourceById(id), {nome,descricao,setor,restricao,grupos:groupIds}); }
   else{ state.resources.push({id:uid(), nome, descricao, setor, restricao, status:'Parada', funcionarios:[], grupos:groupIds}); }
   await persist();
@@ -1456,6 +1517,8 @@ function openOrderModal(){
     return `<option value="${item.id}">${escapeHtml(item.nome)}</option>`;
   }).join('');
   document.getElementById('ordQtd').value = 1;
+  const numeroField = document.getElementById('ordNumero');
+  if(numeroField) numeroField.value = formatOrderNumber(state.nextOrderNum);
   const geradoSel = document.getElementById('ordGeradoPor');
   geradoSel.innerHTML = state.employees.length ? state.employees.map(e=>`<option value="${e.nome} ${e.sobrenome}">${e.nome} ${e.sobrenome}</option>`).join('') : '<option value="">Nenhum funcionário cadastrado</option>';
   renderOrderPreview();
@@ -1509,9 +1572,7 @@ async function saveOrder(shouldPrint){
   if(deny('ordens')) return;
   const geradoPor = document.getElementById('ordGeradoPor').value || 'Não informado';
   if(!orderDraftEquipments.length){ toast('Vincule ao menos um equipamento ao pedido.', 'error'); return; }
-  const numero = formatOrderNumber(state.nextOrderNum);
   const opId = uid();
-  state.nextOrderNum++;
   const equipamentos = orderDraftEquipments.map(function(item){
     return { id: item.equipmentId, nome: item.nome, quantidade: item.quantidade };
   });
@@ -1525,7 +1586,10 @@ async function saveOrder(shouldPrint){
       itens.push(part);
     });
   });
-  if(!itens.length){ toast('Os equipamentos vinculados não têm peças.', 'error'); state.nextOrderNum--; return; }
+  if(!itens.length){ toast('Os equipamentos vinculados não têm peças.', 'error'); return; }
+  const assignedNumber = assignOrderNumber(document.getElementById('ordNumero') ? document.getElementById('ordNumero').value : '');
+  if(assignedNumber.error){ toast(assignedNumber.error, 'error'); return; }
+  const numero = assignedNumber.numero;
   const quantidade = itens.reduce(function(sum, item){ return sum + item.quantidade; }, 0);
   const nomes = equipamentos.map(function(item){ return item.nome + (item.quantidade > 1 ? ' × ' + item.quantidade : ''); });
   state.orders.push({ id: opId, numero, codigo: itens[0].codigo, descricao: nomes.join(', '), quantidadePlanejada: quantidade, tempoEstimadoTotalMin: tempo, status:'Não iniciado', setor:'', motivo:'', criadoEm: nowISO(), geradoPor, equipamentos: equipamentos, itens: itens });
@@ -1734,7 +1798,7 @@ function renderProductCatalog(){
     <form onsubmit="saveProductItem(event)">
       <div class="field-row">
         <div class="field"><label>Nome do item</label><input id="itemDescricao" data-edit="engenharia" required maxlength="120" placeholder="Ex: Ponteira 20mm" value="${escapeHtml(editing ? editing.descricao : '')}"></div>
-        <div class="field"><label>Código</label><input id="itemCodigo" data-edit="engenharia" data-auto="${escapeHtml(suggestedCode)}" value="${escapeHtml(suggestedCode)}" maxlength="40"></div>
+        <div class="field"><label>Código <span class="field-hint">automático, editável</span></label><input id="itemCodigo" data-edit="engenharia" data-auto="${escapeHtml(suggestedCode)}" value="${escapeHtml(suggestedCode)}" maxlength="40"></div>
       </div>
       <div class="field-row">
         <div class="field"><label>Grupo</label>
@@ -2047,8 +2111,7 @@ function openEmployeeModal(id){
   if(id){
     const e = state.employees.find(x=>x.id===id);
     document.getElementById('empModalTitle').textContent = 'Editar Funcionário';
-    document.getElementById('empNumeroField').style.display = 'block';
-    document.getElementById('empNumeroDisplay').value = e.numero || '—';
+    document.getElementById('empNumero').value = e.numero || '';
     document.getElementById('empNome').value = e.nome;
     document.getElementById('empSobrenome').value = e.sobrenome;
     document.getElementById('empFuncao').value = e.funcao;
@@ -2059,7 +2122,7 @@ function openEmployeeModal(id){
     document.getElementById('empFeriasFim').value = (e.ferias && e.ferias.fim) ? e.ferias.fim : '';
   } else {
     document.getElementById('empModalTitle').textContent = 'Novo Funcionário';
-    document.getElementById('empNumeroField').style.display = 'none';
+    document.getElementById('empNumero').value = formatEmployeeNumber(state.nextEmployeeNum);
     document.getElementById('empNome').value = '';
     document.getElementById('empSobrenome').value = '';
     document.getElementById('empFuncao').value = '';
@@ -2089,14 +2152,14 @@ async function saveEmployee(){
   if(feriasOn && !fi){ toast('Informe a data de início das férias.', 'error'); return; }
   const ferias = (feriasOn && fi) ? {inicio:fi, fim: ff || null} : null;
   const machineIds = Array.from(document.querySelectorAll('#empMaquinas input:checked')).map(function(input){ return input.value; });
+  const assignedNumber = assignEmployeeNumber(document.getElementById('empNumero').value, id);
+  if(assignedNumber.error){ toast(assignedNumber.error, 'error'); return; }
+  const novoNumero = assignedNumber.numero;
   let employeeId = id;
-  let novoNumero = null;
   if(id){
     const e = state.employees.find(x=>x.id===id);
-    Object.assign(e, {nome,sobrenome,funcao,turno,vinculo,ferias});
+    Object.assign(e, {numero:novoNumero, nome,sobrenome,funcao,turno,vinculo,ferias});
   } else {
-    novoNumero = formatEmployeeNumber(state.nextEmployeeNum);
-    state.nextEmployeeNum++;
     employeeId = uid();
     state.employees.push({id:employeeId, numero:novoNumero, nome, sobrenome, funcao, turno, vinculo, ferias});
   }
@@ -2179,7 +2242,10 @@ function renderIniciarModalBody(){
           <div class="field"><label>Nome</label><input id="quickEmpNome"></div>
           <div class="field"><label>Sobrenome</label><input id="quickEmpSobrenome"></div>
         </div>
-        <div class="field"><label>Função</label><input id="quickEmpFuncao" placeholder="Ex: Operador"></div>
+        <div class="field-row">
+          <div class="field"><label>Número <span class="field-hint">automático, editável</span></label><input id="quickEmpNumero" value="${formatEmployeeNumber(state.nextEmployeeNum)}" maxlength="8"></div>
+          <div class="field"><label>Função</label><input id="quickEmpFuncao" placeholder="Ex: Operador"></div>
+        </div>
         <div class="field"><label>Máquinas</label><div id="quickEmpMaquinas" style="display:flex; flex-wrap:wrap;"></div></div>
         <button type="button" class="btn btn-primary btn-sm" onclick="saveQuickEmployee()">Salvar funcionário</button>
       </div>
@@ -2190,7 +2256,7 @@ function renderIniciarModalBody(){
       <button type="button" class="btn btn-ghost btn-sm" style="margin-top:10px;" onclick="toggleQuickMachine()">Cadastrar máquina</button>
       <div id="quickMachineBox" style="display:${apShowNewMachine?'block':'none'}; margin-top:10px;">
         <div class="field-row">
-          <div class="field"><label>Código</label><input id="quickResNome" placeholder="Ex: XPTO"></div>
+          <div class="field"><label>Código <span class="field-hint">automático, editável</span></label><input id="quickResNome" value="${escapeHtml(nextResourceCode())}" maxlength="40"></div>
           <div class="field"><label>Descrição</label><input id="quickResDescricao" placeholder="Ex: Torno"></div>
         </div>
         <button type="button" class="btn btn-primary btn-sm" onclick="saveQuickMachine()">Salvar máquina</button>
@@ -2303,8 +2369,9 @@ async function saveQuickEmployee(){
   const sobrenome = document.getElementById('quickEmpSobrenome').value.trim();
   const funcao = document.getElementById('quickEmpFuncao').value.trim() || 'Operador';
   if(!nome || !sobrenome){ toast('Informe nome e sobrenome.', 'error'); return; }
-  const numero = formatEmployeeNumber(state.nextEmployeeNum);
-  state.nextEmployeeNum++;
+  const assignedNumber = assignEmployeeNumber(document.getElementById('quickEmpNumero') ? document.getElementById('quickEmpNumero').value : '', '');
+  if(assignedNumber.error){ toast(assignedNumber.error, 'error'); return; }
+  const numero = assignedNumber.numero;
   const id = uid();
   state.employees.push({ id: id, numero: numero, nome: nome, sobrenome: sobrenome, funcao: funcao, turno: '1º Turno', vinculo: 'Efetivo', ferias: null });
   const machineIds = Array.from(document.querySelectorAll('#quickEmpMaquinas input:checked')).map(function(input){ return input.value; });
@@ -2318,7 +2385,8 @@ async function saveQuickEmployee(){
 }
 async function saveQuickMachine(){
   if(deny('apontamento')) return;
-  const nome = document.getElementById('quickResNome').value.trim();
+  let nome = document.getElementById('quickResNome').value.trim();
+  if(!nome) nome = nextResourceCode();
   const descricao = document.getElementById('quickResDescricao').value.trim() || nome;
   if(!nome){ toast('Informe o código da máquina.', 'error'); return; }
   if(state.resources.some(function(resource){ return resource.nome.toLowerCase() === nome.toLowerCase(); })){
@@ -2651,7 +2719,7 @@ function showAcompDetail(orderId){
 }
 
 /* ===================== CONFIGURAÇÕES E LOGIN ===================== */
-const MODULE_OPTIONS = NAV.filter(function(entry){ return entry.module !== 'configuracoes'; });
+const MODULE_OPTIONS = NAV.filter(function(entry){ return entry.module !== 'configuracoes' && entry.module !== 'suporte'; });
 function showLoginMessage(text){
   const box = document.getElementById('loginMessage');
   if(!box) return;
@@ -2686,16 +2754,21 @@ function hideLogin(){
   if(gate) gate.hidden = true;
   if(app) app.classList.remove('is-locked');
 }
-function kickIfCompanyClosed(error){
-  if(!error || (error.code !== 'COMPANY_BLOCKED' && error.code !== 'COMPANY_EXPIRED')) return false;
-  if(sessionUser && sessionUser.role === 'administrador_suporte') return false;
+function endSession(message){
   localStorage.removeItem('prodfy_jwt');
   knownCompanies = [];
   companyListLoaded = false;
   companyListReady = false;
+  supportTickets = [];
+  notifications = [];
   rememberSession(null);
   showLogin(false);
-  showLoginMessage(error.message);
+  if(message) showLoginMessage(message);
+}
+function kickIfCompanyClosed(error){
+  if(!error || (error.code !== 'COMPANY_BLOCKED' && error.code !== 'COMPANY_EXPIRED')) return false;
+  if(sessionUser && sessionUser.role === 'administrador_suporte') return false;
+  endSession(error.message);
   return true;
 }
 async function accountApi(path, options){
@@ -2714,6 +2787,10 @@ async function accountApi(path, options){
     const error = new Error(detail || (payload && payload.error ? payload.error.message : 'Falha na API.'));
     error.status = response.status;
     error.code = payload && payload.error ? payload.error.code : '';
+    if(error.code === 'SESSION_REPLACED'){
+      endSession(error.message);
+      throw error;
+    }
     kickIfCompanyClosed(error);
     throw error;
   }
@@ -2821,7 +2898,7 @@ function renderSettingsPanel(){
         <div class="field"><label>Nova senha</label>
           <div class="password-field">
             <input id="cfgPassword" type="password" minlength="8" maxlength="72" autocomplete="new-password" placeholder="Deixe em branco para manter">
-            <button class="eye-btn" type="button" onclick="togglePassword('cfgPassword', this)">mostrar</button>
+            <button class="eye-btn" type="button" onclick="togglePassword('cfgPassword', this)" aria-label="Mostrar senha">${icon('eye',16)}</button>
           </div>
         </div>
         <button class="btn btn-primary" type="submit">Salvar dados</button>
@@ -2846,7 +2923,7 @@ function renderSettingsPanel(){
           <div class="field"><label>Senha provisória</label>
             <div class="password-field">
               <input id="userPassword" type="password" maxlength="72" autocomplete="new-password" placeholder="Opcional. Vazio gera uma senha ao criar.">
-              <button class="eye-btn" type="button" onclick="togglePassword('userPassword', this)">mostrar</button>
+              <button class="eye-btn" type="button" onclick="togglePassword('userPassword', this)" aria-label="Mostrar senha">${icon('eye',16)}</button>
             </div>
           </div>
           <div class="field"><label>Perfil de acesso</label>
@@ -3036,12 +3113,16 @@ async function deleteAccessUser(id){
   }
 }
 async function logout(){
+  supportTickets = [];
+  notifications = [];
+  unreadNotified = -1;
   localStorage.removeItem('prodfy_jwt');
   knownCompanies = [];
   companyListLoaded = false;
   companyListReady = false;
   rememberSession(null);
   showLogin(false);
+  renderNotifButton();
 }
 async function enterApp(){
   if(sessionUser && sessionUser.mustChangePassword){
@@ -3060,6 +3141,7 @@ async function enterApp(){
   else if(sessionUser.role === 'visualizador') toast('Perfil visualizador. As áreas liberadas ficam só para consulta.', 'success');
   else if(syncError) toast('As alterações ficaram neste aparelho e sobem quando a API responder.', 'error');
   else toast('Produção ligada ao banco. O mesmo conteúdo aparece nos outros aparelhos.', 'success');
+  refreshSupportInbox();
 }
 async function boot(){
   window.addEventListener('popstate', function(){
@@ -3165,8 +3247,20 @@ function bindLoginForms(){
 /* ===================== INIT ===================== */
 async function init(){
   bindLoginForms();
+  document.addEventListener('click', function(event){
+    const wrap = document.querySelector('.notif-wrap');
+    if(!notifOpen || !wrap || wrap.contains(event.target)) return;
+    notifOpen = false;
+    renderNotifPanel();
+  });
   await boot();
-  setInterval(()=>{ if(activeTab==='dashboard') renderRankingAndCharts(); if(activeTab==='apontamento'){ renderApontamento(); applyAccess(); } }, 15000);
+  setInterval(function(){
+    if(activeTab==='dashboard') renderRankingAndCharts();
+    if(activeTab==='apontamento'){ renderApontamento(); applyAccess(); }
+    refreshSupportInbox();
+  }, 15000);
+  const notifButton = document.getElementById('notifButton');
+  if(notifButton && !notifButton.innerHTML) notifButton.innerHTML = icon('bell', 16);
 }
 
 function showForgotPassword(open){
@@ -3194,7 +3288,9 @@ function togglePassword(id, button){
   if(!input) return;
   const show = input.type === 'password';
   input.type = show ? 'text' : 'password';
-  button.textContent = show ? 'ocultar' : 'mostrar';
+  button.innerHTML = icon(show ? 'eyeOff' : 'eye', 16);
+  button.setAttribute('aria-label', show ? 'Ocultar senha' : 'Mostrar senha');
+  button.setAttribute('aria-pressed', show ? 'true' : 'false');
 }
 async function changeOrderStatus(id, next, selectEl){
   if(deny('ordens')){
@@ -3662,6 +3758,137 @@ async function toggleUserBlock(id, blocked){
   }catch(error){ toast(error.message, 'error'); }
 }
 
+const SUPPORT_STATUS = [
+  ['aberto', 'Aberto'],
+  ['em_andamento', 'Em andamento'],
+  ['resolvido', 'Resolvido']
+];
+function supportStatusLabel(status){
+  const found = SUPPORT_STATUS.find(function(item){ return item[0] === status; });
+  return found ? found[1] : status;
+}
+function renderNotifButton(){
+  const button = document.getElementById('notifButton');
+  if(!button) return;
+  const unread = notifications.filter(function(item){ return !item.readAt; }).length;
+  button.innerHTML = icon('bell', 16) + (unread ? `<span class="notif-badge">${unread}</span>` : '');
+  button.setAttribute('aria-label', unread ? unread + ' notificações novas' : 'Notificações');
+  if(notifOpen) renderNotifPanel();
+}
+function renderNotifPanel(){
+  const panel = document.getElementById('notifPanel');
+  if(!panel) return;
+  panel.hidden = !notifOpen;
+  if(!notifOpen) return;
+  const items = notifications.length ? notifications.map(function(item){
+    return `<button class="notif-item${item.readAt ? '' : ' unread'}" type="button" onclick="openNotification('${item.id}')"><b>${escapeHtml(item.title)}</b><span>${escapeHtml(item.body)}</span></button>`;
+  }).join('') : '<div class="notif-empty">Nenhuma notificação.</div>';
+  panel.innerHTML = `<div class="notif-head"><b>Notificações</b><button class="btn btn-sm" type="button" onclick="markAllNotifications()">Marcar lidas</button></div>${items}`;
+}
+function toggleNotifications(){
+  notifOpen = !notifOpen;
+  renderNotifPanel();
+}
+async function openNotification(id){
+  const item = notifications.find(function(entry){ return entry.id === id; });
+  try{
+    if(item && !item.readAt) await accountApi('/api/notifications/' + id + '/read', { method:'POST' });
+  }catch(error){ toast(error.message, 'error'); }
+  notifOpen = false;
+  renderNotifPanel();
+  setTab('suporte');
+  refreshSupportInbox();
+}
+async function markAllNotifications(){
+  try{ await accountApi('/api/notifications/read', { method:'POST' }); }
+  catch(error){ toast(error.message, 'error'); }
+  refreshSupportInbox();
+}
+async function refreshSupportInbox(){
+  if(!sessionUser || !authToken() || (sessionUser.mustChangePassword)) return;
+  try{
+    const tickets = await accountApi('/api/support');
+    const notes = await accountApi('/api/notifications');
+    const unread = (notes.data || []).filter(function(item){ return !item.readAt; }).length;
+    if(unreadNotified >= 0 && unread > unreadNotified){
+      const newest = (notes.data || []).find(function(item){ return !item.readAt; });
+      if(newest) toast(newest.title + ' — ' + newest.body, 'success');
+    }
+    unreadNotified = unread;
+    const previousTickets = JSON.stringify(supportTickets);
+    const previousBadge = navBadge('suporte');
+    supportTickets = tickets.data || [];
+    notifications = notes.data || [];
+    renderNotifButton();
+    if(navBadge('suporte') !== previousBadge) renderNav();
+    const panel = document.getElementById('panel-suporte');
+    const typing = panel && document.activeElement && panel.contains(document.activeElement);
+    if(activeTab === 'suporte' && !typing && previousTickets !== JSON.stringify(supportTickets)) renderSuporte();
+  }catch(error){
+    if(error && error.code === 'SESSION_REPLACED') return;
+  }
+}
+function renderSuporte(){
+  const el = document.getElementById('panel-suporte');
+  if(!el || !sessionUser) return;
+  const suporte = sessionUser.role === 'administrador_suporte';
+  if(suporte){
+    const columns = SUPPORT_STATUS.map(function(status){
+      const cards = supportTickets.filter(function(ticket){ return ticket.status === status[0]; }).map(function(ticket){
+        return `<article class="support-card">
+          <b>${escapeHtml(ticket.subject)}</b>
+          <div class="section-sub" style="margin:4px 0 8px;">${escapeHtml(ticket.authorName)} · ${escapeHtml(ticket.authorEmail)}</div>
+          <div>${escapeHtml(ticket.message)}</div>
+          ${ticket.reply ? `<div class="support-reply">${escapeHtml(ticket.reply)}</div>` : ''}
+          <label class="field" style="margin-top:8px;">Resposta<textarea id="reply-${ticket.id}" maxlength="4000">${escapeHtml(ticket.reply || '')}</textarea></label>
+          <div class="support-actions">${SUPPORT_STATUS.filter(function(option){ return option[0] !== ticket.status; }).map(function(option){
+            return `<button class="btn btn-sm" type="button" onclick="updateSupportTicket('${ticket.id}','${option[0]}')">${option[1]}</button>`;
+          }).join('')}</div>
+        </article>`;
+      }).join('');
+      return `<section class="support-col"><div class="support-col-title">${status[1]}</div>${cards || '<div class="section-sub">Nenhum chamado.</div>'}</section>`;
+    }).join('');
+    el.innerHTML = `<div class="section-title">${icon('message',19)} Quadro de suporte</div>
+      <div class="section-sub">Chamados de todas as empresas. Ao atualizar, quem abriu o chamado recebe uma notificação.</div>
+      <div class="support-board">${columns}</div>`;
+    return;
+  }
+  const mine = supportTickets.map(function(ticket){
+    return `<article class="support-card">
+      <div style="display:flex;justify-content:space-between;gap:8px;"><b>${escapeHtml(ticket.subject)}</b><span class="badge badge-blue">${escapeHtml(supportStatusLabel(ticket.status))}</span></div>
+      <div style="margin-top:6px;">${escapeHtml(ticket.message)}</div>
+      ${ticket.reply ? `<div class="support-reply">${escapeHtml(ticket.reply)}</div>` : '<div class="section-sub" style="margin-top:6px;">Aguardando o administrador suporte.</div>'}
+    </article>`;
+  }).join('');
+  el.innerHTML = `<div class="section-title">${icon('message',19)} Suporte</div>
+    <div class="section-sub">Abra um chamado. O administrador suporte recebe no quadro dele e você é avisado quando houver atualização.</div>
+    <form class="card" onsubmit="createSupportTicket(event)">
+      <div class="field"><label>Assunto</label><input id="supportSubject" required minlength="3" maxlength="120" placeholder="Ex: Não consigo apontar"></div>
+      <div class="field"><label>Mensagem</label><textarea id="supportMessage" required minlength="3" maxlength="4000" placeholder="Descreva o que aconteceu"></textarea></div>
+      <button class="btn btn-primary" type="submit">Enviar chamado</button>
+    </form>
+    <div class="support-list">${mine || '<div class="card section-sub">Nenhum chamado ainda.</div>'}</div>`;
+}
+async function createSupportTicket(event){
+  event.preventDefault();
+  try{
+    await accountApi('/api/support', { method:'POST', body:{
+      subject: document.getElementById('supportSubject').value,
+      message: document.getElementById('supportMessage').value
+    }});
+    toast('Chamado enviado ao administrador suporte.', 'success');
+    await refreshSupportInbox();
+  }catch(error){ toast(error.message, 'error'); }
+}
+async function updateSupportTicket(id, status){
+  const replyField = document.getElementById('reply-' + id);
+  try{
+    await accountApi('/api/support/' + id, { method:'PUT', body:{ status: status, reply: replyField ? replyField.value : '' } });
+    toast('Chamado atualizado.', 'success');
+    await refreshSupportInbox();
+  }catch(error){ toast(error.message, 'error'); }
+}
+
 window.setTab = setTab;
 window.openSidebar = openSidebar;
 window.closeSidebar = closeSidebar;
@@ -3765,6 +3992,11 @@ window.saveAccessUser = saveAccessUser;
 window.deleteAccessUser = deleteAccessUser;
 window.editAccessUser = editAccessUser;
 window.fillUserCompanySelect = fillUserCompanySelect;
+window.toggleNotifications = toggleNotifications;
+window.openNotification = openNotification;
+window.markAllNotifications = markAllNotifications;
+window.createSupportTicket = createSupportTicket;
+window.updateSupportTicket = updateSupportTicket;
 
 init();
 })();

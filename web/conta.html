@@ -24,7 +24,12 @@
         <div class="section-title">Entrar</div>
         <div class="section-sub">Autenticação JWT da API de usuários.</div>
         <div class="field"><label>E-mail</label><input id="loginEmail" type="email" required autocomplete="username"></div>
-        <div class="field"><label>Senha</label><input id="loginPassword" type="password" required autocomplete="current-password"></div>
+        <div class="field"><label>Senha</label>
+          <div class="password-field">
+            <input id="loginPassword" type="password" required autocomplete="current-password">
+            <button class="eye-btn" type="button" onclick="togglePassword('loginPassword', this)" aria-label="Mostrar senha"><svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
+          </div>
+        </div>
         <button class="btn btn-primary" type="submit">Entrar</button>
       </form>
       <form id="registerForm" class="card">
@@ -32,7 +37,12 @@
         <div class="section-sub">A primeira conta do sistema vira administradora.</div>
         <div class="field"><label>Nome</label><input id="registerName" required minlength="2" maxlength="80"></div>
         <div class="field"><label>E-mail</label><input id="registerEmail" type="email" required autocomplete="username"></div>
-        <div class="field"><label>Senha</label><input id="registerPassword" type="password" required minlength="8" maxlength="72" autocomplete="new-password"></div>
+        <div class="field"><label>Senha</label>
+          <div class="password-field">
+            <input id="registerPassword" type="password" required minlength="8" maxlength="72" autocomplete="new-password">
+            <button class="eye-btn" type="button" onclick="togglePassword('registerPassword', this)" aria-label="Mostrar senha"><svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
+          </div>
+        </div>
         <button class="btn btn-primary" type="submit">Cadastrar</button>
       </form>
     </div>
@@ -54,7 +64,12 @@
           <div class="field"><label>Nome</label><input id="profileName" required minlength="2" maxlength="80"></div>
           <div class="field"><label>E-mail</label><input id="profileEmail" type="email" required></div>
         </div>
-        <div class="field"><label>Nova senha (opcional)</label><input id="profilePassword" type="password" minlength="8" maxlength="72" autocomplete="new-password"></div>
+        <div class="field"><label>Nova senha (opcional)</label>
+          <div class="password-field">
+            <input id="profilePassword" type="password" minlength="8" maxlength="72" autocomplete="new-password">
+            <button class="eye-btn" type="button" onclick="togglePassword('profilePassword', this)" aria-label="Mostrar senha"><svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
+          </div>
+        </div>
         <button class="btn btn-primary" type="submit">Salvar perfil</button>
       </form>
 
@@ -66,7 +81,12 @@
             <div class="field"><label>E-mail</label><input id="newEmail" type="email" required></div>
           </div>
           <div class="field-row">
-            <div class="field"><label>Senha</label><input id="newPassword" type="password" required minlength="8"></div>
+            <div class="field"><label>Senha</label>
+              <div class="password-field">
+                <input id="newPassword" type="password" required minlength="8">
+                <button class="eye-btn" type="button" onclick="togglePassword('newPassword', this)" aria-label="Mostrar senha"><svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button>
+              </div>
+            </div>
             <div class="field"><label>Papel</label>
               <select id="newRole">
                 <option value="visualizador">Visualizador</option>

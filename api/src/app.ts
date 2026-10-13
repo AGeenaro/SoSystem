@@ -27,6 +27,8 @@ import {
   productionSyncSchema,
   registerSchema,
   resolvePasswordRequestSchema,
+  supportCreateSchema,
+  supportUpdateSchema,
   updateUserSchema
 } from "./schemas.js";
 import { APP_VERSION } from "./version.js";
@@ -102,8 +104,11 @@ export function createApp(options: AppOptions): Express {
   const auth = requireAuth(options.jwtSecret);
 
   async function issueSession(user: UserRecord) {
+    const sessionVersion = user.sessionVersion + 1;
+    const current = await options.users.update(user.id, { sessionVersion });
+    if (!current) throw new HttpError(500, "INTERNAL_ERROR", "Não foi possível abrir a sessão.");
     const accessToken = signToken(
-      { sub: user.id, email: user.email, role: user.role },
+      { sub: current.id, email: current.email, role: current.role, sv: current.sessionVersion },
       options.jwtSecret,
       jwtExpiresIn
     );
@@ -111,7 +116,7 @@ export function createApp(options: AppOptions): Express {
       accessToken,
       tokenType: "Bearer" as const,
       expiresIn: jwtExpiresIn,
-      user: toPublicUser(user)
+      user: toPublicUser(current)
     };
   }
 
@@ -139,10 +144,13 @@ export function createApp(options: AppOptions): Express {
     }
   }
 
-  async function actorFrom(req: { auth?: { sub: string } }) {
+  async function actorFrom(req: { auth?: { sub: string; sv?: number } }) {
     const user = await options.users.findById(req.auth!.sub);
     if (!user) throw new HttpError(401, "UNAUTHORIZED", "Usuário do token não existe mais.");
     if (user.blocked) throw new HttpError(403, "USER_BLOCKED", "Esta conta está bloqueada.");
+    if (user.sessionVersion > 0 && user.sessionVersion !== req.auth?.sv) {
+      throw new HttpError(401, "SESSION_REPLACED", "Esta conta entrou em outro computador. Entre novamente.");
+    }
     await assertCompanyOpen(user);
     return user;
   }
@@ -375,6 +383,108 @@ export function createApp(options: AppOptions): Express {
     });
     await writeLog(actor, "senha_redefinida", "user", target.id, { mustChangePassword: target.mustChangePassword }, { mustChangePassword: true }, target.companyId);
     res.json({ data: { provisionalPassword } });
+  }));
+
+  const SUPPORT_STATUS_LABEL: Record<string, string> = {
+    aberto: "Aberto",
+    em_andamento: "Em andamento",
+    resolvido: "Resolvido"
+  };
+
+  async function notifyUsers(userIds: string[], notice: { title: string; body: string; kind: string; entityId: string | null }) {
+    const unique = [...new Set(userIds)].filter(Boolean);
+    await Promise.all(unique.map((userId) => platform.addNotification({ userId, ...notice })));
+  }
+
+  async function supportAdminIds() {
+    const users = await options.users.list();
+    return users.filter((user) => user.role === "administrador_suporte" && !user.blocked).map((user) => user.id);
+  }
+
+  app.get("/api/support", auth, asyncHandler(async (req, res) => {
+    const actor = await actorFrom(req);
+    assertPasswordReady(actor);
+    const tickets = await platform.listSupportTickets();
+    const visible = actor.role === "administrador_suporte"
+      ? tickets
+      : tickets.filter((ticket) => ticket.authorId === actor.id);
+    res.json({ data: visible });
+  }));
+
+  app.post("/api/support", auth, asyncHandler(async (req, res) => {
+    const actor = await actorFrom(req);
+    assertPasswordReady(actor);
+    const input = parseBody(supportCreateSchema, req.body);
+    const ticket = await platform.createSupportTicket({
+      companyId: actor.companyId,
+      authorId: actor.id,
+      authorName: actor.name,
+      authorEmail: actor.email,
+      subject: input.subject,
+      message: input.message
+    });
+    await writeLog(actor, "suporte_aberto", "support", ticket.id, null, { subject: ticket.subject, status: ticket.status }, actor.companyId);
+    await notifyUsers(
+      (await supportAdminIds()).filter((id) => id !== actor.id),
+      {
+        title: "Novo chamado de suporte",
+        body: `${actor.name}: ${ticket.subject}`,
+        kind: "support",
+        entityId: ticket.id
+      }
+    );
+    res.status(201).json({ data: ticket });
+  }));
+
+  app.put("/api/support/:id", auth, asyncHandler(async (req, res) => {
+    const actor = await actorFrom(req);
+    assertPasswordReady(actor);
+    if (actor.role !== "administrador_suporte") {
+      throw new HttpError(403, "FORBIDDEN", "Somente o administrador suporte atualiza chamados.");
+    }
+    const { id } = parseBody(idParamSchema, req.params);
+    const input = parseBody(supportUpdateSchema, req.body);
+    const current = await platform.findSupportTicket(id);
+    if (!current) throw new HttpError(404, "NOT_FOUND", "Chamado não encontrado.");
+    const patch: { status?: "aberto" | "em_andamento" | "resolvido"; reply?: string | null } = {};
+    if (input.status !== undefined) patch.status = input.status;
+    if (input.reply !== undefined) patch.reply = input.reply;
+    const updated = await platform.updateSupportTicket(id, patch);
+    if (!updated) throw new HttpError(404, "NOT_FOUND", "Chamado não encontrado.");
+    await writeLog(actor, "suporte_atualizado", "support", id, { status: current.status, reply: current.reply }, { status: updated.status, reply: updated.reply }, current.companyId);
+    const statusLabel = SUPPORT_STATUS_LABEL[updated.status] ?? updated.status;
+    const notice = {
+      title: "Chamado de suporte atualizado",
+      body: `${updated.subject} — ${statusLabel}`,
+      kind: "support",
+      entityId: updated.id
+    };
+    const recipients = (await supportAdminIds()).filter((userId) => userId !== actor.id);
+    if (updated.authorId !== actor.id) recipients.push(updated.authorId);
+    await notifyUsers(recipients, notice);
+    res.json({ data: updated });
+  }));
+
+  app.get("/api/notifications", auth, asyncHandler(async (req, res) => {
+    const actor = await actorFrom(req);
+    assertPasswordReady(actor);
+    res.json({ data: await platform.listNotifications(actor.id) });
+  }));
+
+  app.post("/api/notifications/read", auth, asyncHandler(async (req, res) => {
+    const actor = await actorFrom(req);
+    assertPasswordReady(actor);
+    const count = await platform.markAllNotificationsRead(actor.id);
+    res.json({ data: { count } });
+  }));
+
+  app.post("/api/notifications/:id/read", auth, asyncHandler(async (req, res) => {
+    const actor = await actorFrom(req);
+    assertPasswordReady(actor);
+    const { id } = parseBody(idParamSchema, req.params);
+    const updated = await platform.markNotificationRead(id, actor.id);
+    if (!updated) throw new HttpError(404, "NOT_FOUND", "Notificação não encontrada.");
+    res.json({ data: updated });
   }));
 
   app.get("/api/logs", auth, asyncHandler(async (req, res) => {

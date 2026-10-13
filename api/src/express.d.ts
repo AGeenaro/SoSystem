@@ -6,6 +6,7 @@ declare module "express-serve-static-core" {
       sub: string;
       email: string;
       role: "visualizador" | "operador" | "administrador" | "administrador_suporte";
+      sv: number;
     };
   }
 }

@@ -7,6 +7,7 @@ export type AuthToken = {
   sub: string;
   email: string;
   role: UserRole;
+  sv: number;
 };
 
 export function signToken(payload: AuthToken, secret: string, expiresIn: string): string {
@@ -30,7 +31,8 @@ export function requireAuth(secret: string): RequestHandler {
       req.auth = {
         sub: String(decoded.sub),
         email: String(decoded.email ?? ""),
-        role: decoded.role
+        role: decoded.role,
+        sv: typeof decoded.sv === "number" ? decoded.sv : -1
       };
       next();
     } catch {
