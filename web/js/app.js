@@ -297,7 +297,94 @@ function loadCache(){
     state = emptyState();
   }
 }
+let sectorHold = null;
+function sectorKey(value){
+  return String(value || '').trim().toLowerCase();
+}
+function allowedSectorKeys(){
+  if(!sessionUser || sessionUser.role === 'administrador_suporte') return null;
+  const sectors = sessionUser.permissions && sessionUser.permissions.sectors;
+  if(!Array.isArray(sectors) || !sectors.length) return null;
+  const keys = sectors.map(sectorKey).filter(Boolean);
+  return keys.length ? keys : null;
+}
+function restoreSectorHold(){
+  if(!sectorHold) return;
+  ['groups','families','products','orders','punches','resources','equipments'].forEach(function(key){
+    state[key] = (state[key] || []).concat(sectorHold[key] || []);
+  });
+  sectorHold = null;
+}
+function restrictStateToSectors(){
+  restoreSectorHold();
+  const allowed = allowedSectorKeys();
+  if(!allowed) return;
+  const hold = { groups:[], families:[], products:[], orders:[], punches:[], resources:[], equipments:[] };
+  const groupOk = {};
+  state.groups.forEach(function(group){ groupOk[group.id] = allowed.indexOf(sectorKey(group.nome)) >= 0; });
+  state.groups = state.groups.filter(function(group){
+    if(groupOk[group.id]) return true;
+    hold.groups.push(group);
+    return false;
+  });
+  const familyOk = {};
+  state.families = state.families.filter(function(family){
+    const visible = !family.grupoId || groupOk[family.grupoId];
+    if(visible){ familyOk[family.id] = true; return true; }
+    hold.families.push(family);
+    return false;
+  });
+  const productOk = {};
+  state.products = state.products.filter(function(product){
+    const visible = !product.familiaId || familyOk[product.familiaId];
+    if(visible){ productOk[String(product.codigo || '')] = true; return true; }
+    hold.products.push(product);
+    return false;
+  });
+  state.equipments = state.equipments.filter(function(equipment){
+    const parts = equipment.itens || [];
+    const visible = !parts.length || parts.some(function(part){ return productOk[String(part.codigo || '')]; });
+    if(visible) return true;
+    hold.equipments.push(equipment);
+    return false;
+  });
+  state.resources = state.resources.filter(function(resource){
+    const ids = resource.grupos || [];
+    let visible = true;
+    if(ids.length) visible = ids.some(function(id){ return groupOk[id]; });
+    else if(resource.setor && resource.setor !== 'Geral'){
+      visible = String(resource.setor).split(',').some(function(name){ return allowed.indexOf(sectorKey(name)) >= 0; });
+    }
+    if(visible) return true;
+    hold.resources.push(resource);
+    return false;
+  });
+  const orderOk = {};
+  state.orders = state.orders.filter(function(order){
+    const items = order.itens || [];
+    const linked = items.filter(function(item){ return item.grupoId; });
+    let visible = true;
+    if(linked.length) visible = linked.some(function(item){ return groupOk[item.grupoId]; });
+    else if(order.setor) visible = allowed.indexOf(sectorKey(order.setor)) >= 0;
+    if(visible){ orderOk[order.id] = true; return true; }
+    hold.orders.push(order);
+    return false;
+  });
+  state.punches = state.punches.filter(function(punch){
+    if(orderOk[punch.ordemId]) return true;
+    hold.punches.push(punch);
+    return false;
+  });
+  sectorHold = hold;
+}
 function buildChanges(){
+  restoreSectorHold();
+  let changes;
+  try{ changes = collectChanges(); }
+  finally{ restrictStateToSectors(); }
+  return changes;
+}
+function collectChanges(){
   const records = [];
   PRODUCTION_COLLECTIONS.forEach(([kind, key, idOf])=>{
     state[key].forEach(item=>{
@@ -312,6 +399,7 @@ function buildChanges(){
   return { records, nextOrderNum: state.nextOrderNum, nextEmployeeNum: state.nextEmployeeNum };
 }
 function applySnapshot(data){
+  restoreSectorHold();
   const tomb = new Map((data.tombstones || []).map(item => [item.kind + ':' + item.id, item.updatedAt]));
   const next = emptyState();
   next.nextOrderNum = Math.max(state.nextOrderNum || 1, data.nextOrderNum || 1);
@@ -346,6 +434,7 @@ function applySnapshot(data){
   state.groups.forEach(function(item){ delete item.imagem; });
   state.families.forEach(function(item){ delete item.imagem; });
   rebuildFingerprints();
+  restrictStateToSectors();
 }
 function scheduleSync(){
   clearTimeout(syncTimer);
@@ -366,7 +455,7 @@ async function syncNow(){
   syncing = true;
   setSyncPill('Sincronizando…');
   try{
-    const viewing = sessionUser && sessionUser.role === 'visualizador';
+    const viewing = sessionUser && permissionList(sessionUser).edit.length === 0;
     if(sessionUser && sessionUser.role === 'administrador_suporte' && !activeCompanyId()){
       setSyncPill('Escolha a empresa em Configurações', true);
       return;
@@ -573,6 +662,7 @@ function readSessionCache(){
   try{ return JSON.parse(localStorage.getItem(SESSION_KEY) || 'null'); }catch(e){ return null; }
 }
 function rememberSession(user){
+  if(!user || !sessionUser || user.id !== sessionUser.id) sectorHold = null;
   sessionUser = user;
   if(user) localStorage.setItem(SESSION_KEY, JSON.stringify(user));
   else localStorage.removeItem(SESSION_KEY);
@@ -593,7 +683,8 @@ function permissionList(user){
   return { view: view, edit: edit };
 }
 function canView(module){
-  if(module === 'configuracoes' || module === 'suporte') return true;
+  if(module === 'configuracoes') return canManageUsers();
+  if(module === 'suporte') return true;
   return permissionList(sessionUser).view.indexOf(module) >= 0;
 }
 function canEdit(module){
@@ -2816,53 +2907,72 @@ function permissionGrid(id, selected){
     return `<label class="perm-item"><input type="checkbox" value="${item.module}" ${checked} onchange="syncSameModule(this)"> ${item.label}</label>`;
   }).join('')}</div>`;
 }
-const ROLE_PROFILE_KEY = 'sosystem_role_profiles';
 let accessUserCache = null;
 let profileRole = 'visualizador';
-function profileRoles(){
-  if(sessionUser && sessionUser.role === 'administrador_suporte') return ['visualizador','operador','administrador','administrador_suporte'];
+let companyProfiles = [];
+let draftBlocked = false;
+let editingBlocked = false;
+function nextAlphaCode(codes){
+  let max = -1;
+  (codes || []).forEach(function(code){
+    const text = String(code || '').trim().toUpperCase();
+    if(!/^[A-Z]+$/.test(text)) return;
+    let current = 0;
+    for(let index = 0; index < text.length; index++) current = current * 26 + (text.charCodeAt(index) - 65);
+    if(current > max) max = current;
+  });
+  return alphaCode(max + 1);
+}
+function alphaCode(index){
+  let value = Math.max(0, index);
+  let text = '';
+  do {
+    text = String.fromCharCode(65 + (value % 26)) + text;
+    value = Math.floor(value / 26);
+  } while(value > 0);
+  while(text.length < 2) text = 'A' + text;
+  return text;
+}
+function companyProfileRoles(){
   return ['visualizador','operador','administrador'];
 }
-function readRoleProfiles(){
-  try{ return JSON.parse(localStorage.getItem(ROLE_PROFILE_KEY) || '{}'); }catch(e){ return {}; }
+function currentCompanyProfile(){
+  return companyProfiles.find(function(profile){ return profile.role === profileRole; }) || { view: [], edit: [], sectors: [] };
 }
-function writeRoleProfile(role, permissions){
-  const all = readRoleProfiles();
-  all[role] = permissions;
-  localStorage.setItem(ROLE_PROFILE_KEY, JSON.stringify(all));
+function sectorCheckMarkup(selected){
+  const names = [];
+  (state.groups || []).forEach(function(group){
+    const name = String(group.nome || '').trim();
+    if(name && names.indexOf(name) < 0) names.push(name);
+  });
+  if(!names.length) return '<div class="section-sub">Ainda não há setores. Cadastre os grupos em Cadastro. Sem marcação, o perfil vê todos os setores.</div>';
+  return `<div class="perm-grid" id="profileSectors">${names.map(function(name){
+    const checked = (selected || []).some(function(item){ return sectorKey(item) === sectorKey(name); }) ? 'checked' : '';
+    return `<label class="perm-item"><input type="checkbox" value="${escapeHtml(name)}" ${checked}> ${escapeHtml(name)}</label>`;
+  }).join('')}</div>
+    <div class="section-sub">Nenhum setor marcado libera todos. Marcado, o perfil só vê esses setores. Ex.: Chaparia não vê Usinagem.</div>`;
 }
-function defaultRolePermissions(role){
-  const all = [];
-  MODULE_OPTIONS.forEach(function(item){ if(all.indexOf(item.module) < 0) all.push(item.module); });
-  if(role === 'visualizador') return { view: all.slice(), edit: [] };
-  return { view: all.slice(), edit: all.slice() };
+function roleCheckMarkup(){
+  const current = currentCompanyProfile();
+  return `<div class="section-sub">Pode ver. Desmarque tudo para esconder os módulos.</div>${permissionGrid('profileView', current.view || [])}
+    <div class="section-sub">Pode editar. Vazio deixa o perfil só visualizar.</div>${permissionGrid('profileEdit', current.edit || [])}
+    <div class="section-sub">Setores que este perfil pode ver</div>${sectorCheckMarkup(current.sectors || [])}`;
 }
-function rolePermissions(role){
-  const saved = readRoleProfiles()[role];
-  if(saved && Array.isArray(saved.view) && Array.isArray(saved.edit)) return saved;
-  const sample = (accessUserCache || []).find(function(user){ return user.role === role && user.permissions && Array.isArray(user.permissions.view); });
-  if(sample) return { view: sample.permissions.view || [], edit: sample.permissions.edit || [] };
-  return defaultRolePermissions(role);
-}
-function roleCheckMarkup(role){
-  const current = rolePermissions(role);
-  return `<div class="section-sub">Pode ver</div>${permissionGrid('profileView', current.view || [])}
-    <div class="section-sub">Pode editar</div>${permissionGrid('profileEdit', current.edit || [])}`;
-}
-let settingsChoice = 'empresa';
+let settingsChoice = 'usuario';
 function renderConfiguracoes(){
   const el = document.getElementById('panel-configuracoes');
   if(!el || !sessionUser) return;
   const choices = [
-    ['empresa', 'Empresa', 'Nome, limites e bloqueio da empresa.'],
-    ['usuario', 'Usuário', 'Contas que entram no sistema.'],
-    ['perfil', 'Perfil de Usuário', 'Visualizador, operador, ADM e administrador suporte.']
+    ['usuario', 'Usuários', 'Código, nome, perfil, bloqueio e acessos.'],
+    ['empresa', 'Empresa', 'Código, descrição e perfis desta empresa.']
   ];
+  if(settingsChoice !== 'usuario' && settingsChoice !== 'empresa' && settingsChoice !== 'perfis') settingsChoice = 'usuario';
   el.innerHTML = `
     <div class="section-title">${icon('sliders',19)} Configurações</div>
     <div class="section-sub">Escolha um assunto. Os outros ficam fora desta tela.</div>
     <div class="settings-choices">${choices.map(function(choice){
-      return `<button class="settings-choice${settingsChoice===choice[0]?' active':''}" type="button" onclick="setSettingsChoice('${choice[0]}')"><b>${choice[1]}</b><span>${choice[2]}</span></button>`;
+      const active = (settingsChoice === 'perfis' ? 'empresa' : settingsChoice) === choice[0];
+      return `<button class="settings-choice${active?' active':''}" type="button" onclick="setSettingsChoice('${choice[0]}')"><b>${choice[1]}</b><span>${choice[2]}</span></button>`;
     }).join('')}</div>
     <div id="settingsPanel"></div>`;
   renderSettingsPanel();
@@ -2874,37 +2984,9 @@ function setSettingsChoice(id){
 function renderSettingsPanel(){
   const panel = document.getElementById('settingsPanel');
   if(!panel || !sessionUser) return;
-  if(settingsChoice === 'perfil'){
-    const roles = profileRoles();
-    if(roles.indexOf(profileRole) < 0) profileRole = roles[0];
-    panel.innerHTML = `
-      ${canManageUsers() ? `<form class="card" style="margin-bottom:14px;" onsubmit="saveRoleProfile(event)">
-        <div class="section-title" style="font-size:16px;">Perfil de usuário</div>
-        <div class="section-sub">O que cada perfil pode ver e editar. Vale para as contas desse perfil.</div>
-        <div class="field"><label>Perfil</label>
-          <select id="roleProfile" onchange="showProfileRole(this.value)">${roles.map(function(role){
-            return `<option value="${role}" ${role===profileRole?'selected':''}>${ROLE_LABELS[role]}</option>`;
-          }).join('')}</select>
-        </div>
-        <div id="profileChecks">${roleCheckMarkup(profileRole)}</div>
-        <button class="btn btn-primary" type="submit">Salvar perfil</button>
-      </form>` : `<div class="card" style="margin-bottom:14px;">Os perfis de acesso são definidos por um administrador.</div>`}
-      <form id="profileForm" class="card" onsubmit="saveProfile(event)">
-        <div class="section-title" style="font-size:16px;">Seus dados</div>
-        <div class="section-sub">${escapeHtml(ROLE_LABELS[sessionUser.role] || sessionUser.role)}. Esta parte altera só a sua conta.</div>
-        <div class="field-row">
-          <div class="field"><label>Nome</label><input id="cfgName" required minlength="2" maxlength="80" value="${escapeHtml(sessionUser.name)}"></div>
-          <div class="field"><label>E-mail</label><input id="cfgEmail" type="email" required value="${escapeHtml(sessionUser.email)}"></div>
-        </div>
-        <div class="field"><label>Nova senha</label>
-          <div class="password-field">
-            <input id="cfgPassword" type="password" minlength="8" maxlength="72" autocomplete="new-password" placeholder="Deixe em branco para manter">
-            <button class="eye-btn" type="button" onclick="togglePassword('cfgPassword', this)" aria-label="Mostrar senha">${icon('eye',16)}</button>
-          </div>
-        </div>
-        <button class="btn btn-primary" type="submit">Salvar dados</button>
-      </form>`;
-    if(canManageUsers()) ensureAccessUsers();
+  if(settingsChoice === 'perfis'){
+    panel.innerHTML = '<div id="companyProfiles" class="card">Carregando perfis…</div>';
+    loadCompanyProfiles();
     return;
   }
   if(settingsChoice === 'usuario'){
@@ -2913,12 +2995,18 @@ function renderSettingsPanel(){
       : ['visualizador','operador','administrador'];
     panel.innerHTML = canManageUsers() ? `
       <form id="accessUserForm" class="card" style="margin-bottom:14px;" onsubmit="saveAccessUser(event)">
-        <div class="section-title" style="font-size:16px;">Contas de acesso</div>
-        <div class="section-sub">Quem entra no sistema e em qual empresa. O que pode ver ou editar fica em Perfil de Usuário.</div>
+        <div class="section-title" style="font-size:16px;">Usuários</div>
+        <div class="section-sub">O perfil escolhido aqui usa as regras da empresa. O que ele vê e edita fica em Empresa → Perfis de usuário.</div>
         <input type="hidden" id="editingUserId" value="">
         <div class="field-row">
-          <div class="field"><label>Nome</label><input id="userName" required minlength="2"></div>
+          <div class="field"><label>Código</label><input id="userCode" maxlength="12" autocomplete="off" oninput="this.dataset.touched='1'"></div>
+          <div class="field"><label>Descrição</label><input id="userName" required minlength="2" maxlength="80"></div>
+        </div>
+        <div class="field-row">
           <div class="field"><label>E-mail</label><input id="userEmail" type="email" required></div>
+          <div class="field"><label>Perfil de usuário</label>
+            <select id="userRole" onchange="fillUserCompanySelect(); suggestUserCode();">${roles.map(function(role){ return `<option value="${role}">${ROLE_LABELS[role]}</option>`; }).join('')}</select>
+          </div>
         </div>
         <div class="field-row">
           <div class="field"><label>Senha provisória</label>
@@ -2927,22 +3015,24 @@ function renderSettingsPanel(){
               <button class="eye-btn" type="button" onclick="togglePassword('userPassword', this)" aria-label="Mostrar senha">${icon('eye',16)}</button>
             </div>
           </div>
-          <div class="field"><label>Perfil de acesso</label>
-            <select id="userRole" onchange="fillUserCompanySelect()">${roles.map(function(role){ return `<option value="${role}">${ROLE_LABELS[role]}</option>`; }).join('')}</select>
+          <div class="field"><label>Bloqueado</label>
+            <button class="btn" id="userBlockedBtn" type="button" onclick="toggleDraftBlocked()">Não</button>
           </div>
         </div>
         <div class="field" id="userCompanyField">
           <label>Empresa</label>
-          <select id="userCompany"><option value="">Escolha a empresa</option></select>
+          <select id="userCompany" onchange="suggestUserCode()"><option value="">Escolha a empresa</option></select>
         </div>
         <button class="btn btn-primary" type="submit">Salvar usuário</button>
       </form>
       <div class="card"><div class="table-wrap"><table>
-        <thead><tr><th>Nome</th><th>E-mail</th><th>Perfil</th><th>Empresa</th><th style="width:140px;"></th></tr></thead>
-        <tbody id="accessUsersBody"><tr class="empty-row"><td colspan="5">Carregando contas…</td></tr></tbody>
+        <thead><tr><th>Código</th><th>Descrição</th><th>Perfil</th><th>Empresa</th><th>Bloqueado</th><th>Cadastro</th><th>Último acesso</th><th style="width:90px;"></th></tr></thead>
+        <tbody id="accessUsersBody"><tr class="empty-row"><td colspan="8">Carregando contas…</td></tr></tbody>
       </table></div></div>
       <div class="card" style="margin-top:14px;" id="passwordRequestList">Carregando pedidos de senha…</div>` : `<div class="card">Contas novas são criadas por um administrador. Os seus dados ficam em Perfil de Usuário.</div>`;
     if(canManageUsers()){
+      draftBlocked = false;
+      editingBlocked = false;
       fillUserCompanySelect();
       loadAccessUsers();
       loadPasswordRequests();
@@ -2982,81 +3072,116 @@ async function loadAccessUsers(){
       const mine = sessionUser && sessionUser.id === user.id;
       const missing = user.role !== 'administrador_suporte' && !user.companyId;
       return `<tr>
+        <td class="mono">${escapeHtml(user.code || '—')}</td>
         <td>${escapeHtml(user.name)}</td>
-        <td>${escapeHtml(user.email)}</td>
         <td>${escapeHtml(ROLE_LABELS[user.role] || user.role)}</td>
         <td${missing ? ' style="color:var(--red-dark); font-weight:700;"' : ''}>${escapeHtml(userCompanyLabel(user))}</td>
+        <td>${mine ? (user.blocked ? 'Sim' : 'Não') : `<button class="btn btn-sm" type="button" onclick="toggleUserBlock('${user.id}', ${user.blocked ? 'false' : 'true'})">${user.blocked ? 'Sim' : 'Não'}</button>`}</td>
+        <td class="mono">${fmtDateTime(user.createdAt)}</td>
+        <td class="mono">${fmtDateTime(user.lastAccessAt)}</td>
         <td>
           <button class="icon-btn" type="button" onclick="editAccessUser('${user.id}')" title="Editar">${icon('edit',14)}</button>
-          ${mine ? '' : `<button class="btn btn-sm" type="button" onclick="toggleUserBlock('${user.id}', ${user.blocked ? 'false' : 'true'})">${user.blocked ? 'Desbloquear' : 'Bloquear'}</button>`}
           <button class="icon-btn danger" type="button" onclick="deleteAccessUser('${user.id}')" ${mine ? 'disabled' : ''} title="Excluir">${icon('trash',14)}</button>
         </td>
       </tr>`;
-    }).join('') || `<tr class="empty-row"><td colspan="5">Nenhuma conta.</td></tr>`;
+    }).join('') || `<tr class="empty-row"><td colspan="8">Nenhuma conta.</td></tr>`;
+    suggestUserCode();
   }catch(error){
-    body.innerHTML = `<tr class="empty-row"><td colspan="5">${escapeHtml(error.message)}</td></tr>`;
+    body.innerHTML = `<tr class="empty-row"><td colspan="8">${escapeHtml(error.message)}</td></tr>`;
   }
+}
+function toggleDraftBlocked(){
+  draftBlocked = !draftBlocked;
+  const button = document.getElementById('userBlockedBtn');
+  if(button) button.textContent = draftBlocked ? 'Sim' : 'Não';
+}
+function suggestUserCode(){
+  const input = document.getElementById('userCode');
+  const editing = document.getElementById('editingUserId');
+  if(!input || (editing && editing.value) || input.dataset.touched === '1') return;
+  const role = document.getElementById('userRole');
+  const company = document.getElementById('userCompany');
+  const companyId = role && role.value === 'administrador_suporte' ? null : (company && company.value ? company.value : (sessionUser && sessionUser.companyId));
+  const codes = (accessUserCache || []).filter(function(user){ return (user.companyId || null) === (companyId || null); }).map(function(user){ return user.code; });
+  input.value = nextAlphaCode(codes);
 }
 async function editAccessUser(id){
   try{
     const result = await accountApi('/api/users/' + id);
     const user = result.data;
     document.getElementById('editingUserId').value = user.id;
+    const code = document.getElementById('userCode');
+    code.value = user.code || '';
+    code.dataset.touched = '1';
     document.getElementById('userName').value = user.name;
     document.getElementById('userEmail').value = user.email;
     document.getElementById('userPassword').value = '';
     document.getElementById('userRole').value = user.role;
+    draftBlocked = !!user.blocked;
+    editingBlocked = !!user.blocked;
+    const blocked = document.getElementById('userBlockedBtn');
+    if(blocked) blocked.textContent = draftBlocked ? 'Sim' : 'Não';
     fillUserCompanySelect(user.companyId || '');
   }catch(error){
     toast(error.message, 'error');
   }
 }
+function profileCompanyId(){
+  if(sessionUser && sessionUser.role === 'administrador_suporte') return activeCompanyId();
+  return sessionUser ? sessionUser.companyId : '';
+}
 function showProfileRole(role){
   profileRole = role;
   const box = document.getElementById('profileChecks');
-  if(box) box.innerHTML = roleCheckMarkup(role);
+  if(box) box.innerHTML = roleCheckMarkup();
 }
-async function ensureAccessUsers(){
-  try{ accessUserCache = (await accountApi('/api/users')).data || []; }
-  catch(e){ accessUserCache = accessUserCache || []; }
-  const select = document.getElementById('roleProfile');
-  const box = document.getElementById('profileChecks');
-  if(select && box && !readRoleProfiles()[select.value]) box.innerHTML = roleCheckMarkup(select.value);
-}
-async function saveRoleProfile(event){
-  event.preventDefault();
-  if(!canManageUsers()) return;
-  const role = document.getElementById('roleProfile').value;
-  const permissions = { view: checkedModules('profileView'), edit: checkedModules('profileEdit') };
-  writeRoleProfile(role, permissions);
+async function loadCompanyProfiles(){
+  const box = document.getElementById('companyProfiles');
+  if(!box) return;
+  const companyId = profileCompanyId();
+  if(!companyId){
+    box.innerHTML = '<div class="section-sub">Escolha a empresa antes de configurar os perfis.</div>';
+    return;
+  }
   try{
-    const result = await accountApi('/api/users');
-    const targets = (result.data || []).filter(function(user){ return user.role === role; });
-    for(let index = 0; index < targets.length; index++){
-      const updated = await accountApi('/api/users/' + targets[index].id, { method:'PUT', body:{ permissions: permissions } });
-      if(sessionUser && sessionUser.id === targets[index].id) rememberSession(Object.assign({}, sessionUser, updated.data));
-    }
-    accessUserCache = (await accountApi('/api/users')).data || [];
-    renderNav();
-    toast(targets.length ? 'Perfil salvo nas contas desse perfil.' : 'Perfil salvo. As próximas contas já nascem com ele.', 'success');
+    companyProfiles = (await accountApi('/api/companies/' + companyId + '/profiles')).data || [];
+    if(companyProfileRoles().indexOf(profileRole) < 0) profileRole = 'visualizador';
+    box.innerHTML = `<form onsubmit="saveCompanyProfile(event)">
+      <div class="section-title" style="font-size:16px;">Perfil de usuário por empresa</div>
+      <div class="section-sub">Cada empresa tem o próprio ADM, operador e visualizador. Dá para liberar tudo, só visualizar ou esconder módulos e setores.</div>
+      <div class="field"><label>Perfil</label>
+        <select id="roleProfile" onchange="showProfileRole(this.value)">${companyProfileRoles().map(function(role){
+          return `<option value="${role}" ${role===profileRole?'selected':''}>${ROLE_LABELS[role]}</option>`;
+        }).join('')}</select>
+      </div>
+      <div id="profileChecks">${roleCheckMarkup()}</div>
+      <button class="btn" type="button" onclick="setSettingsChoice('empresa')">Voltar</button>
+      <button class="btn btn-primary" type="submit">Salvar perfil</button>
+    </form>`;
   }catch(error){
-    toast(error.message, 'error');
+    box.textContent = error.message;
   }
 }
-async function saveProfile(event){
+async function saveCompanyProfile(event){
   event.preventDefault();
+  if(!canManageUsers()) return;
+  const companyId = profileCompanyId();
+  const role = document.getElementById('roleProfile').value;
+  const permissions = {
+    view: checkedModules('profileView'),
+    edit: checkedModules('profileEdit'),
+    sectors: checkedModules('profileSectors')
+  };
   try{
-    const body = {
-      name: document.getElementById('cfgName').value,
-      email: document.getElementById('cfgEmail').value
-    };
-    const password = document.getElementById('cfgPassword').value;
-    if(password) body.password = password;
-    const updated = await accountApi('/api/users/' + sessionUser.id, { method:'PUT', body: body });
-    rememberSession(Object.assign({}, sessionUser, updated.data));
-    document.getElementById('cfgPassword').value = '';
-    toast('Dados salvos.', 'success');
-    renderNav();
+    await accountApi('/api/companies/' + companyId + '/profiles/' + role, { method:'PUT', body: permissions });
+    if(sessionUser && sessionUser.companyId === companyId && sessionUser.role === role){
+      const me = await accountApi('/api/auth/me');
+      rememberSession(me.data);
+      renderNav();
+      await syncNow();
+    }
+    toast('Perfil salvo nesta empresa.', 'success');
+    await loadCompanyProfiles();
   }catch(error){
     toast(error.message, 'error');
   }
@@ -3065,7 +3190,13 @@ async function saveAccessUser(event){
   event.preventDefault();
   const id = document.getElementById('editingUserId').value;
   const role = document.getElementById('userRole').value;
+  const code = document.getElementById('userCode').value.trim().toUpperCase();
+  if(!/^[A-Z0-9]{1,12}$/.test(code)){
+    toast('O código usa até 12 letras ou números.', 'error');
+    return;
+  }
   const body = {
+    code: code,
     name: document.getElementById('userName').value,
     email: document.getElementById('userEmail').value,
     role: role
@@ -3075,7 +3206,6 @@ async function saveAccessUser(event){
     toast('A senha precisa ter 8 caracteres, uma maiúscula, um número e um caractere especial.', 'error');
     return;
   }
-  body.permissions = rolePermissions(role);
   try{
     if(sessionUser.role === 'administrador_suporte' && role !== 'administrador_suporte'){
       body.companyId = document.getElementById('userCompany').value;
@@ -3087,8 +3217,12 @@ async function saveAccessUser(event){
     if(password) body.password = password;
     if(id){
       await accountApi('/api/users/' + id, { method:'PUT', body: body });
+      if(draftBlocked !== editingBlocked){
+        await accountApi('/api/users/' + id + '/block', { method:'POST', body:{ blocked: draftBlocked } });
+      }
       toast('Usuário salvo.', 'success');
     }else{
+      body.blocked = draftBlocked;
       const created = await accountApi('/api/users', { method:'POST', body: body });
       if(!password && created.data.provisionalPassword){
         window.alert('Senha provisória, mostrada uma vez:\n' + created.data.provisionalPassword + '\nA pessoa troca no primeiro acesso.');
@@ -3097,6 +3231,11 @@ async function saveAccessUser(event){
     }
     event.target.reset();
     document.getElementById('editingUserId').value = '';
+    document.getElementById('userCode').dataset.touched = '';
+    draftBlocked = false;
+    editingBlocked = false;
+    const blocked = document.getElementById('userBlockedBtn');
+    if(blocked) blocked.textContent = 'Não';
     fillUserCompanySelect();
     await loadAccessUsers();
   }catch(error){
@@ -3657,10 +3796,14 @@ async function renderCompanySettings(){
       <div class="section-title" style="font-size:16px;">Dados da empresa</div>
       <div class="section-sub">Versão ${escapeHtml((window.PRODIFY_CONFIG && window.PRODIFY_CONFIG.version) || '')}</div>
       ${current && current.blocked ? '<div class="section-sub" style="color:var(--red-dark);font-weight:700;">Esta empresa está bloqueada. Quem pertence a ela não entra, e a produção fica parada.</div>' : ''}
-      ${suporte ? `<div class="field"><label>Empresa ativa</label><select id="activeCompany" onchange="selectCompany(this.value)"><option value="">Escolha</option>${companies.map(function(company){ return `<option value="${company.id}" ${company.id===selected?'selected':''}>${escapeHtml(company.name)}${company.blocked ? ' — bloqueada' : ''}</option>`; }).join('')}</select></div>
-        <form onsubmit="createCompany(event)"><div class="field-row"><div class="field"><label>Nova empresa</label><input id="newCompanyName" required minlength="2"></div></div><button class="btn btn-primary" type="submit">Criar empresa</button></form>` : ''}
+      ${suporte ? `<div class="field"><label>Empresa ativa</label><select id="activeCompany" onchange="selectCompany(this.value)"><option value="">Escolha</option>${companies.map(function(company){ return `<option value="${company.id}" ${company.id===selected?'selected':''}>${escapeHtml((company.code ? company.code + ' — ' : '') + company.name)}${company.blocked ? ' — bloqueada' : ''}</option>`; }).join('')}</select></div>
+        <form onsubmit="createCompany(event)"><div class="field-row"><div class="field"><label>Id</label><input id="newCompanyCode" maxlength="12" value="${escapeHtml(nextAlphaCode(companies.map(function(company){ return company.code; })))}"></div><div class="field"><label>Descrição</label><input id="newCompanyName" required minlength="2"></div></div><button class="btn btn-primary" type="submit">Criar empresa</button></form>` : ''}
       ${current ? `<form onsubmit="saveCompany(event, '${current.id}')">
-        <div class="field"><label>Nome</label><input id="companyName" value="${escapeHtml(current.name)}" ${manager ? '' : 'disabled'}></div>
+        <div class="field-row">
+          <div class="field"><label>Id</label><input id="companyCode" maxlength="12" value="${escapeHtml(current.code || nextAlphaCode(companies.filter(function(company){ return company.id !== current.id; }).map(function(company){ return company.code; })))}" ${manager ? '' : 'disabled'}></div>
+          <div class="field"><label>Descrição</label><input id="companyName" value="${escapeHtml(current.name)}" ${manager ? '' : 'disabled'}></div>
+        </div>
+        ${manager ? `<button class="btn" type="button" onclick="setSettingsChoice('perfis')">Perfis de usuário</button>` : ''}
         ${suporte ? `<div class="field-row">
           <div class="field"><label>Máximo de usuários</label><input id="maxUsers" type="number" min="1" value="${current.maxUsers}"></div>
           <div class="field"><label>Máximo de máquinas</label><input id="maxMachines" type="number" min="1" value="${current.maxMachines}"></div>
@@ -3678,6 +3821,7 @@ async function selectCompany(id){
   if(!id || (sessionUser && sessionUser.role !== 'administrador_suporte')) return;
   localStorage.setItem('prodfy_company', id);
   state = emptyState();
+  sectorHold = null;
   fingerprints = {};
   pendingDeletes = [];
   renderCompanyFoot();
@@ -3689,7 +3833,8 @@ async function selectCompany(id){
 async function createCompany(event){
   event.preventDefault();
   try{
-    const created = await accountApi('/api/companies', { method:'POST', body:{ name: document.getElementById('newCompanyName').value } });
+    const code = document.getElementById('newCompanyCode').value.trim().toUpperCase();
+    const created = await accountApi('/api/companies', { method:'POST', body:{ name: document.getElementById('newCompanyName').value, code: code || undefined } });
     localStorage.setItem('prodfy_company', created.data.id);
     toast('Empresa criada.', 'success');
     await refreshCompanyFoot();
@@ -3700,7 +3845,7 @@ async function createCompany(event){
 }
 async function saveCompany(event, id){
   event.preventDefault();
-  const body = { name: document.getElementById('companyName').value };
+  const body = { name: document.getElementById('companyName').value, code: document.getElementById('companyCode').value.trim().toUpperCase() };
   if(sessionUser.role === 'administrador_suporte'){
     body.maxUsers = Number(document.getElementById('maxUsers').value);
     body.maxMachines = Number(document.getElementById('maxMachines').value);
@@ -4242,9 +4387,9 @@ window.toggleUserBlock = toggleUserBlock;
 window.logout = logout;
 window.syncSameModule = syncSameModule;
 window.showProfileRole = showProfileRole;
-window.saveRoleProfile = saveRoleProfile;
+window.saveCompanyProfile = saveCompanyProfile;
 window.setSettingsChoice = setSettingsChoice;
-window.saveProfile = saveProfile;
+window.toggleDraftBlocked = toggleDraftBlocked;
 window.saveAccessUser = saveAccessUser;
 window.deleteAccessUser = deleteAccessUser;
 window.editAccessUser = editAccessUser;

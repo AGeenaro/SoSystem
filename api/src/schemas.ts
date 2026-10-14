@@ -6,8 +6,11 @@ import { PRODUCTION_KINDS } from "./production/merge.js";
 const roleSchema = z.enum(USER_ROLES);
 const permissionsSchema = z.object({
   view: z.array(z.enum(PRODUCTION_MODULES)).max(32),
-  edit: z.array(z.enum(PRODUCTION_MODULES)).max(32)
+  edit: z.array(z.enum(PRODUCTION_MODULES)).max(32),
+  sectors: z.array(z.string().trim().min(1).max(80)).max(80).optional()
 }).strict();
+
+const codeSchema = z.string().trim().min(1, "Informe o código.").max(12).regex(/^[A-Za-z0-9]+$/, "O código usa letras e números.");
 
 const passwordSchema = z.string().max(72).refine(isStrongPassword, PASSWORD_HINT);
 const emailSchema = z.string().trim().email("E-mail inválido.").max(160);
@@ -30,7 +33,9 @@ export const createUserSchema = z.object({
   password: passwordSchema.optional(),
   role: roleSchema.optional(),
   permissions: permissionsSchema.optional(),
-  companyId: z.string().uuid().nullable().optional()
+  companyId: z.string().uuid().nullable().optional(),
+  code: codeSchema.optional(),
+  blocked: z.boolean().optional()
 }).strict();
 
 export const updateUserSchema = z.object({
@@ -39,7 +44,8 @@ export const updateUserSchema = z.object({
   password: passwordSchema.optional(),
   role: roleSchema.optional(),
   permissions: permissionsSchema.optional(),
-  companyId: z.string().uuid().nullable().optional()
+  companyId: z.string().uuid().nullable().optional(),
+  code: codeSchema.optional()
 }).strict().refine((value) => Object.keys(value).length > 0, {
   message: "Informe ao menos um campo para atualizar."
 });
@@ -66,11 +72,13 @@ export type CreateUserInput = z.infer<typeof createUserSchema>;
 export type UpdateUserInput = z.infer<typeof updateUserSchema>;
 
 export const companyCreateSchema = z.object({
-  name: z.string().trim().min(2).max(80)
+  name: z.string().trim().min(2).max(80),
+  code: codeSchema.optional()
 }).strict();
 
 export const companyUpdateSchema = z.object({
   name: z.string().trim().min(2).max(80).optional(),
+  code: codeSchema.optional(),
   maxUsers: z.number().int().min(1).max(100_000).optional(),
   maxMachines: z.number().int().min(1).max(100_000).optional(),
   maxRegistrations: z.number().int().min(1).max(1_000_000).optional(),
@@ -90,6 +98,14 @@ export const resolvePasswordRequestSchema = z.object({
 
 export const blockUserSchema = z.object({
   blocked: z.boolean()
+}).strict();
+
+export const profileRoleSchema = z.enum(["visualizador", "operador", "administrador"]);
+
+export const companyProfileSchema = z.object({
+  view: z.array(z.enum(PRODUCTION_MODULES)).max(32),
+  edit: z.array(z.enum(PRODUCTION_MODULES)).max(32),
+  sectors: z.array(z.string().trim().min(1).max(80)).max(80)
 }).strict();
 
 export const supportCreateSchema = z.object({

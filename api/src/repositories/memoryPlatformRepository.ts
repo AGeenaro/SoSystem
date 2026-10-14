@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
+import type { UserPermissions } from "../access.js";
 import type {
   AuditLogRecord,
   CompanyPatch,
+  CompanyProfileRecord,
+  CompanyProfileRole,
   CompanyRecord,
   NewAuditLog,
   NewCompany,
@@ -20,6 +23,7 @@ function now() {
 
 export function createMemoryPlatformRepository(): PlatformRepository {
   const companies = new Map<string, CompanyRecord>();
+  const profiles = new Map<string, CompanyProfileRecord>();
   const requests = new Map<string, PasswordRequestRecord>();
   const logs: AuditLogRecord[] = [];
   const tickets = new Map<string, SupportTicketRecord>();
@@ -36,6 +40,7 @@ export function createMemoryPlatformRepository(): PlatformRepository {
       const stamp = now();
       const company: CompanyRecord = {
         id: randomUUID(),
+        code: (input.code ?? "").trim().toUpperCase(),
         name: input.name,
         maxUsers: input.maxUsers ?? 50,
         maxMachines: input.maxMachines ?? 50,
@@ -54,6 +59,23 @@ export function createMemoryPlatformRepository(): PlatformRepository {
       const next = { ...current, ...patch, updatedAt: now() };
       companies.set(id, next);
       return next;
+    },
+    async listProfiles(companyId) {
+      return [...profiles.values()]
+        .filter((profile) => profile.companyId === companyId)
+        .sort((a, b) => a.role.localeCompare(b.role));
+    },
+    async saveProfile(companyId, role: CompanyProfileRole, permissions: UserPermissions) {
+      const profile: CompanyProfileRecord = {
+        companyId,
+        role,
+        view: permissions.view,
+        edit: permissions.edit,
+        sectors: permissions.sectors,
+        updatedAt: now()
+      };
+      profiles.set(`${companyId}:${role}`, profile);
+      return profile;
     },
     async createPasswordRequest(input) {
       const pending = [...requests.values()].find((item) => item.userId === input.userId && item.status === "pendente");

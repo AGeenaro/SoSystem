@@ -3,7 +3,7 @@ import cors from "cors";
 import express, { type Express } from "express";
 import helmet from "helmet";
 import swaggerUi from "swagger-ui-express";
-import { defaultPermissions, isManager, sanitizePermissions, type UserRole } from "./access.js";
+import { defaultPermissions, isManager, nextAlphaCode, normalizeCode, sanitizePermissions, type UserPermissions, type UserRole } from "./access.js";
 import { requireAuth, signToken } from "./auth.js";
 import { HttpError, asyncHandler, errorHandler } from "./http.js";
 import { openApiSpec } from "./openapi.js";
@@ -13,17 +13,19 @@ import type { ProductionRecord } from "./production/merge.js";
 import { buildLimiter } from "./rateLimit.js";
 import { createMemoryPlatformRepository } from "./repositories/memoryPlatformRepository.js";
 import { applyProductionSync, createMemoryProductionRepository, snapshotOf } from "./repositories/memoryProductionRepository.js";
-import type { CompanyRecord, PlatformRepository } from "./repositories/platformRepository.js";
+import type { CompanyProfileRole, CompanyRecord, PlatformRepository } from "./repositories/platformRepository.js";
 import type { ProductionRepository } from "./repositories/productionRepository.js";
 import { toPublicUser, type UserPatch, type UserRecord, type UserRepository } from "./repositories/userRepository.js";
 import {
   blockUserSchema,
   companyCreateSchema,
+  companyProfileSchema,
   companyUpdateSchema,
   createUserSchema,
   idParamSchema,
   loginSchema,
   passwordRequestSchema,
+  profileRoleSchema,
   productionSyncSchema,
   registerSchema,
   resolvePasswordRequestSchema,
@@ -191,6 +193,54 @@ export function createApp(options: AppOptions): Express {
     return company;
   }
 
+  function assertCode(code: string) {
+    if (!/^[A-Z0-9]{1,12}$/.test(code)) {
+      throw new HttpError(422, "INVALID_CODE", "O código usa até 12 letras ou números.");
+    }
+  }
+
+  async function userCodeFor(companyId: string | null, requested: string | undefined, ignoreUserId?: string) {
+    const users = await options.users.list();
+    const peers = users.filter((user) => user.companyId === companyId && user.id !== ignoreUserId);
+    const code = requested ? normalizeCode(requested) : nextAlphaCode(peers.map((user) => user.code));
+    assertCode(code);
+    if (peers.some((user) => user.code.toUpperCase() === code)) {
+      throw new HttpError(409, "CODE_IN_USE", "Já existe um usuário com este código nesta empresa.");
+    }
+    return code;
+  }
+
+  async function companyCodeFor(requested: string | undefined, ignoreCompanyId?: string) {
+    const companies = await platform.listCompanies();
+    const peers = companies.filter((company) => company.id !== ignoreCompanyId);
+    const code = requested ? normalizeCode(requested) : nextAlphaCode(peers.map((company) => company.code));
+    assertCode(code);
+    if (peers.some((company) => company.code.toUpperCase() === code)) {
+      throw new HttpError(409, "CODE_IN_USE", "Já existe uma empresa com este código.");
+    }
+    return code;
+  }
+
+  async function permissionsForRole(companyId: string | null, role: UserRole, requested?: Partial<UserPermissions> | null): Promise<UserPermissions> {
+    if (companyId && role !== "administrador_suporte") {
+      try {
+        const profiles = await platform.listProfiles(companyId);
+        const profile = profiles.find((item) => item.role === role);
+        if (profile) return sanitizePermissions(role, profile);
+      } catch (error) {
+        if (!(error instanceof HttpError && error.code === "SCHEMA_PENDING")) throw error;
+      }
+    }
+    return sanitizePermissions(role, requested);
+  }
+
+  async function applyCompanyProfile(user: UserRecord): Promise<UserRecord> {
+    if (!user.companyId || user.role === "administrador_suporte") return user;
+    const permissions = await permissionsForRole(user.companyId, user.role, user.permissions);
+    if (JSON.stringify(user.permissions) === JSON.stringify(permissions)) return user;
+    return (await options.users.update(user.id, { permissions })) ?? user;
+  }
+
   function assertCompanyUsable(company: CompanyRecord) {
     if (company.blocked) throw new HttpError(403, "COMPANY_BLOCKED", "O acesso desta empresa está bloqueado.");
     if (company.usageUntil && company.usageUntil < todayISO()) {
@@ -264,8 +314,10 @@ export function createApp(options: AppOptions): Express {
     if (!user || !valid) throw new HttpError(401, "INVALID_CREDENTIALS", "E-mail ou senha inválidos.");
     if (user.blocked) throw new HttpError(403, "USER_BLOCKED", "Esta conta está bloqueada.");
     await assertCompanyOpen(user);
-    await writeLog(user, "login", "user", user.id, null, { email: user.email, role: user.role }, user.companyId);
-    res.json({ data: await issueSession(user) });
+    const opened = await options.users.update(user.id, { lastAccessAt: new Date().toISOString() });
+    const current = await applyCompanyProfile(opened ?? user);
+    await writeLog(current, "login", "user", current.id, null, { email: current.email, role: current.role }, current.companyId);
+    res.json({ data: await issueSession(current) });
   }));
 
   app.post("/api/auth/password-requests", authLimiter, asyncHandler(async (req, res) => {
@@ -286,7 +338,7 @@ export function createApp(options: AppOptions): Express {
   }));
 
   app.get("/api/auth/me", auth, asyncHandler(async (req, res) => {
-    const user = await actorFrom(req);
+    const user = await applyCompanyProfile(await actorFrom(req));
     res.json({ data: toPublicUser(user) });
   }));
 
@@ -307,7 +359,8 @@ export function createApp(options: AppOptions): Express {
       throw new HttpError(403, "FORBIDDEN", "Somente o administrador suporte cria empresas.");
     }
     const input = parseBody(companyCreateSchema, req.body);
-    const company = await platform.createCompany({ name: input.name });
+    const code = await companyCodeFor(input.code);
+    const company = await platform.createCompany({ name: input.name, code });
     await writeLog(actor, "empresa_criada", "company", company.id, null, company, company.id);
     res.status(201).json({ data: company });
   }));
@@ -325,10 +378,54 @@ export function createApp(options: AppOptions): Express {
     if (!suporte && (input.maxUsers !== undefined || input.maxMachines !== undefined || input.maxRegistrations !== undefined || input.usageUntil !== undefined || input.blocked !== undefined)) {
       throw new HttpError(403, "FORBIDDEN", "Limites e bloqueio da empresa ficam com o administrador suporte.");
     }
-    const updated = await platform.updateCompany(id, input);
+    const patch = { ...input };
+    if (input.code !== undefined) patch.code = await companyCodeFor(input.code, id);
+    const updated = await platform.updateCompany(id, patch);
     if (!updated) throw new HttpError(404, "NOT_FOUND", "Empresa não encontrada.");
     await writeLog(actor, "empresa_atualizada", "company", id, current, updated, id);
     res.json({ data: updated });
+  }));
+
+  function assertCompanyManager(actor: UserRecord, companyId: string) {
+    if (actor.role === "administrador_suporte") return;
+    if (actor.role === "administrador" && actor.companyId === companyId) return;
+    throw new HttpError(403, "FORBIDDEN", "Só o ADM configura os perfis desta empresa.");
+  }
+
+  app.get("/api/companies/:id/profiles", auth, asyncHandler(async (req, res) => {
+    const actor = await actorFrom(req);
+    assertPasswordReady(actor);
+    const { id } = parseBody(idParamSchema, req.params);
+    assertCompanyManager(actor, id);
+    const company = await platform.findCompany(id);
+    if (!company) throw new HttpError(404, "NOT_FOUND", "Empresa não encontrada.");
+    const saved = await platform.listProfiles(id);
+    const roles: CompanyProfileRole[] = ["visualizador", "operador", "administrador"];
+    res.json({
+      data: roles.map((role) => {
+        const found = saved.find((profile) => profile.role === role);
+        if (found) return found;
+        const defaults = defaultPermissions(role);
+        return { companyId: id, role, view: defaults.view, edit: defaults.edit, sectors: [], updatedAt: null };
+      })
+    });
+  }));
+
+  app.put("/api/companies/:id/profiles/:role", auth, asyncHandler(async (req, res) => {
+    const actor = await actorFrom(req);
+    assertPasswordReady(actor);
+    const { id } = parseBody(idParamSchema, req.params);
+    const role = parseBody(profileRoleSchema, req.params.role);
+    assertCompanyManager(actor, id);
+    const company = await platform.findCompany(id);
+    if (!company) throw new HttpError(404, "NOT_FOUND", "Empresa não encontrada.");
+    const input = parseBody(companyProfileSchema, req.body);
+    const permissions = sanitizePermissions(role, input);
+    const saved = await platform.saveProfile(id, role, permissions);
+    const users = (await options.users.list()).filter((user) => user.companyId === id && user.role === role);
+    await Promise.all(users.map((user) => options.users.update(user.id, { permissions })));
+    await writeLog(actor, "perfil_empresa", "company_profile", `${id}:${role}`, null, saved, id);
+    res.json({ data: saved });
   }));
 
   app.get("/api/password-requests", auth, asyncHandler(async (req, res) => {
@@ -534,14 +631,18 @@ export function createApp(options: AppOptions): Express {
       }
     }
     const provisionalPassword = input.password ?? generateProvisionalPassword();
+    const code = await userCodeFor(companyId, input.code);
     const user = await options.users.create({
       name: input.name,
       email,
       passwordHash: await bcrypt.hash(provisionalPassword, bcryptRounds),
       role,
-      permissions: sanitizePermissions(role, input.permissions),
+      permissions: await permissionsForRole(companyId, role, input.permissions),
       companyId,
-      mustChangePassword: true
+      mustChangePassword: true,
+      blocked: input.blocked ?? false,
+      blockedByRole: input.blocked ? actor.role : null,
+      code
     });
     await writeLog(actor, "usuario_criado", "user", user.id, null, toPublicUser(user), companyId);
     res.status(201).json({ data: { ...toPublicUser(user), provisionalPassword } });
@@ -593,9 +694,6 @@ export function createApp(options: AppOptions): Express {
     }
     const nextRole = input.role ?? target.role;
     if (!self && input.role !== undefined) patch.role = input.role;
-    if ((!self && (input.permissions !== undefined || input.role !== undefined)) || (self && input.permissions !== undefined && isManager(actor.role))) {
-      patch.permissions = sanitizePermissions(nextRole, input.permissions ?? target.permissions);
-    }
     if (!self) {
       if (nextRole === "administrador_suporte") {
         patch.companyId = null;
@@ -615,6 +713,11 @@ export function createApp(options: AppOptions): Express {
         }
         patch.companyId = companyId;
       }
+      const nextCompanyId = nextRole === "administrador_suporte" ? null : (patch.companyId !== undefined ? patch.companyId : target.companyId);
+      if (input.role !== undefined || input.permissions !== undefined || input.companyId !== undefined) {
+        patch.permissions = await permissionsForRole(nextCompanyId, nextRole, input.permissions ?? target.permissions);
+      }
+      if (input.code !== undefined) patch.code = await userCodeFor(nextCompanyId, input.code, id);
     }
     const updated = await options.users.update(id, patch);
     if (!updated) throw new HttpError(404, "NOT_FOUND", "Usuário não encontrado.");
@@ -665,8 +768,8 @@ export function createApp(options: AppOptions): Express {
   app.post("/api/production/sync", auth, asyncHandler(async (req, res) => {
     const actor = await actorFrom(req);
     assertPasswordReady(actor);
-    if (actor.role === "visualizador" && !(actor.permissions.edit || []).length) {
-      throw new HttpError(403, "FORBIDDEN", "O visualizador não altera a produção.");
+    if (actor.role !== "administrador_suporte" && !(actor.permissions.edit || []).length) {
+      throw new HttpError(403, "FORBIDDEN", "Seu perfil não altera a produção.");
     }
     const company = await resolveCompanyId(actor, companyHeader(req));
     const input = parseBody(productionSyncSchema, req.body);

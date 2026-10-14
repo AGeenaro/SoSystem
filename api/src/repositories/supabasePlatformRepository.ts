@@ -1,7 +1,10 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import type { UserPermissions } from "../access.js";
 import { HttpError } from "../http.js";
 import type {
   CompanyPatch,
+  CompanyProfileRecord,
+  CompanyProfileRole,
   CompanyRecord,
   NewAuditLog,
   NewCompany,
@@ -16,6 +19,7 @@ import type {
 
 type CompanyRow = {
   id: string;
+  code?: string | null;
   name: string;
   max_users: number;
   max_machines: number;
@@ -51,9 +55,19 @@ type LogRow = {
   created_at: string;
 };
 
+type ProfileRow = {
+  company_id: string;
+  role: CompanyProfileRole;
+  view: CompanyProfileRecord["view"];
+  edit: CompanyProfileRecord["edit"];
+  sectors?: string[] | null;
+  updated_at: string;
+};
+
 function companyFrom(row: CompanyRow): CompanyRecord {
   return {
     id: row.id,
+    code: String(row.code ?? "").trim().toUpperCase(),
     name: row.name,
     maxUsers: row.max_users,
     maxMachines: row.max_machines,
@@ -133,6 +147,44 @@ function notificationFrom(row: NotificationRow): NotificationRecord {
   };
 }
 
+function profileFrom(row: ProfileRow): CompanyProfileRecord {
+  return {
+    companyId: row.company_id,
+    role: row.role,
+    view: row.view ?? [],
+    edit: row.edit ?? [],
+    sectors: Array.isArray(row.sectors) ? row.sectors : [],
+    updatedAt: row.updated_at
+  };
+}
+
+async function persistCompany(
+  supabase: SupabaseClient,
+  mode: "insert" | "update",
+  id: string | undefined,
+  payload: Record<string, unknown>
+): Promise<CompanyRecord | null> {
+  let body = { ...payload };
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const result = mode === "insert"
+      ? await supabase.from("companies").insert(body).select("*").single()
+      : await supabase.from("companies").update(body).eq("id", id!).select("*").maybeSingle();
+    if (!result.error) return result.data ? companyFrom(result.data as CompanyRow) : null;
+    if (/"code"/i.test(result.error.message) && "code" in body) {
+      delete body.code;
+      body = { ...body };
+      if (!Object.keys(body).length && mode === "update") {
+        const existing = await supabase.from("companies").select("*").eq("id", id!).maybeSingle();
+        if (existing.error) raise(existing.error);
+        return existing.data ? companyFrom(existing.data as CompanyRow) : null;
+      }
+      continue;
+    }
+    raise(result.error);
+  }
+  throw new HttpError(500, "DATABASE_ERROR", "Falha ao acessar o banco de dados.");
+}
+
 function raise(error: { code?: string; message: string }): never {
   if (error.code === "42P01" || error.code === "42703") {
     throw new HttpError(503, "SCHEMA_PENDING", "Falta atualizar o banco. Rode o script supabase/schema.sql.");
@@ -157,29 +209,44 @@ export function createSupabasePlatformRepository(url: string, serviceRoleKey: st
       return data ? companyFrom(data as CompanyRow) : null;
     },
     async createCompany(input: NewCompany) {
-      const payload = {
+      const created = await persistCompany(supabase, "insert", undefined, {
+        code: (input.code ?? "").trim().toUpperCase(),
         name: input.name,
         max_users: input.maxUsers ?? 50,
         max_machines: input.maxMachines ?? 50,
         max_registrations: input.maxRegistrations ?? 500,
         usage_until: input.usageUntil ?? null,
         blocked: input.blocked ?? false
-      };
-      const { data, error } = await supabase.from("companies").insert(payload).select("*").single();
-      if (error) raise(error);
-      return companyFrom(data as CompanyRow);
+      });
+      if (!created) throw new HttpError(500, "DATABASE_ERROR", "Falha ao acessar o banco de dados.");
+      return created;
     },
     async updateCompany(id, patch: CompanyPatch) {
       const payload: Record<string, unknown> = {};
+      if (patch.code !== undefined) payload.code = patch.code.trim().toUpperCase();
       if (patch.name !== undefined) payload.name = patch.name;
       if (patch.maxUsers !== undefined) payload.max_users = patch.maxUsers;
       if (patch.maxMachines !== undefined) payload.max_machines = patch.maxMachines;
       if (patch.maxRegistrations !== undefined) payload.max_registrations = patch.maxRegistrations;
       if (patch.usageUntil !== undefined) payload.usage_until = patch.usageUntil;
       if (patch.blocked !== undefined) payload.blocked = patch.blocked;
-      const { data, error } = await supabase.from("companies").update(payload).eq("id", id).select("*").maybeSingle();
+      return persistCompany(supabase, "update", id, payload);
+    },
+    async listProfiles(companyId) {
+      const { data, error } = await supabase.from("company_profiles").select("*").eq("company_id", companyId);
       if (error) raise(error);
-      return data ? companyFrom(data as CompanyRow) : null;
+      return ((data ?? []) as ProfileRow[]).map(profileFrom);
+    },
+    async saveProfile(companyId, role: CompanyProfileRole, permissions: UserPermissions) {
+      const { data, error } = await supabase.from("company_profiles").upsert({
+        company_id: companyId,
+        role,
+        view: permissions.view,
+        edit: permissions.edit,
+        sectors: permissions.sectors
+      }, { onConflict: "company_id,role" }).select("*").single();
+      if (error) raise(error);
+      return profileFrom(data as ProfileRow);
     },
     async createPasswordRequest(input) {
       const existing = await supabase

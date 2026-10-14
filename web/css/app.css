@@ -33,7 +33,7 @@ body{ margin:0; font-family:var(--font); background:var(--bg); color:var(--text)
 .login-gate[hidden]{ display:none; }
 .login-card{ width:min(420px, 100%); }
 .login-message{ margin-bottom:12px; padding:10px 12px; border-radius:10px; background:#FDEEEE; color:var(--red-dark); border:1px solid #F8D6D5; }
-.settings-choices{ display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:10px; margin:14px 0; }
+.settings-choices{ display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; margin:14px 0; }
 .settings-choice{ text-align:left; background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:14px 16px; cursor:pointer; font:inherit; color:var(--text); }
 .settings-choice b{ display:block; font-size:15px; margin-bottom:4px; }
 .settings-choice span{ display:block; color:var(--text-muted); font-size:12.5px; font-weight:500; line-height:1.35; }

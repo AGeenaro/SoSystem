@@ -272,3 +272,91 @@ alter table public.support_tickets enable row level security;
 alter table public.notifications enable row level security;
 revoke all on table public.support_tickets from anon, authenticated;
 revoke all on table public.notifications from anon, authenticated;
+
+-- Código editável, último acesso e perfil de acesso por empresa.
+alter table public.users add column if not exists code text;
+alter table public.users add column if not exists last_access_at timestamptz;
+alter table public.companies add column if not exists code text;
+
+create table if not exists public.company_profiles (
+  company_id uuid not null references public.companies(id) on delete cascade,
+  role text not null check (role in ('visualizador', 'operador', 'administrador')),
+  view jsonb not null default '[]'::jsonb,
+  edit jsonb not null default '[]'::jsonb,
+  sectors jsonb not null default '[]'::jsonb,
+  updated_at timestamptz not null default now(),
+  primary key (company_id, role)
+);
+
+alter table public.company_profiles enable row level security;
+revoke all on table public.company_profiles from anon, authenticated;
+
+create unique index if not exists companies_code_key on public.companies (upper(code)) where code is not null and btrim(code) <> '';
+create unique index if not exists users_company_code_key on public.users (coalesce(company_id, '00000000-0000-0000-0000-000000000000'::uuid), upper(code)) where code is not null and btrim(code) <> '';
+
+do $$
+declare
+  rec record;
+  seq integer;
+  value integer;
+  generated text;
+begin
+  for rec in
+    select id, company_id
+    from public.users
+    where code is null or btrim(code) = ''
+    order by company_id nulls first, created_at
+  loop
+    select coalesce(max(decoded.n), -1) + 1 into seq
+    from (
+      select (
+        select sum((ascii(upper(substr(users.code, idx, 1))) - 65) * power(26, length(users.code) - idx)::bigint)
+        from generate_series(1, length(users.code)) as idx
+      )::integer as n
+      from public.users
+      where users.code ~ '^[A-Za-z]+$'
+        and users.company_id is not distinct from rec.company_id
+        and users.id <> rec.id
+    ) decoded;
+    value := coalesce(seq, 0);
+    generated := '';
+    loop
+      generated := chr(65 + (value % 26)) || generated;
+      value := value / 26;
+      exit when value = 0;
+    end loop;
+    while length(generated) < 2 loop
+      generated := 'A' || generated;
+    end loop;
+    update public.users set code = generated where id = rec.id;
+  end loop;
+
+  for rec in
+    select id from public.companies where code is null or btrim(code) = '' order by created_at
+  loop
+    select coalesce(max(decoded.n), -1) + 1 into seq
+    from (
+      select (
+        select sum((ascii(upper(substr(companies.code, idx, 1))) - 65) * power(26, length(companies.code) - idx)::bigint)
+        from generate_series(1, length(companies.code)) as idx
+      )::integer as n
+      from public.companies
+      where companies.code ~ '^[A-Za-z]+$'
+        and companies.id <> rec.id
+    ) decoded;
+    value := coalesce(seq, 0);
+    generated := '';
+    loop
+      generated := chr(65 + (value % 26)) || generated;
+      value := value / 26;
+      exit when value = 0;
+    end loop;
+    while length(generated) < 2 loop
+      generated := 'A' || generated;
+    end loop;
+    update public.companies set code = generated where id = rec.id;
+  end loop;
+exception
+  when others then
+    raise notice 'Códigos antigos ficam em branco até serem editados: %', sqlerrm;
+end $$;

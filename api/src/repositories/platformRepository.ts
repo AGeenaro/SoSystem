@@ -1,5 +1,8 @@
+import type { ProductionModule, UserPermissions } from "../access.js";
+
 export type CompanyRecord = {
   id: string;
+  code: string;
   name: string;
   maxUsers: number;
   maxMachines: number;
@@ -10,7 +13,19 @@ export type CompanyRecord = {
   updatedAt: string;
 };
 
+export type CompanyProfileRole = "visualizador" | "operador" | "administrador";
+
+export type CompanyProfileRecord = {
+  companyId: string;
+  role: CompanyProfileRole;
+  view: ProductionModule[];
+  edit: ProductionModule[];
+  sectors: string[];
+  updatedAt: string;
+};
+
 export type NewCompany = {
+  code?: string;
   name: string;
   maxUsers?: number;
   maxMachines?: number;
@@ -88,6 +103,8 @@ export interface PlatformRepository {
   findCompany(id: string): Promise<CompanyRecord | null>;
   createCompany(input: NewCompany): Promise<CompanyRecord>;
   updateCompany(id: string, patch: CompanyPatch): Promise<CompanyRecord | null>;
+  listProfiles(companyId: string): Promise<CompanyProfileRecord[]>;
+  saveProfile(companyId: string, role: CompanyProfileRole, permissions: UserPermissions): Promise<CompanyProfileRecord>;
   createPasswordRequest(input: Omit<PasswordRequestRecord, "id" | "status" | "createdAt" | "resolvedAt" | "resolvedBy">): Promise<PasswordRequestRecord>;
   listPasswordRequests(): Promise<PasswordRequestRecord[]>;
   findPasswordRequest(id: string): Promise<PasswordRequestRecord | null>;

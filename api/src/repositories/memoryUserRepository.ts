@@ -33,6 +33,8 @@ export function createMemoryUserRepository(): UserRepository {
         blocked: input.blocked ?? false,
         blockedByRole: input.blockedByRole ?? null,
         sessionVersion: input.sessionVersion ?? 0,
+        code: (input.code ?? "").trim().toUpperCase(),
+        lastAccessAt: input.lastAccessAt ?? null,
         createdAt: now,
         updatedAt: now
       };
