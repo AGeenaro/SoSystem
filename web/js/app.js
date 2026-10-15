@@ -3984,19 +3984,18 @@ function routeEditor(){
     const machines = state.resources.map(function(resource){
       return `<option value="${escapeHtml(resource.id)}" ${resource.id === step.maquinaId ? 'selected' : ''}>${escapeHtml((resource.codigo || resource.nome) + ' — ' + (resource.descricao || ''))}</option>`;
     }).join('');
-    return `<div class="kit-row" data-route-index="${index}">
+    return `<div class="route-row" data-route-index="${index}">
       <select class="route-op" data-edit="engenharia">${selectOptions(state.operacoes, step.operacaoId || '', 'Operação')}</select>
       <select class="route-setor" data-edit="engenharia">${selectOptions(state.setores, step.setorId || '', 'Setor')}</select>
       <select class="route-maq" data-edit="engenharia"><option value="">Máquina opcional</option>${machines}</select>
-      <span></span>
-      <span style="display:flex; gap:4px;">
+      <span class="route-actions">
         <button class="btn btn-sm" type="button" onclick="moveRouteRow(${index},-1)">↑</button>
         <button class="btn btn-sm" type="button" onclick="moveRouteRow(${index},1)">↓</button>
         <button class="icon-btn danger" data-edit="engenharia" type="button" onclick="removeRouteRow(${index})">${icon('trash',14)}</button>
       </span>
     </div>`;
   }).join('');
-  return `<div class="kit-head"><span>Operação</span><span>Setor</span><span>Máquina</span><span></span><span></span></div>${rows}
+  return `<div class="route-head"><span>Operação</span><span>Setor</span><span>Máquina</span><span></span></div>${rows}
     <button class="btn btn-ghost btn-sm" data-edit="engenharia" type="button" style="margin-top:8px;" onclick="addRouteRow()">Adicionar etapa</button>
     <div class="section-sub">A ordem é a sequência: 1 cortar, 2 dobrar, 3 soldar.</div>`;
 }
