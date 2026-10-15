@@ -172,6 +172,10 @@ tr.row-vacation{ background:#FDEAEA; }
 tr.row-vacation:hover{ background:#FBDCDB; }
 tr.row-vacation td{ color:#7A1F24; }
 .table-wrap{ overflow-x:auto; border:1px solid var(--border); border-radius:var(--radius); background:var(--surface); box-shadow:var(--shadow); }
+.cadastro-check-cell{ width:36px; text-align:center; padding-left:10px; padding-right:6px; }
+.cadastro-check{ width:16px; height:16px; cursor:pointer; vertical-align:middle; }
+.cadastro-bulk{ display:flex; align-items:center; gap:12px; margin-top:14px; padding:10px 12px; border:1px solid var(--border); border-radius:var(--radius); background:var(--surface-2); }
+.cadastro-bulk span{ font-size:13px; color:var(--text-muted); font-weight:600; }
 .mono{ font-variant-numeric:tabular-nums; }
 .empty-row td{ text-align:center; color:var(--text-faint); padding:34px; font-style:italic; }
 

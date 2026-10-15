@@ -3,7 +3,7 @@ import cors from "cors";
 import express, { type Express } from "express";
 import helmet from "helmet";
 import swaggerUi from "swagger-ui-express";
-import { defaultPermissions, isManager, nextAlphaCode, normalizeCode, sanitizePermissions, type UserPermissions, type UserRole } from "./access.js";
+import { defaultPermissions, isManager, nextNumericCode, normalizeCode, sanitizePermissions, type UserPermissions, type UserRole } from "./access.js";
 import { requireAuth, signToken } from "./auth.js";
 import { HttpError, asyncHandler, errorHandler } from "./http.js";
 import { openApiSpec } from "./openapi.js";
@@ -202,7 +202,7 @@ export function createApp(options: AppOptions): Express {
   async function userCodeFor(companyId: string | null, requested: string | undefined, ignoreUserId?: string) {
     const users = await options.users.list();
     const peers = users.filter((user) => user.companyId === companyId && user.id !== ignoreUserId);
-    const code = requested ? normalizeCode(requested) : nextAlphaCode(peers.map((user) => user.code));
+    const code = requested ? normalizeCode(requested) : nextNumericCode(peers.map((user) => user.code));
     assertCode(code);
     if (peers.some((user) => user.code.toUpperCase() === code)) {
       throw new HttpError(409, "CODE_IN_USE", "Já existe um usuário com este código nesta empresa.");
@@ -213,7 +213,7 @@ export function createApp(options: AppOptions): Express {
   async function companyCodeFor(requested: string | undefined, ignoreCompanyId?: string) {
     const companies = await platform.listCompanies();
     const peers = companies.filter((company) => company.id !== ignoreCompanyId);
-    const code = requested ? normalizeCode(requested) : nextAlphaCode(peers.map((company) => company.code));
+    const code = requested ? normalizeCode(requested) : nextNumericCode(peers.map((company) => company.code));
     assertCode(code);
     if (peers.some((company) => company.code.toUpperCase() === code)) {
       throw new HttpError(409, "CODE_IN_USE", "Já existe uma empresa com este código.");

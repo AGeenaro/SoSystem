@@ -23,26 +23,22 @@ export type UserPermissions = {
 const MODULE_SET = new Set<string>(PRODUCTION_MODULES);
 
 export function alphaCode(index: number): string {
-  let value = Math.max(0, Math.trunc(index));
-  let text = "";
-  do {
-    text = String.fromCharCode(65 + (value % 26)) + text;
-    value = Math.floor(value / 26);
-  } while (value > 0);
-  while (text.length < 2) text = "A" + text;
-  return text;
+  return String(Math.max(0, Math.trunc(index)));
+}
+
+export function nextNumericCode(used: Array<string | null | undefined>): string {
+  let max = 0;
+  for (const value of used) {
+    const digits = String(value ?? "").replace(/\D/g, "");
+    if (!digits) continue;
+    const number = Number(digits);
+    if (Number.isFinite(number) && number > max) max = Math.floor(number);
+  }
+  return String(max + 1);
 }
 
 export function nextAlphaCode(used: Array<string | null | undefined>): string {
-  let max = -1;
-  for (const value of used) {
-    const text = String(value ?? "").trim().toUpperCase();
-    if (!/^[A-Z]+$/.test(text)) continue;
-    let current = 0;
-    for (const char of text) current = current * 26 + (char.charCodeAt(0) - 65);
-    if (current > max) max = current;
-  }
-  return alphaCode(max + 1);
+  return nextNumericCode(used);
 }
 
 export function normalizeCode(value: string): string {

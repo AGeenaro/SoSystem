@@ -76,7 +76,7 @@ A resposta `429` inclui os cabeçalhos padrão de rate limit. `/health` fica for
 Resposta `200`:
 
 ```json
-{ "data": { "status": "ok", "service": "sosystem-api", "version": "2026.10.18" } }
+{ "data": { "status": "ok", "service": "sosystem-api", "version": "2026.10.19" } }
 ```
 
 ### `POST /api/auth/register`

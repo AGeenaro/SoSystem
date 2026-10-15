@@ -925,8 +925,11 @@ function nextNumericCode(list){
   });
   return String(max + 1);
 }
+function suggestCode(list){
+  return nextNumericCode(list);
+}
 function suggestAlpha(list){
-  return nextAlphaCode((list || []).map(function(item){ return item && item.codigo; }));
+  return suggestCode(list);
 }
 function orderLabel(order){ return (order && (order.numero || order.id)) || ''; }
 function orderById(id){ return state.orders.find(o=>o.id===id || o.numero===id); }
@@ -1930,7 +1933,7 @@ function renderEngenharia(){
   const el = document.getElementById('panel-engenharia');
   el.innerHTML = `
     <div class="section-title">${icon('gear',19)} Engenharia de Produto</div>
-    <div class="section-sub">Consulta dos itens. O código interno é AA e o ERP fica separado: <b>30.2000.XXXX</b> para PI e <b>30.3000.XXXX</b> para PF. Incluir e alterar é em Cadastro, na opção Item.</div>
+    <div class="section-sub">Consulta dos itens. O código interno é automático e editável; o ERP fica separado: <b>30.2000.XXXX</b> para PI e <b>30.3000.XXXX</b> para PF. Incluir e alterar é em Cadastro, na opção Item.</div>
     <div class="toolbar">
       <div class="search-box"><span class="search-ic">${icon('search',15)}</span><input placeholder="Buscar código ou descrição..." oninput="engSearch=this.value; renderEngenhariaTable();"></div>
       <button class="btn btn-primary" data-edit="engenharia" onclick="openCadastroItem()">${icon('plus',14)} Novo item</button>
@@ -3082,25 +3085,10 @@ let companyProfiles = [];
 let draftBlocked = false;
 let editingBlocked = false;
 function nextAlphaCode(codes){
-  let max = -1;
-  (codes || []).forEach(function(code){
-    const text = String(code || '').trim().toUpperCase();
-    if(!/^[A-Z]+$/.test(text)) return;
-    let current = 0;
-    for(let index = 0; index < text.length; index++) current = current * 26 + (text.charCodeAt(index) - 65);
-    if(current > max) max = current;
-  });
-  return alphaCode(max + 1);
+  return nextNumericCode((codes || []).map(function(code){ return { codigo: code }; }));
 }
 function alphaCode(index){
-  let value = Math.max(0, index);
-  let text = '';
-  do {
-    text = String.fromCharCode(65 + (value % 26)) + text;
-    value = Math.floor(value / 26);
-  } while(value > 0);
-  while(text.length < 2) text = 'A' + text;
-  return text;
+  return String(Math.max(1, Math.floor(Number(index) || 0) + 1));
 }
 function companyProfileRoles(){
   return ['visualizador','operador','administrador'];
@@ -3651,6 +3639,8 @@ async function commitOrderStatus(order, next, motivo){
 }
 let cadastroChoice = 'setor';
 let cadastroEditId = '';
+let cadastroSelectedIds = [];
+let cadastroListIds = [];
 let kitDraft = [];
 let routeDraft = [];
 let textDraft = {};
@@ -3722,6 +3712,7 @@ function resetCadastroForm(){
 }
 function setCadastroChoice(choice){
   cadastroChoice = choice;
+  cadastroSelectedIds = [];
   resetCadastroForm();
   renderCadastro();
   applyAccess();
@@ -3736,12 +3727,12 @@ function guardCadastro(){
 function suggestedCadastroCode(){
   if(cadastroChoice === 'setor') return nextNumericCode(state.setores);
   if(cadastroChoice === 'grupo') return nextNumericCode(state.groups);
-  if(cadastroChoice === 'familia') return suggestAlpha(state.families);
-  if(cadastroChoice === 'item') return suggestAlpha(state.products);
-  if(cadastroChoice === 'operacao') return suggestAlpha(state.operacoes);
-  if(cadastroChoice === 'operador') return suggestAlpha(state.employees);
-  if(cadastroChoice === 'maquina') return suggestAlpha(state.resources);
-  return suggestAlpha(state.equipments);
+  if(cadastroChoice === 'familia') return nextNumericCode(state.families);
+  if(cadastroChoice === 'item') return nextNumericCode(state.products);
+  if(cadastroChoice === 'operacao') return nextNumericCode(state.operacoes);
+  if(cadastroChoice === 'operador') return nextNumericCode(state.employees);
+  if(cadastroChoice === 'maquina') return nextNumericCode(state.resources);
+  return nextNumericCode(state.equipments);
 }
 function cadastroRecord(id){
   if(!id) return null;
@@ -3775,6 +3766,25 @@ function checkGrid(id, items, selected, label){
 }
 function rowActions(id){
   return `<button class="btn btn-sm" type="button" onclick="editCadastro('${escapeHtml(id)}')">Editar</button> <button class="icon-btn danger" data-edit="engenharia" type="button" onclick="deleteCadastro('${escapeHtml(id)}')" title="Excluir">${icon('trash',14)}</button>`;
+}
+function rowSelect(id){
+  const key = String(id || '');
+  const checked = cadastroSelectedIds.indexOf(key) >= 0 ? 'checked' : '';
+  return `<td class="cadastro-check-cell"><input class="cadastro-check" type="checkbox" value="${escapeHtml(key)}" ${checked} onchange="toggleCadastroSelect(this.value, this.checked)" aria-label="Selecionar linha"></td>`;
+}
+function toggleCadastroSelect(id, checked){
+  const key = String(id || '');
+  if(!key) return;
+  const index = cadastroSelectedIds.indexOf(key);
+  if(checked && index < 0) cadastroSelectedIds.push(key);
+  if(!checked && index >= 0) cadastroSelectedIds.splice(index, 1);
+  renderCadastroBody();
+  applyAccess();
+}
+function toggleCadastroSelectAll(checked){
+  cadastroSelectedIds = checked ? cadastroListIds.slice() : [];
+  renderCadastroBody();
+  applyAccess();
 }
 function codeField(value){
   return `<div class="field"><label>Código <span class="field-hint">automático, editável</span></label><input id="cadCodigo" data-edit="engenharia" maxlength="12" value="${escapeHtml(value || '')}"></div>`;
@@ -3820,9 +3830,15 @@ function routeEditor(){
     <button class="btn btn-ghost btn-sm" data-edit="engenharia" type="button" style="margin-top:8px;" onclick="addRouteRow()">Adicionar etapa</button>
     <div class="section-sub">A ordem é a sequência: 1 cortar, 2 dobrar, 3 soldar.</div>`;
 }
-function listTable(headers, body){
-  const cols = headers.length + 1;
-  return `<div class="table-wrap" style="margin-top:14px;"><table><thead><tr>${headers.map(function(header){ return '<th>' + header + '</th>'; }).join('')}<th style="width:120px;"></th></tr></thead><tbody>${body || '<tr class="empty-row"><td colspan="' + cols + '">Nenhum cadastro ainda.</td></tr>'}</tbody></table></div>`;
+function listTable(headers, body, ids){
+  cadastroListIds = (ids || []).map(function(id){ return String(id); });
+  cadastroSelectedIds = cadastroSelectedIds.filter(function(id){ return cadastroListIds.indexOf(id) >= 0; });
+  const cols = headers.length + 2;
+  const selectedCount = cadastroSelectedIds.length;
+  const allChecked = cadastroListIds.length && selectedCount === cadastroListIds.length ? 'checked' : '';
+  const selectTh = `<th class="cadastro-check-cell"><input class="cadastro-check" type="checkbox" ${allChecked} ${cadastroListIds.length ? '' : 'disabled'} onclick="toggleCadastroSelectAll(this.checked)" title="Selecionar todos" aria-label="Selecionar todos"></th>`;
+  const bar = selectedCount ? `<div class="cadastro-bulk"><span>${selectedCount} selecionado${selectedCount === 1 ? '' : 's'}</span><button class="btn btn-sm btn-danger" data-edit="engenharia" type="button" onclick="deleteCadastroSelected()">Excluir selecionados</button></div>` : '';
+  return `${bar}<div class="table-wrap" style="margin-top:14px;"><table><thead><tr>${selectTh}${headers.map(function(header){ return '<th>' + header + '</th>'; }).join('')}<th style="width:120px;"></th></tr></thead><tbody>${body || '<tr class="empty-row"><td colspan="' + cols + '">Nenhum cadastro ainda.</td></tr>'}</tbody></table></div>`;
 }
 function renderCadastroBody(){
   const box = document.getElementById('cadastroBody');
@@ -3831,16 +3847,18 @@ function renderCadastroBody(){
   const codigo = fieldValue('cadCodigo', record ? (record.codigo || '') : suggestedCadastroCode());
   const descricao = fieldValue('cadDescricao', record ? (cadastroChoice === 'operador' ? ((record.nome || '') + ' ' + (record.sobrenome || '')).trim() : recordLabel(record)) : '');
   if(cadastroChoice === 'setor'){
+    const ids = state.setores.map(function(setor){ return setor.id; });
     const rows = state.setores.map(function(setor){
-      return `<tr><td class="mono">${escapeHtml(setor.codigo || '')}</td><td>${escapeHtml(recordLabel(setor))}</td><td>${rowActions(setor.id)}</td></tr>`;
+      return `<tr>${rowSelect(setor.id)}<td class="mono">${escapeHtml(setor.codigo || '')}</td><td>${escapeHtml(recordLabel(setor))}</td><td>${rowActions(setor.id)}</td></tr>`;
     }).join('');
-    box.innerHTML = `<div class="section-title" style="font-size:16px;">Setor</div><div class="section-sub">Lugar da fábrica. O código é numérico.</div><div class="grid grid-2">${codeField(codigo)}${descriptionField(descricao)}</div>${saveButtons()}${listTable(['Código','Descrição'], rows)}`;
+    box.innerHTML = `<div class="section-title" style="font-size:16px;">Setor</div><div class="section-sub">Lugar da fábrica. O código é numérico.</div><div class="grid grid-2">${codeField(codigo)}${descriptionField(descricao)}</div>${saveButtons()}${listTable(['Código','Descrição'], rows, ids)}`;
     return;
   }
   if(cadastroChoice === 'grupo'){
+    const ids = state.groups.map(function(group){ return group.id; });
     const rows = state.groups.map(function(group){
       const families = state.families.filter(function(family){ return family.grupoId === group.id; }).map(recordLabel).join(', ');
-      return `<tr><td class="mono">${escapeHtml(group.codigo || '')}</td><td>${escapeHtml(recordLabel(group))}</td><td>${escapeHtml(families || '—')}</td><td>${rowActions(group.id)}</td></tr>`;
+      return `<tr>${rowSelect(group.id)}<td class="mono">${escapeHtml(group.codigo || '')}</td><td>${escapeHtml(recordLabel(group))}</td><td>${escapeHtml(families || '—')}</td><td>${rowActions(group.id)}</td></tr>`;
     }).join('');
     const detail = state.groups.map(function(group){
       const families = state.families.filter(function(family){ return family.grupoId === group.id; });
@@ -3850,20 +3868,21 @@ function renderCadastroBody(){
       }).join('') || '<div class="section-sub">Nenhuma família neste grupo.</div>';
       return `<div style="margin-top:8px;"><b>${escapeHtml((group.codigo || '') + ' ' + recordLabel(group))}</b>${blocks}</div>`;
     }).join('');
-    box.innerHTML = `<div class="section-title" style="font-size:16px;">Grupo</div><div class="section-sub">Categoria acima da família. Ex.: Separação reúne Decanter e Prensa. O código é numérico.</div><div class="grid grid-2">${codeField(codigo)}${descriptionField(descricao)}</div>${saveButtons()}${listTable(['Código','Descrição','Famílias'], rows)}<div style="margin-top:12px;">${detail}</div>`;
+    box.innerHTML = `<div class="section-title" style="font-size:16px;">Grupo</div><div class="section-sub">Categoria acima da família. Ex.: Separação reúne Decanter e Prensa. O código é numérico.</div><div class="grid grid-2">${codeField(codigo)}${descriptionField(descricao)}</div>${saveButtons()}${listTable(['Código','Descrição','Famílias'], rows, ids)}<div style="margin-top:12px;">${detail}</div>`;
     return;
   }
   if(cadastroChoice === 'familia'){
     const grupoId = fieldValue('cadGrupo', record ? (record.grupoId || '') : '');
+    const ids = state.families.map(function(family){ return family.id; });
     const rows = state.families.map(function(family){
       const group = groupById(family.grupoId);
-      return `<tr><td class="mono">${escapeHtml(family.codigo || '')}</td><td>${escapeHtml(recordLabel(family))}</td><td>${escapeHtml(group ? recordLabel(group) : '—')}</td><td>${(family.itens || []).length}</td><td>${rowActions(family.id)}</td></tr>`;
+      return `<tr>${rowSelect(family.id)}<td class="mono">${escapeHtml(family.codigo || '')}</td><td>${escapeHtml(recordLabel(family))}</td><td>${escapeHtml(group ? recordLabel(group) : '—')}</td><td>${(family.itens || []).length}</td><td>${rowActions(family.id)}</td></tr>`;
     }).join('');
     box.innerHTML = `<div class="section-title" style="font-size:16px;">Família</div><div class="section-sub">Linha do produto. Ex.: Decanter é a família; os tamanhos ficam no equipamento. Aqui fica o conjunto padrão de peças.</div>
       <div class="grid grid-2">${codeField(codigo)}${descriptionField(descricao)}
         <div class="field"><label>Grupo</label><select id="cadGrupo" data-edit="engenharia">${selectOptions(state.groups, grupoId, 'Selecione o grupo')}</select></div>
       </div>
-      <div class="section-sub" style="margin-top:8px;">Conjunto padrão</div>${kitEditor()}${saveButtons()}${listTable(['Código','Descrição','Grupo','Peças'], rows)}`;
+      <div class="section-sub" style="margin-top:8px;">Conjunto padrão</div>${kitEditor()}${saveButtons()}${listTable(['Código','Descrição','Grupo','Peças'], rows, ids)}`;
     return;
   }
   if(cadastroChoice === 'item'){
@@ -3876,12 +3895,13 @@ function renderCadastroBody(){
     const material = fieldValue('cadMaterial', record ? (record.material || '') : '');
     const tempo = fieldValue('cadTempo', record ? (record.tempoFabricacaoMin || 1) : 1);
     const machines = checkedDraft('maquinas', record ? (record.maquinas || []) : []);
+    const ids = state.products.map(function(product){ return product.codigo; });
     const rows = state.products.map(function(product){
       const family = familyById(product.familiaId);
       const setor = setorById(product.setorId);
-      return `<tr><td class="mono">${escapeHtml(product.codigo || '')}</td><td class="mono">${escapeHtml(product.codigoErp || '')}</td><td>${escapeHtml(product.descricao || '')}</td><td>${escapeHtml(family ? recordLabel(family) : '—')}</td><td>${escapeHtml(setor ? recordLabel(setor) : '—')}</td><td>${rowActions(product.codigo)}</td></tr>`;
+      return `<tr>${rowSelect(product.codigo)}<td class="mono">${escapeHtml(product.codigo || '')}</td><td class="mono">${escapeHtml(product.codigoErp || '')}</td><td>${escapeHtml(product.descricao || '')}</td><td>${escapeHtml(family ? recordLabel(family) : '—')}</td><td>${escapeHtml(setor ? recordLabel(setor) : '—')}</td><td>${rowActions(product.codigo)}</td></tr>`;
     }).join('');
-    box.innerHTML = `<div class="section-title" style="font-size:16px;">Item</div><div class="section-sub">Peça unitária, como tambor ou rosca. O tamanho não entra aqui. O código interno é AA e o ERP fica no outro campo.</div>
+    box.innerHTML = `<div class="section-title" style="font-size:16px;">Item</div><div class="section-sub">Peça unitária, como tambor ou rosca. O tamanho não entra aqui. O código interno é automático e editável; o ERP fica no outro campo.</div>
       <div class="grid grid-2">${codeField(codigo)}
         <div class="field"><label>Código ERP</label><input id="cadErp" data-edit="engenharia" maxlength="20" value="${escapeHtml(erp)}"></div>
         ${descriptionField(descricao)}
@@ -3894,22 +3914,24 @@ function renderCadastroBody(){
       </div>
       <div class="section-sub">Máquinas em que esta peça pode ser feita. As outras ficam proibidas.</div>
       ${checkGrid('cadMaquinas', state.resources, machines, function(resource){ return (resource.codigo || resource.nome) + ' — ' + (resource.descricao || ''); })}
-      <div class="section-sub" style="margin-top:8px;">Rota ordenada</div>${routeEditor()}${saveButtons()}${listTable(['Código','ERP','Descrição','Família','Setor'], rows)}`;
+      <div class="section-sub" style="margin-top:8px;">Rota ordenada</div>${routeEditor()}${saveButtons()}${listTable(['Código','ERP','Descrição','Família','Setor'], rows, ids)}`;
     return;
   }
   if(cadastroChoice === 'operacao'){
+    const ids = state.operacoes.map(function(operation){ return operation.id; });
     const rows = state.operacoes.map(function(operation){
-      return `<tr><td class="mono">${escapeHtml(operation.codigo || '')}</td><td>${escapeHtml(recordLabel(operation))}</td><td>${rowActions(operation.id)}</td></tr>`;
+      return `<tr>${rowSelect(operation.id)}<td class="mono">${escapeHtml(operation.codigo || '')}</td><td>${escapeHtml(recordLabel(operation))}</td><td>${rowActions(operation.id)}</td></tr>`;
     }).join('');
-    box.innerHTML = `<div class="section-title" style="font-size:16px;">Operação</div><div class="section-sub">Etapa de processo. Ex.: cortar, dobrar, calandrar, soldar, jatear, tornear, montar. A sequência fica no item.</div><div class="grid grid-2">${codeField(codigo)}${descriptionField(descricao)}</div>${saveButtons()}${listTable(['Código','Descrição'], rows)}`;
+    box.innerHTML = `<div class="section-title" style="font-size:16px;">Operação</div><div class="section-sub">Etapa de processo. Ex.: cortar, dobrar, calandrar, soldar, jatear, tornear, montar. A sequência fica no item.</div><div class="grid grid-2">${codeField(codigo)}${descriptionField(descricao)}</div>${saveButtons()}${listTable(['Código','Descrição'], rows, ids)}`;
     return;
   }
   if(cadastroChoice === 'operador'){
     const turno = fieldValue('cadTurno', record ? (record.turno || '1º Turno') : '1º Turno');
     const machines = checkedDraft('maquinas', record ? employeeMachines(record.id).map(function(resource){ return resource.id; }) : []);
+    const ids = state.employees.map(function(employee){ return employee.id; });
     const rows = state.employees.map(function(employee){
       const names = employeeMachines(employee.id).map(function(resource){ return resource.codigo || resource.nome; }).join(', ');
-      return `<tr><td class="mono">${escapeHtml(employee.codigo || '')}</td><td>${escapeHtml(((employee.nome || '') + ' ' + (employee.sobrenome || '')).trim())}</td><td>${escapeHtml(employee.turno || '')}</td><td>${escapeHtml(names || '—')}</td><td>${rowActions(employee.id)}</td></tr>`;
+      return `<tr>${rowSelect(employee.id)}<td class="mono">${escapeHtml(employee.codigo || '')}</td><td>${escapeHtml(((employee.nome || '') + ' ' + (employee.sobrenome || '')).trim())}</td><td>${escapeHtml(employee.turno || '')}</td><td>${escapeHtml(names || '—')}</td><td>${rowActions(employee.id)}</td></tr>`;
     }).join('');
     box.innerHTML = `<div class="section-title" style="font-size:16px;">Operador</div><div class="section-sub">A mesma pessoa do cadastro de funcionários. O vínculo com a máquina aparece dos dois lados.</div>
       <div class="grid grid-2">${codeField(codigo)}${descriptionField(descricao)}
@@ -3917,16 +3939,17 @@ function renderCadastroBody(){
       </div>
       <div class="section-sub">Máquinas deste operador</div>
       ${checkGrid('cadMaquinas', state.resources, machines, function(resource){ return (resource.codigo || resource.nome) + ' — ' + (resource.descricao || ''); })}
-      ${saveButtons()}${listTable(['Código','Descrição','Turno','Máquinas'], rows)}`;
+      ${saveButtons()}${listTable(['Código','Descrição','Turno','Máquinas'], rows, ids)}`;
     return;
   }
   if(cadastroChoice === 'maquina'){
     const setorId = fieldValue('cadSetor', record ? (record.setorId || '') : '');
     const operations = checkedDraft('operacoes', record ? (record.operacoes || []) : []);
     const operators = checkedDraft('operadores', record ? (record.funcionarios || []) : []);
+    const ids = state.resources.map(function(resource){ return resource.id; });
     const rows = state.resources.map(function(resource){
       const setor = setorById(resource.setorId);
-      return `<tr><td class="mono">${escapeHtml(resource.codigo || resource.nome || '')}</td><td>${escapeHtml(resource.descricao || '')}</td><td>${escapeHtml(setor ? recordLabel(setor) : (resource.setor || '—'))}</td><td>${rowActions(resource.id)}</td></tr>`;
+      return `<tr>${rowSelect(resource.id)}<td class="mono">${escapeHtml(resource.codigo || resource.nome || '')}</td><td>${escapeHtml(resource.descricao || '')}</td><td>${escapeHtml(setor ? recordLabel(setor) : (resource.setor || '—'))}</td><td>${rowActions(resource.id)}</td></tr>`;
     }).join('');
     box.innerHTML = `<div class="section-title" style="font-size:16px;">Máquina</div><div class="section-sub">Recurso de produção: setor, operações que executa e operadores vinculados.</div>
       <div class="grid grid-2">${codeField(codigo)}${descriptionField(descricao)}
@@ -3936,19 +3959,20 @@ function renderCadastroBody(){
       ${checkGrid('cadOperacoes', state.operacoes, operations, recordLabel)}
       <div class="section-sub">Operadores vinculados</div>
       ${checkGrid('cadOperadores', state.employees, operators, function(employee){ return ((employee.codigo || '') + ' ' + (employee.nome || '') + ' ' + (employee.sobrenome || '')).trim(); })}
-      ${saveButtons()}${listTable(['Código','Descrição','Setor'], rows)}`;
+      ${saveButtons()}${listTable(['Código','Descrição','Setor'], rows, ids)}`;
     return;
   }
   const familiaId = fieldValue('cadFamilia', record ? (record.familiaId || '') : '');
+  const ids = state.equipments.map(function(equipment){ return equipment.id; });
   const rows = state.equipments.map(function(equipment){
     const family = familyById(equipment.familiaId);
-    return `<tr><td class="mono">${escapeHtml(equipment.codigo || '')}</td><td>${escapeHtml(recordLabel(equipment))}</td><td>${escapeHtml(family ? recordLabel(family) : '—')}</td><td>${(equipment.itens || []).length}</td><td>${rowActions(equipment.id)}</td></tr>`;
+    return `<tr>${rowSelect(equipment.id)}<td class="mono">${escapeHtml(equipment.codigo || '')}</td><td>${escapeHtml(recordLabel(equipment))}</td><td>${escapeHtml(family ? recordLabel(family) : '—')}</td><td>${(equipment.itens || []).length}</td><td>${rowActions(equipment.id)}</td></tr>`;
   }).join('');
   box.innerHTML = `<div class="section-title" style="font-size:16px;">Equipamento</div><div class="section-sub">Um modelo da família. Ex.: Decanter 220. Ao escolher a família, as peças padrão são copiadas e podem ser ajustadas.</div>
     <div class="grid grid-2">${codeField(codigo)}${descriptionField(descricao)}
       <div class="field"><label>Família</label><select id="cadFamilia" data-edit="engenharia" onchange="onEquipmentFamilyChange()">${selectOptions(state.families, familiaId, 'Selecione a família')}</select></div>
     </div>
-    ${kitEditor()}${saveButtons()}${listTable(['Código','Descrição','Família','Peças'], rows)}`;
+    ${kitEditor()}${saveButtons()}${listTable(['Código','Descrição','Família','Peças'], rows, ids)}`;
 }
 function refreshCadastroDraft(){
   pullKitDraft();
@@ -4171,16 +4195,7 @@ async function saveCadastro(){
   applyAccess();
   toast('Cadastro salvo.', 'success');
 }
-async function deleteCadastro(id){
-  if(guardCadastro()) return;
-  const record = cadastroRecord(id);
-  if(!record) return;
-  const label = recordLabel(record) || record.codigo || id;
-  if(cadastroChoice === 'setor' && setorUsed(id)){
-    toast('Este setor está em uso. Tire o vínculo antes de excluir.', 'error');
-    return;
-  }
-  if(!confirm('Excluir ' + label + '? Pedidos já gerados continuam com a composição gravada.')) return;
+function removeCadastroRecord(id){
   if(cadastroChoice === 'setor') state.setores = state.setores.filter(function(item){ return item.id !== id; });
   else if(cadastroChoice === 'grupo'){
     state.families.forEach(function(family){ if(family.grupoId === id) family.grupoId = ''; });
@@ -4208,11 +4223,50 @@ async function deleteCadastro(id){
     });
     state.resources = state.resources.filter(function(resource){ return resource.id !== id; });
   } else state.equipments = state.equipments.filter(function(equipment){ return equipment.id !== id; });
+  cadastroSelectedIds = cadastroSelectedIds.filter(function(selected){ return selected !== String(id); });
   if(cadastroEditId === id) resetCadastroForm();
+}
+async function deleteCadastro(id){
+  if(guardCadastro()) return;
+  const record = cadastroRecord(id);
+  if(!record) return;
+  const label = recordLabel(record) || record.codigo || id;
+  if(cadastroChoice === 'setor' && setorUsed(id)){
+    toast('Este setor está em uso. Tire o vínculo antes de excluir.', 'error');
+    return;
+  }
+  if(!confirm('Excluir ' + label + '? Pedidos já gerados continuam com a composição gravada.')) return;
+  removeCadastroRecord(id);
   await persist();
   renderCadastro();
   applyAccess();
   toast('Cadastro excluído.', 'success');
+}
+async function deleteCadastroSelected(){
+  if(guardCadastro()) return;
+  const ids = cadastroSelectedIds.slice();
+  if(!ids.length){ toast('Selecione ao menos um cadastro.', 'error'); return; }
+  if(!confirm('Excluir ' + ids.length + ' cadastro(s) selecionado(s)? Pedidos já gerados continuam com a composição gravada.')) return;
+  let removed = 0;
+  const blocked = [];
+  ids.forEach(function(id){
+    if(!cadastroRecord(id)) return;
+    if(cadastroChoice === 'setor' && setorUsed(id)){
+      const record = cadastroRecord(id);
+      blocked.push(recordLabel(record) || record.codigo || id);
+      return;
+    }
+    removeCadastroRecord(id);
+    removed++;
+  });
+  cadastroSelectedIds = [];
+  if(removed){
+    await persist();
+    renderCadastro();
+    applyAccess();
+    toast(removed === 1 ? '1 cadastro excluído.' : removed + ' cadastros excluídos.', 'success');
+  } else renderCadastroBody();
+  if(blocked.length) toast('Em uso, não excluídos: ' + blocked.slice(0, 3).join(', ') + (blocked.length > 3 ? '…' : ''), 'error');
 }
 
 function renderTaskBoard(){
@@ -4686,8 +4740,7 @@ function ensureNamed(list, nome, errors, label){
   let found = list.find(function(item){ return recordLabel(item).toLowerCase() === clean.toLowerCase(); });
   if(found) return found;
   if(!canEdit('engenharia')){ errors.push('Sem permissão para criar ' + label + ' ' + clean + '.'); return null; }
-  const numeric = list === state.setores || list === state.groups;
-  found = { id: uid(), codigo: numeric ? nextNumericCode(list) : suggestAlpha(list), descricao: clean, nome: clean };
+  found = { id: uid(), codigo: nextNumericCode(list), descricao: clean, nome: clean };
   if(list === state.families) found.itens = [];
   list.push(found);
   return found;
@@ -4984,6 +5037,9 @@ window.setCadastroChoice = setCadastroChoice;
 window.saveCadastro = saveCadastro;
 window.editCadastro = editCadastro;
 window.deleteCadastro = deleteCadastro;
+window.deleteCadastroSelected = deleteCadastroSelected;
+window.toggleCadastroSelect = toggleCadastroSelect;
+window.toggleCadastroSelectAll = toggleCadastroSelectAll;
 window.addKitRow = addKitRow;
 window.removeKitRow = removeKitRow;
 window.addRouteRow = addRouteRow;
