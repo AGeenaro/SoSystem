@@ -3,7 +3,7 @@
 ## 1. Banco no Supabase
 
 1. Abra o [SQL Editor](https://supabase.com/dashboard/project/tmqyymurvkgjmejyhzdx/sql/new) do projeto `tmqyymurvkgjmejyhzdx`.
-2. Cole e execute `supabase/schema.sql`. Pode rodar de novo: o script cria o que falta, inclusive as tabelas de produção, e não apaga usuários já cadastrados.
+2. Cole e execute `supabase/schema.sql`. Pode rodar de novo: o script cria o que falta e atualiza a lista de `kind` da produção (`setor` e `operacao` inclusos). Não apaga usuários já cadastrados.
 3. Em Project Settings → API, copie a **service_role**. Ela não vai para o Git. Também não use essa chave no frontend.
 
 URL do projeto, já usada pela API:

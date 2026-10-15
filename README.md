@@ -1,6 +1,6 @@
 # SoSystem / Prodfy
 
-Gestão de chão de fábrica no navegador, com a produção gravada no Supabase pela API.
+Gestão de chão de fábrica no navegador, com a produção gravada no Supabase pela API. O cadastro segue setor, operação, máquina, grupo, família, item e equipamento.
 
 O aplicativo não fica mais em um único HTML. A interface está em `web/` (HTML, CSS e JavaScript). A API está em `api/` (Node.js, Express e TypeScript). O banco SQL fica no Supabase. Não há serviço em Python.
 

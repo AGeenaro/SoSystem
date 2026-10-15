@@ -2,7 +2,7 @@ export const openApiSpec = {
   openapi: "3.0.3",
   info: {
     title: "SoSystem API",
-    version: "2026.10.16",
+    version: "2026.10.17",
     description: "API REST com usuários e produção de fábrica. Autenticação JWT, validação, tratamento global de erros e rate limiting. O banco SQL fica no Supabase."
   },
   servers: [
@@ -239,7 +239,7 @@ export const openApiSpec = {
     "/api/production": {
       get: {
         tags: ["Produção"],
-        summary: "Ler ordens, apontamentos, células, produtos e funcionários",
+        summary: "Ler produção e cadastros: setor, operação, grupo, família, item, máquina, operador e equipamento",
         security: [{ bearerAuth: [] }],
         responses: {
           "200": { description: "Estado atual, sem registros excluídos" },

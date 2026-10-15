@@ -14,7 +14,7 @@ Rotas protegidas exigem o cabeçalho:
 Authorization: Bearer <accessToken>
 ```
 
-O token é emitido em `POST /api/auth/register` e `POST /api/auth/login`. O payload contém `sub` (id do usuário), `email` e `role` (`admin` ou `user`). A validade padrão é `8h` (`JWT_EXPIRES_IN`).
+O token é emitido em `POST /api/auth/register` e `POST /api/auth/login`. O payload contém `sub` (id do usuário), `email`, `role` e `sv` (versão da sessão). Um segundo login da mesma conta invalida o token anterior com `401` e `SESSION_REPLACED`. A validade padrão é `8h` (`JWT_EXPIRES_IN`).
 
 A primeira conta criada por `/api/auth/register` recebe `role: administrador_suporte` e o cadastro público fecha. Os perfis seguintes são `visualizador`, `operador`, `administrador` e `administrador_suporte`. O administrador suporte cria qualquer perfil. O administrador cria os demais e não altera contas de suporte. O visualizador não grava produção. `GET /api/auth/status` responde `{ "data": { "needsSetup": true } }` quando ainda não existe conta.
 
@@ -48,6 +48,9 @@ Erro:
 | --- | --- | --- |
 | 400 | `INVALID_JSON` | Corpo não é JSON |
 | 401 | `UNAUTHORIZED` | Token ausente, expirado, inválido, ou usuário removido |
+| 401 | `SESSION_REPLACED` | A mesma conta entrou em outro computador |
+| 409 | `CODE_IN_USE` | Código de usuário ou empresa já existe |
+| 503 | `SCHEMA_PENDING` | Falta rodar `supabase/schema.sql` |
 | 401 | `INVALID_CREDENTIALS` | E-mail ou senha incorretos no login |
 | 403 | `FORBIDDEN` | Papel insuficiente, consulta de outra conta, ou autoexclusão |
 | 404 | `NOT_FOUND` | Rota ou usuário inexistente |
@@ -73,7 +76,7 @@ A resposta `429` inclui os cabeçalhos padrão de rate limit. `/health` fica for
 Resposta `200`:
 
 ```json
-{ "data": { "status": "ok", "service": "sosystem-api" } }
+{ "data": { "status": "ok", "service": "sosystem-api", "version": "2026.10.17" } }
 ```
 
 ### `POST /api/auth/register`
@@ -195,7 +198,7 @@ Administrador. Não é permitido excluir a própria conta. Resposta `204` sem co
 
 ## Produção
 
-Qualquer usuário autenticado lê e sincroniza a mesma fábrica. A resposta de leitura e de sincronização traz `employees`, `products`, `orders`, `punches`, `resources`, `tombstones`, `nextOrderNum` e `nextEmployeeNum`.
+Qualquer usuário autenticado lê e sincroniza a fábrica da própria empresa. A resposta traz `employees`, `products`, `orders`, `punches`, `resources`, `groups`, `families`, `equipments`, `setores`, `operacoes`, `tombstones`, `nextOrderNum` e `nextEmployeeNum`.
 
 ### `GET /api/production`
 
@@ -221,7 +224,7 @@ Envia o que mudou neste aparelho e devolve o estado mesclado. Um registro novo c
 }
 ```
 
-`kind` aceita `employee`, `product`, `order`, `punch`, `resource`, `group` e `family`. No máximo 5000 registros por pedido. O cabeçalho `x-company-id` escolhe a empresa quando quem chama é o administrador suporte. Os demais usuários ficam na própria empresa.
+`kind` aceita `employee`, `product`, `order`, `punch`, `resource`, `group`, `family`, `equipment`, `setor` e `operacao`. Setor é o lugar da fábrica. Grupo é a categoria acima da família. Família guarda o conjunto padrão de peças. Item é `product`, com código interno e código ERP. Operação é a etapa da rota. Máquina é `resource` e operador é `employee`. Equipamento copia as peças da família. No máximo 5000 registros por pedido. O cabeçalho `x-company-id` escolhe a empresa quando quem chama é o administrador suporte. Os demais usuários ficam na própria empresa. Um perfil sem módulos de edição só lê a produção.
 
 Senha nova: 8 caracteres, uma maiúscula, um número e um caractere especial. Conta criada por um administrador recebe senha provisória, mostrada uma vez na resposta (`provisionalPassword`), e precisa trocá-la no primeiro acesso.
 
