@@ -3905,7 +3905,18 @@ function checkGrid(id, items, selected, label){
   if(!items.length) return '<div class="section-sub">Nenhum cadastro ainda.</div>';
   return `<div class="perm-grid" id="${id}">${items.map(function(item){
     const checked = (selected || []).indexOf(item.id) >= 0 ? 'checked' : '';
-    return `<label class="perm-item"><input data-edit="engenharia" type="checkbox" value="${escapeHtml(item.id)}" ${checked}> ${escapeHtml(label(item))}</label>`;
+    const parts = typeof label === 'function' ? label(item) : label;
+    let body = '';
+    if(parts && typeof parts === 'object'){
+      body = `<span class="perm-item-text">
+        ${parts.code ? `<span class="perm-item-code mono">${escapeHtml(parts.code)}</span>` : ''}
+        <span class="perm-item-title">${escapeHtml(parts.title || '')}</span>
+        ${parts.sub ? `<span class="perm-item-sub">${escapeHtml(parts.sub)}</span>` : ''}
+      </span>`;
+    } else {
+      body = `<span class="perm-item-text"><span class="perm-item-title">${escapeHtml(parts || '')}</span></span>`;
+    }
+    return `<label class="perm-item"><input data-edit="engenharia" type="checkbox" value="${escapeHtml(item.id)}" ${checked}>${body}</label>`;
   }).join('')}</div>`;
 }
 function rowActions(id){
@@ -4072,7 +4083,9 @@ function renderCadastroBody(){
         <div class="field"><label>Tempo (min/peça)</label><input id="cadTempo" data-edit="engenharia" type="number" min="0" step="0.1" value="${escapeHtml(tempo)}"></div>
       </div>
       <div class="section-sub">Máquinas em que esta peça pode ser feita. As outras ficam proibidas.</div>
-      ${checkGrid('cadMaquinas', state.resources, machines, function(resource){ return (resource.codigo || resource.nome) + ' — ' + (resource.descricao || ''); })}
+      ${checkGrid('cadMaquinas', state.resources, machines, function(resource){
+        return { code: resource.codigo || resource.nome || '', title: resource.descricao || resource.codigo || resource.nome || '' };
+      })}
       <div class="section-sub" style="margin-top:8px;">Rota ordenada</div>${routeEditor()}${saveButtons()}${listTable(['Código','ERP','Descrição','Família','Setor'], rows, ids)}`;
     return;
   }
@@ -4097,7 +4110,9 @@ function renderCadastroBody(){
         <div class="field"><label>Turno</label><select id="cadTurno" data-edit="engenharia">${TURNO_OPTIONS.map(function(item){ return `<option ${item === turno ? 'selected' : ''}>${escapeHtml(item)}</option>`; }).join('')}</select></div>
       </div>
       <div class="section-sub">Máquinas deste operador</div>
-      ${checkGrid('cadMaquinas', state.resources, machines, function(resource){ return (resource.codigo || resource.nome) + ' — ' + (resource.descricao || ''); })}
+      ${checkGrid('cadMaquinas', state.resources, machines, function(resource){
+        return { code: resource.codigo || resource.nome || '', title: resource.descricao || resource.codigo || resource.nome || '' };
+      })}
       ${saveButtons()}${listTable(['Código','Descrição','Turno','Máquinas'], rows, ids)}`;
     return;
   }
@@ -4115,9 +4130,16 @@ function renderCadastroBody(){
         <div class="field"><label>Setor</label><select id="cadSetor" data-edit="engenharia">${selectOptions(state.setores, setorId, 'Selecione o setor')}</select></div>
       </div>
       <div class="section-sub">Operações que esta máquina executa</div>
-      ${checkGrid('cadOperacoes', state.operacoes, operations, recordLabel)}
+      ${checkGrid('cadOperacoes', state.operacoes, operations, function(operation){
+        return { code: operation.codigo || '', title: recordLabel(operation) };
+      })}
       <div class="section-sub">Operadores vinculados</div>
-      ${checkGrid('cadOperadores', state.employees, operators, function(employee){ return ((employee.codigo || '') + ' ' + (employee.nome || '') + ' ' + (employee.sobrenome || '')).trim(); })}
+      ${checkGrid('cadOperadores', state.employees, operators, function(employee){
+        return {
+          code: employee.codigo || '',
+          title: ((employee.nome || '') + ' ' + (employee.sobrenome || '')).trim() || employee.codigo || ''
+        };
+      })}
       ${saveButtons()}${listTable(['Código','Descrição','Setor'], rows, ids)}`;
     return;
   }
