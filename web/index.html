@@ -316,6 +316,16 @@
     </div>
   </div>
 </div>
+<div class="modal-overlay" id="modalCadastroTrash">
+  <div class="modal" style="max-width:560px;">
+    <div class="modal-header">
+      <div class="modal-title" id="cadastroTrashTitle">Lixeira</div>
+      <button class="modal-close" type="button" onclick="closeModal('modalCadastroTrash')">×</button>
+    </div>
+    <div class="section-sub">Itens já excluídos deste cadastro. Dá para restaurar ou apagar de vez.</div>
+    <div id="cadastroTrashBody"></div>
+  </div>
+</div>
 <div id="cadastroSelectBar" class="cadastro-select-bar" hidden>
   <span id="cadastroSelectCount">0 selecionados</span>
   <button class="btn btn-sm btn-danger" data-edit="engenharia" type="button" onclick="deleteCadastroSelected()">Excluir selecionados</button>
@@ -328,7 +338,7 @@
 <script src="js/app.js"></script>
 <script>
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js?v=30').catch(function () {});
+  navigator.serviceWorker.register('sw.js?v=31').catch(function () {});
 }
 </script>
 </body>

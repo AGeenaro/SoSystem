@@ -215,7 +215,7 @@ function employeeMiniChipHTML(id){
   return `<span class="employee-mini-chip">${employeeAvatarHTML(e,'inline-avatar-small')}<span>${e.nome} ${e.sobrenome}</span></span>`;
 }
 function emptyState(){
-  return { employees:[], products:[], orders:[], punches:[], resources:[], groups:[], families:[], equipments:[], setores:[], operacoes:[], nextOrderNum:1, nextEmployeeNum:1 };
+  return { employees:[], products:[], orders:[], punches:[], resources:[], groups:[], families:[], equipments:[], setores:[], operacoes:[], trash:[], nextOrderNum:1, nextEmployeeNum:1 };
 }
 function activeCompanyId(){
   if(sessionUser && sessionUser.companyId) return sessionUser.companyId;
@@ -335,6 +335,7 @@ function normalizeState(){
   }
   state.setores = state.setores || [];
   state.operacoes = state.operacoes || [];
+  state.trash = Array.isArray(state.trash) ? state.trash : [];
   (state.resources || []).forEach(function(resource){
     ensureArray(resource, 'funcionarios');
     ensureArray(resource, 'operacoes');
@@ -468,8 +469,10 @@ function collectChanges(){
 }
 function applySnapshot(data){
   restoreSectorHold();
+  const keptTrash = Array.isArray(state.trash) ? state.trash.slice() : [];
   const tomb = new Map((data.tombstones || []).map(item => [item.kind + ':' + item.id, item.updatedAt]));
   const next = emptyState();
+  next.trash = keptTrash;
   next.nextOrderNum = Math.max(state.nextOrderNum || 1, data.nextOrderNum || 1);
   next.nextEmployeeNum = Math.max(state.nextEmployeeNum || 1, data.nextEmployeeNum || 1);
   PRODUCTION_COLLECTIONS.forEach(([kind, key, idOf])=>{
@@ -3934,10 +3937,11 @@ function descriptionField(value, label){
   return `<div class="field"><label>${label || 'Descrição'}</label><input id="cadDescricao" data-edit="engenharia" maxlength="120" value="${escapeHtml(value || '')}"></div>`;
 }
 function saveButtons(){
+  const trashed = (state.trash || []).filter(function(item){ return item.module === cadastroChoice; }).length;
   return `<div class="cadastro-save-row">
     <button class="btn btn-primary" data-edit="engenharia" type="button" onclick="saveCadastro()">Salvar</button>
     <button class="btn btn-ghost" type="button" onclick="setCadastroChoice('${cadastroChoice}')">Limpar</button>
-    <button class="icon-btn danger cadastro-delete" data-edit="engenharia" type="button" onclick="deleteCadastroFromForm()" title="Excluir">${icon('trash',16)}</button>
+    <button class="icon-btn danger cadastro-delete" type="button" onclick="openCadastroTrash()" title="Lixeira">${icon('trash',16)}${trashed ? `<span class="cadastro-trash-count">${trashed}</span>` : ''}</button>
   </div>`;
 }
 function updateCadastroSelectBar(){
@@ -4350,6 +4354,30 @@ async function saveCadastro(){
   applyAccess();
   toast('Cadastro salvo.', 'success');
 }
+function cadastroKindOf(choice){
+  return ({
+    setor: 'setor',
+    grupo: 'group',
+    familia: 'family',
+    item: 'product',
+    operacao: 'operacao',
+    operador: 'employee',
+    maquina: 'resource',
+    equipamento: 'equipment'
+  })[choice || cadastroChoice] || '';
+}
+function cadastroModuleLabel(choice){
+  return ({
+    setor: 'Setor',
+    grupo: 'Grupo',
+    familia: 'Família',
+    item: 'Item',
+    operacao: 'Operação',
+    operador: 'Operador',
+    maquina: 'Máquina',
+    equipamento: 'Equipamento'
+  })[choice || cadastroChoice] || 'Cadastro';
+}
 function removeCadastroRecord(id){
   if(cadastroChoice === 'setor') state.setores = state.setores.filter(function(item){ return item.id !== id; });
   else if(cadastroChoice === 'grupo'){
@@ -4381,6 +4409,25 @@ function removeCadastroRecord(id){
   cadastroSelectedIds = cadastroSelectedIds.filter(function(selected){ return selected !== String(id); });
   if(cadastroEditId === id) resetCadastroForm();
 }
+function moveCadastroToTrash(id){
+  const record = cadastroRecord(id);
+  if(!record) return false;
+  const kind = cadastroKindOf(cadastroChoice);
+  const recordId = String(cadastroChoice === 'item' ? record.codigo : record.id);
+  state.trash = state.trash || [];
+  state.trash.unshift({
+    trashId: uid(),
+    module: cadastroChoice,
+    kind: kind,
+    recordId: recordId,
+    record: JSON.parse(JSON.stringify(record)),
+    deletedAt: new Date().toISOString(),
+    label: recordLabel(record) || record.codigo || recordId
+  });
+  if(kind && recordId) queueCatalogDelete(kind, recordId);
+  removeCadastroRecord(id);
+  return true;
+}
 async function deleteCadastro(id){
   if(guardCadastro()) return;
   const record = cadastroRecord(id);
@@ -4390,32 +4437,96 @@ async function deleteCadastro(id){
     toast('Este setor está em uso. Tire o vínculo antes de excluir.', 'error');
     return;
   }
-  const ok = await askConfirm('Excluir "' + label + '"? Pedidos já gerados continuam com a composição gravada.');
+  const ok = await askConfirm('Mover "' + label + '" para a lixeira? Pedidos já gerados continuam com a composição gravada.');
   if(!ok) return;
-  removeCadastroRecord(id);
+  moveCadastroToTrash(id);
   await persist();
   renderCadastro();
   applyAccess();
   updateCadastroSelectBar();
-  toast('Cadastro excluído.', 'success');
+  toast('Movido para a lixeira.', 'success');
 }
-async function deleteCadastroFromForm(){
+function openCadastroTrash(){
+  const title = document.getElementById('cadastroTrashTitle');
+  if(title) title.textContent = 'Lixeira — ' + cadastroModuleLabel(cadastroChoice);
+  renderCadastroTrashBody();
+  openModal('modalCadastroTrash');
+}
+function renderCadastroTrashBody(){
+  const box = document.getElementById('cadastroTrashBody');
+  if(!box) return;
+  const list = (state.trash || []).filter(function(item){ return item.module === cadastroChoice; });
+  if(!list.length){
+    box.innerHTML = '<div class="section-sub" style="margin-top:12px;">Nenhum item excluído neste cadastro.</div>';
+    return;
+  }
+  box.innerHTML = `<div class="table-wrap" style="margin-top:12px;"><table>
+    <thead><tr><th>Código</th><th>Descrição</th><th>Excluído</th><th style="width:150px;"></th></tr></thead>
+    <tbody>${list.map(function(item){
+      const codigo = (item.record && (item.record.codigo || item.recordId)) || '';
+      const nome = item.label || recordLabel(item.record) || codigo;
+      return `<tr>
+        <td class="mono">${escapeHtml(codigo)}</td>
+        <td>${escapeHtml(nome)}</td>
+        <td class="mono">${escapeHtml(fmtDateTime(item.deletedAt))}</td>
+        <td style="white-space:nowrap;">
+          <button class="btn btn-sm" type="button" data-edit="engenharia" onclick="restoreCadastroTrash('${escapeHtml(item.trashId)}')">Restaurar</button>
+          <button class="icon-btn danger" type="button" data-edit="engenharia" onclick="purgeCadastroTrash('${escapeHtml(item.trashId)}')" title="Apagar de vez">${icon('trash',14)}</button>
+        </td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table></div>`;
+  applyAccess();
+}
+async function restoreCadastroTrash(trashId){
   if(guardCadastro()) return;
-  if(cadastroEditId){
-    await deleteCadastro(cadastroEditId);
-    return;
-  }
-  if(cadastroSelectedIds.length){
-    await deleteCadastroSelected();
-    return;
-  }
-  toast('Abra um cadastro para editar ou marque linhas para excluir.', 'error');
+  const entry = (state.trash || []).find(function(item){ return item.trashId === trashId; });
+  if(!entry || !entry.record) return;
+  const module = entry.module || cadastroChoice;
+  const record = Object.assign({}, entry.record, { updatedAt: new Date().toISOString() });
+  const exists = module === 'item' ? state.products.some(function(item){ return item.codigo === record.codigo; })
+    : module === 'setor' ? !!setorById(record.id)
+    : module === 'grupo' ? !!groupById(record.id)
+    : module === 'familia' ? !!familyById(record.id)
+    : module === 'operacao' ? !!operacaoById(record.id)
+    : module === 'operador' ? state.employees.some(function(item){ return item.id === record.id; })
+    : module === 'maquina' ? !!resourceById(record.id)
+    : !!equipmentById(record.id);
+  if(exists){ toast('Já existe um cadastro com este código.', 'error'); return; }
+  if(module === 'setor') state.setores.push(record);
+  else if(module === 'grupo') state.groups.push(record);
+  else if(module === 'familia'){ record.itens = record.itens || []; state.families.push(record); }
+  else if(module === 'item'){ record.maquinas = record.maquinas || []; record.rota = record.rota || []; state.products.push(record); }
+  else if(module === 'operacao') state.operacoes.push(record);
+  else if(module === 'operador') state.employees.push(record);
+  else if(module === 'maquina'){ record.funcionarios = record.funcionarios || []; record.operacoes = record.operacoes || []; record.grupos = record.grupos || []; state.resources.push(record); }
+  else { record.itens = record.itens || []; state.equipments.push(record); }
+  pendingDeletes = pendingDeletes.filter(function(item){ return !(item.kind === entry.kind && item.id === entry.recordId); });
+  state.trash = state.trash.filter(function(item){ return item.trashId !== trashId; });
+  await persist();
+  renderCadastro();
+  applyAccess();
+  renderCadastroTrashBody();
+  toast('Cadastro restaurado.', 'success');
+}
+async function purgeCadastroTrash(trashId){
+  if(guardCadastro()) return;
+  const entry = (state.trash || []).find(function(item){ return item.trashId === trashId; });
+  if(!entry) return;
+  const ok = await askConfirm('Apagar de vez "' + (entry.label || entry.recordId) + '"? Isso não dá para desfazer.');
+  if(!ok) return;
+  state.trash = state.trash.filter(function(item){ return item.trashId !== trashId; });
+  await persist();
+  renderCadastro();
+  applyAccess();
+  renderCadastroTrashBody();
+  toast('Removido da lixeira.', 'success');
 }
 async function deleteCadastroSelected(){
   if(guardCadastro()) return;
   const ids = cadastroSelectedIds.slice();
   if(!ids.length){ toast('Selecione ao menos um cadastro.', 'error'); return; }
-  const ok = await askConfirm('Excluir ' + ids.length + ' cadastro(s) selecionado(s)? Pedidos já gerados continuam com a composição gravada.');
+  const ok = await askConfirm('Mover ' + ids.length + ' cadastro(s) selecionado(s) para a lixeira? Pedidos já gerados continuam com a composição gravada.');
   if(!ok) return;
   let removed = 0;
   const blocked = [];
@@ -4426,15 +4537,14 @@ async function deleteCadastroSelected(){
       blocked.push(recordLabel(record) || record.codigo || id);
       return;
     }
-    removeCadastroRecord(id);
-    removed++;
+    if(moveCadastroToTrash(id)) removed++;
   });
   cadastroSelectedIds = [];
   if(removed){
     await persist();
     renderCadastro();
     applyAccess();
-    toast(removed === 1 ? '1 cadastro excluído.' : removed + ' cadastros excluídos.', 'success');
+    toast(removed === 1 ? '1 item na lixeira.' : removed + ' itens na lixeira.', 'success');
   } else renderCadastroBody();
   updateCadastroSelectBar();
   if(blocked.length) toast('Em uso, não excluídos: ' + blocked.slice(0, 3).join(', ') + (blocked.length > 3 ? '…' : ''), 'error');
@@ -5211,7 +5321,9 @@ window.saveCadastro = saveCadastro;
 window.editCadastro = editCadastro;
 window.deleteCadastro = deleteCadastro;
 window.deleteCadastroSelected = deleteCadastroSelected;
-window.deleteCadastroFromForm = deleteCadastroFromForm;
+window.openCadastroTrash = openCadastroTrash;
+window.restoreCadastroTrash = restoreCadastroTrash;
+window.purgeCadastroTrash = purgeCadastroTrash;
 window.toggleCadastroSelect = toggleCadastroSelect;
 window.toggleCadastroSelectAll = toggleCadastroSelectAll;
 window.resolveConfirm = resolveConfirm;
