@@ -869,6 +869,7 @@ function setTab(id, options){
   closeSidebar();
   renderActiveTab();
   applyAccess();
+  updateCadastroSelectBar();
   if(!options.quiet && meta && location.pathname !== meta.path){
     history[options.replace ? 'replaceState' : 'pushState']({ tab:id }, '', meta.path);
   }
@@ -890,6 +891,27 @@ function openSidebar(){ document.getElementById('sidebar').classList.add('open')
 function closeSidebar(){ document.getElementById('sidebar').classList.remove('open'); document.getElementById('sidebarScrim').classList.remove('open'); }
 function openModal(id){ document.getElementById(id).classList.add('open'); }
 function closeModal(id){ document.getElementById(id).classList.remove('open'); }
+let confirmResolver = null;
+function askConfirm(message, options){
+  options = options || {};
+  return new Promise(function(resolve){
+    if(confirmResolver) confirmResolver(false);
+    confirmResolver = resolve;
+    const title = document.getElementById('confirmTitle');
+    const text = document.getElementById('confirmMessage');
+    const ok = document.getElementById('confirmOk');
+    if(title) title.textContent = options.title || 'Confirmar exclusão';
+    if(text) text.textContent = message || '';
+    if(ok) ok.textContent = options.okLabel || 'Excluir';
+    openModal('modalConfirm');
+  });
+}
+function resolveConfirm(ok){
+  closeModal('modalConfirm');
+  const resolve = confirmResolver;
+  confirmResolver = null;
+  if(resolve) resolve(!!ok);
+}
 
 /* ===================== HELPERS ===================== */
 function employeeName(id){ const e = state.employees.find(x=>x.id===id); return e ? (e.nome+' '+e.sobrenome) : '—'; }
@@ -1331,7 +1353,7 @@ function clearDashFilters(){
 }
 async function zerarAlocacoes(){
   if(deny('monitoramento')) return;
-  if(!confirm('Isso vai remover todos os funcionários alocados de todas as células. Confirmar?')) return;
+  if(!(await askConfirm('Isso vai remover todos os funcionários alocados de todas as células.', { title: 'Limpar alocações', okLabel: 'Confirmar' }))) return;
   state.resources.forEach(r=>r.funcionarios=[]);
   await persist();
   renderDashLists();
@@ -1565,7 +1587,7 @@ async function saveResource(){
 }
 async function removeResource(id){
   if(deny('recursos')) return;
-  if(!confirm('Remover esta célula? Os funcionários alocados serão liberados.')) return;
+  if(!(await askConfirm('Remover esta célula? Os funcionários alocados serão liberados.'))) return;
   state.resources = state.resources.filter(r=>r.id!==id);
   await persist();
   populateSetorSelect();
@@ -2396,7 +2418,7 @@ async function removeProductByCode(codigo){
 }
 async function removeProduct(idx){
   if(deny('engenharia')) return;
-  if(!confirm('Excluir este produto?')) return;
+  if(!(await askConfirm('Excluir este produto?'))) return;
   if(state.products[idx] && state.products[idx].codigo === editingProductCode) editingProductCode = '';
   state.products.splice(idx,1);
   await persist();
@@ -2528,7 +2550,7 @@ async function saveEmployee(){
 }
 async function removeEmployee(id){
   if(deny('funcionarios')) return;
-  if(!confirm('Remover este funcionário?')) return;
+  if(!(await askConfirm('Remover este funcionário?'))) return;
   state.employees = state.employees.filter(e=>e.id!==id);
   state.resources.forEach(r=>{ r.funcionarios = (r.funcionarios || []).filter(eid=>eid!==id); });
   await persist();
@@ -3519,7 +3541,7 @@ async function saveAccessUser(event){
   }
 }
 async function deleteAccessUser(id){
-  if(!confirm('Excluir esta conta?')) return;
+  if(!(await askConfirm('Excluir esta conta?'))) return;
   try{
     await accountApi('/api/users/' + id, { method:'DELETE' });
     toast('Conta excluída.', 'success');
@@ -3912,7 +3934,21 @@ function descriptionField(value, label){
   return `<div class="field"><label>${label || 'Descrição'}</label><input id="cadDescricao" data-edit="engenharia" maxlength="120" value="${escapeHtml(value || '')}"></div>`;
 }
 function saveButtons(){
-  return `<div style="display:flex; gap:8px; margin-top:12px;"><button class="btn btn-primary" data-edit="engenharia" type="button" onclick="saveCadastro()">Salvar</button><button class="btn btn-ghost" type="button" onclick="setCadastroChoice('${cadastroChoice}')">Limpar</button></div>`;
+  return `<div class="cadastro-save-row">
+    <button class="btn btn-primary" data-edit="engenharia" type="button" onclick="saveCadastro()">Salvar</button>
+    <button class="btn btn-ghost" type="button" onclick="setCadastroChoice('${cadastroChoice}')">Limpar</button>
+    <button class="icon-btn danger cadastro-delete" data-edit="engenharia" type="button" onclick="deleteCadastroFromForm()" title="Excluir">${icon('trash',16)}</button>
+  </div>`;
+}
+function updateCadastroSelectBar(){
+  const bar = document.getElementById('cadastroSelectBar');
+  const count = document.getElementById('cadastroSelectCount');
+  if(!bar || !count) return;
+  const selected = activeTab === 'cadastro' ? cadastroSelectedIds.length : 0;
+  bar.hidden = selected === 0;
+  count.textContent = selected === 1 ? '1 selecionado' : selected + ' selecionados';
+  if(activeTab === 'cadastro') document.body.classList.toggle('has-cadastro-select', selected > 0);
+  else document.body.classList.remove('has-cadastro-select');
 }
 function kitEditor(){
   const head = '<div class="kit-head"><span>Id do item</span><span>Descrição</span><span>Qtd.</span><span>Setor</span><span></span></div>';
@@ -3956,8 +3992,8 @@ function listTable(headers, body, ids){
   const selectedCount = cadastroSelectedIds.length;
   const allChecked = cadastroListIds.length && selectedCount === cadastroListIds.length ? 'checked' : '';
   const selectTh = `<th class="cadastro-check-cell"><input class="cadastro-check" type="checkbox" ${allChecked} ${cadastroListIds.length ? '' : 'disabled'} onclick="toggleCadastroSelectAll(this.checked)" title="Selecionar todos" aria-label="Selecionar todos"></th>`;
-  const bar = selectedCount ? `<div class="cadastro-bulk"><span>${selectedCount} selecionado${selectedCount === 1 ? '' : 's'}</span><button class="btn btn-sm btn-danger" data-edit="engenharia" type="button" onclick="deleteCadastroSelected()">Excluir selecionados</button></div>` : '';
-  return `${bar}<div class="table-wrap" style="margin-top:14px;"><table><thead><tr>${selectTh}${headers.map(function(header){ return '<th>' + header + '</th>'; }).join('')}<th style="width:120px;"></th></tr></thead><tbody>${body || '<tr class="empty-row"><td colspan="' + cols + '">Nenhum cadastro ainda.</td></tr>'}</tbody></table></div>`;
+  updateCadastroSelectBar();
+  return `<div class="table-wrap" style="margin-top:14px;"><table><thead><tr>${selectTh}${headers.map(function(header){ return '<th>' + header + '</th>'; }).join('')}<th style="width:120px;"></th></tr></thead><tbody>${body || '<tr class="empty-row"><td colspan="' + cols + '">Nenhum cadastro ainda.</td></tr>'}</tbody></table></div>`;
 }
 function renderCadastroBody(){
   const box = document.getElementById('cadastroBody');
@@ -4354,18 +4390,33 @@ async function deleteCadastro(id){
     toast('Este setor está em uso. Tire o vínculo antes de excluir.', 'error');
     return;
   }
-  if(!confirm('Excluir ' + label + '? Pedidos já gerados continuam com a composição gravada.')) return;
+  const ok = await askConfirm('Excluir "' + label + '"? Pedidos já gerados continuam com a composição gravada.');
+  if(!ok) return;
   removeCadastroRecord(id);
   await persist();
   renderCadastro();
   applyAccess();
+  updateCadastroSelectBar();
   toast('Cadastro excluído.', 'success');
+}
+async function deleteCadastroFromForm(){
+  if(guardCadastro()) return;
+  if(cadastroEditId){
+    await deleteCadastro(cadastroEditId);
+    return;
+  }
+  if(cadastroSelectedIds.length){
+    await deleteCadastroSelected();
+    return;
+  }
+  toast('Abra um cadastro para editar ou marque linhas para excluir.', 'error');
 }
 async function deleteCadastroSelected(){
   if(guardCadastro()) return;
   const ids = cadastroSelectedIds.slice();
   if(!ids.length){ toast('Selecione ao menos um cadastro.', 'error'); return; }
-  if(!confirm('Excluir ' + ids.length + ' cadastro(s) selecionado(s)? Pedidos já gerados continuam com a composição gravada.')) return;
+  const ok = await askConfirm('Excluir ' + ids.length + ' cadastro(s) selecionado(s)? Pedidos já gerados continuam com a composição gravada.');
+  if(!ok) return;
   let removed = 0;
   const blocked = [];
   ids.forEach(function(id){
@@ -4385,6 +4436,7 @@ async function deleteCadastroSelected(){
     applyAccess();
     toast(removed === 1 ? '1 cadastro excluído.' : removed + ' cadastros excluídos.', 'success');
   } else renderCadastroBody();
+  updateCadastroSelectBar();
   if(blocked.length) toast('Em uso, não excluídos: ' + blocked.slice(0, 3).join(', ') + (blocked.length > 3 ? '…' : ''), 'error');
 }
 
@@ -5159,8 +5211,10 @@ window.saveCadastro = saveCadastro;
 window.editCadastro = editCadastro;
 window.deleteCadastro = deleteCadastro;
 window.deleteCadastroSelected = deleteCadastroSelected;
+window.deleteCadastroFromForm = deleteCadastroFromForm;
 window.toggleCadastroSelect = toggleCadastroSelect;
 window.toggleCadastroSelectAll = toggleCadastroSelectAll;
+window.resolveConfirm = resolveConfirm;
 window.addKitRow = addKitRow;
 window.removeKitRow = removeKitRow;
 window.addRouteRow = addRouteRow;

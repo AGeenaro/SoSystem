@@ -303,6 +303,23 @@
     <input id="csvImportInput" type="file" accept=".csv,text/csv" hidden onchange="importCadastroCsv(this)">
   </div>
 </div>
+<div class="modal-overlay" id="modalConfirm">
+  <div class="modal modal-confirm">
+    <div class="modal-header">
+      <div class="modal-title" id="confirmTitle">Confirmar</div>
+      <button class="modal-close" type="button" onclick="resolveConfirm(false)">×</button>
+    </div>
+    <div class="section-sub" id="confirmMessage"></div>
+    <div class="confirm-actions">
+      <button class="btn btn-ghost" type="button" onclick="resolveConfirm(false)">Cancelar</button>
+      <button class="btn btn-danger" type="button" id="confirmOk" onclick="resolveConfirm(true)">Excluir</button>
+    </div>
+  </div>
+</div>
+<div id="cadastroSelectBar" class="cadastro-select-bar" hidden>
+  <span id="cadastroSelectCount">0 selecionados</span>
+  <button class="btn btn-sm btn-danger" data-edit="engenharia" type="button" onclick="deleteCadastroSelected()">Excluir selecionados</button>
+</div>
 <canvas id="hiddenCanvas" style="display:none;"></canvas>
 <div id="printArea"></div>
 </div>
@@ -311,7 +328,7 @@
 <script src="js/app.js"></script>
 <script>
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js?v=29').catch(function () {});
+  navigator.serviceWorker.register('sw.js?v=30').catch(function () {});
 }
 </script>
 </body>
