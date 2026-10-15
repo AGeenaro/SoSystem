@@ -83,11 +83,6 @@
         <div class="topbar-title"><span class="eyebrow" id="topEyebrow">SOSystem</span><span id="topTitle">Dashboard</span></div>
       </div>
       <div class="topbar-right">
-        <div id="csvActions" class="csv-actions" hidden>
-          <button class="btn btn-sm" type="button" onclick="exportCadastroModelo()">Modelo CSV</button>
-          <button class="btn btn-sm btn-primary" type="button" id="csvImportButton" onclick="document.getElementById('csvImportInput').click()">Importar CSV</button>
-          <input id="csvImportInput" type="file" accept=".csv,text/csv" hidden onchange="importCadastroCsv(this)">
-        </div>
         <div class="notif-wrap">
           <button id="notifButton" class="icon-btn notif-btn" type="button" onclick="toggleNotifications()" aria-label="Notificações"></button>
           <div id="notifPanel" class="notif-panel" hidden></div>
@@ -288,6 +283,18 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="modalCsv">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title" id="csvModalTitle">Importar CSV</div>
+      <button class="modal-close" type="button" onclick="closeModal('modalCsv')">×</button>
+    </div>
+    <div class="section-sub" id="csvModalHint">O modelo segue o cadastro que está aberto.</div>
+    <button class="btn btn-ghost btn-block" type="button" onclick="exportCadastroModelo()">Baixar modelo padrão</button>
+    <button class="btn btn-primary btn-block" type="button" style="margin-top:8px;" onclick="document.getElementById('csvImportInput').click()">Selecionar arquivo</button>
+    <input id="csvImportInput" type="file" accept=".csv,text/csv" hidden onchange="importCadastroCsv(this)">
+  </div>
+</div>
 <canvas id="hiddenCanvas" style="display:none;"></canvas>
 <div id="printArea"></div>
 </div>
@@ -296,7 +303,7 @@
 <script src="js/app.js"></script>
 <script>
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js?v=26').catch(function () {});
+  navigator.serviceWorker.register('sw.js?v=27').catch(function () {});
 }
 </script>
 </body>

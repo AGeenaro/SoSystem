@@ -1947,6 +1947,7 @@ function renderEngenharia(){
 function renderCadastro(){
   const el = document.getElementById('panel-cadastro');
   if(!el) return;
+  ['setores','operacoes','groups','families','products','employees','resources','equipments'].forEach(function(key){ if(!Array.isArray(state[key])) state[key] = []; });
   const options = [
     ['setor', 'Setor', 'Lugar da fábrica. Ex.: Chaparia, Usinagem.'],
     ['grupo', 'Grupo', 'Categoria acima da família. Ex.: Separação.'],
@@ -1958,8 +1959,13 @@ function renderCadastro(){
     ['equipamento', 'Equipamento', 'Um modelo da família, com as peças copiadas.']
   ];
   el.innerHTML = `
-    <div class="section-title">${icon('plus',19)} Cadastro</div>
-    <div class="section-sub">Ordem sugerida: setor, operação e máquina; depois grupo, família e item; por último o equipamento, que herda as peças da família.</div>
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
+      <div>
+        <div class="section-title">${icon('plus',19)} Cadastro</div>
+        <div class="section-sub">Ordem sugerida: setor, operação e máquina; depois grupo, família e item; por último o equipamento, que herda as peças da família.</div>
+      </div>
+      <button class="btn btn-primary" type="button" style="flex-shrink:0; white-space:nowrap;" onclick="openCsvModal()">Importar CSV</button>
+    </div>
     <div class="cadastro-choices">${options.map(function(choice){
       const active = cadastroChoice === choice[0] ? ' active' : '';
       return `<button type="button" class="settings-choice${active}" onclick="setCadastroChoice('${choice[0]}')"><b>${choice[1]}</b><span>${choice[2]}</span></button>`;
@@ -4561,43 +4567,47 @@ async function updateSupportTicket(id, status){
   }catch(error){ toast(error.message, 'error'); }
 }
 
-const CSV_COLUMNS = ['modulo','codigo','nome','sobrenome','descricao','funcao','turno','vinculo','grupo','familia','classificacao','tempo_min','pintura','montagem','peca','quantidade','restricao','setor','exemplo'];
-const CSV_EXAMPLES = [
-  ['setor','1','Chaparia','','','','','','','','','','','','','','','','sim'],
-  ['operacao','','Cortar','','','','','','','','','','','','','','','','sim'],
-  ['grupo','1','Separação','','','','','','','','','','','','','','','','sim'],
-  ['familia','','Decanter','','','','','','Separação','','','','','','','','','','sim'],
-  ['item','30.2000.0001','Tambor','','','','','','Separação','Decanter','PI','1','nao','nao','','','','Chaparia','sim'],
-  ['funcionario','0001','Ana','Souza','','Operadora','1º Turno','Efetivo','','','','','','','','','','','sim'],
-  ['maquina','','','','Torno','','','','','','','','','','','','','Chaparia','sim'],
-  ['equipamento','','Decanter 220','','','','','','','Decanter','','','','','30.2000.0001','2','','','sim']
-];
-function updateCsvActions(){
-  const box = document.getElementById('csvActions');
-  if(!box) return;
-  const visible = !!sessionUser && (canView('engenharia') || canView('funcionarios') || canView('recursos'));
-  box.hidden = !visible;
-  const importButton = document.getElementById('csvImportButton');
-  if(importButton) importButton.hidden = !(canEdit('engenharia') || canEdit('funcionarios') || canEdit('recursos'));
+const CSV_MODELS = {
+  setor: { file: 'setor', label: 'Setor', columns: ['codigo','descricao','exemplo'], rows: [['1','Chaparia','sim'], ['2','Usinagem','sim']] },
+  grupo: { file: 'grupo', label: 'Grupo', columns: ['codigo','descricao','exemplo'], rows: [['1','Separação','sim']] },
+  familia: { file: 'familia', label: 'Família', columns: ['codigo','descricao','grupo','peca','quantidade','setor','exemplo'], rows: [['','Decanter','Separação','','','','sim']] },
+  item: { file: 'item', label: 'Item', columns: ['codigo','codigo_erp','descricao','material','grupo','familia','setor','classificacao','tempo_min','exemplo'], rows: [['','30.2000.0001','Tambor','aço inox','Separação','Decanter','Chaparia','PI','1','sim']] },
+  operacao: { file: 'operacao', label: 'Operação', columns: ['codigo','descricao','exemplo'], rows: [['','Cortar','sim'], ['','Dobrar','sim'], ['','Soldar','sim']] },
+  operador: { file: 'operador', label: 'Operador', columns: ['codigo','descricao','turno','exemplo'], rows: [['','Ana Souza','1º Turno','sim']] },
+  maquina: { file: 'maquina', label: 'Máquina', columns: ['codigo','descricao','setor','exemplo'], rows: [['','Torno','Chaparia','sim']] },
+  equipamento: { file: 'equipamento', label: 'Equipamento', columns: ['codigo','descricao','familia','peca','quantidade','setor','exemplo'], rows: [['','Decanter 220','Decanter','30.2000.0001','2','Chaparia','sim']] }
+};
+function cadastroCsvModel(){
+  return CSV_MODELS[cadastroChoice] || CSV_MODELS.setor;
 }
+function openCsvModal(){
+  const model = cadastroCsvModel();
+  const title = document.getElementById('csvModalTitle');
+  const hint = document.getElementById('csvModalHint');
+  if(title) title.textContent = 'Importar CSV — ' + model.label;
+  if(hint) hint.textContent = 'Este modelo é só de ' + model.label + '. Apague "sim" da coluna exemplo nas linhas que devem entrar. Colunas: ' + model.columns.filter(function(name){ return name !== 'exemplo'; }).join(', ') + '.';
+  openModal('modalCsv');
+}
+function updateCsvActions(){}
 function csvEscape(value){
   const text = value == null ? '' : String(value);
   if(/[;"\n]/.test(text)) return '"' + text.replace(/"/g, '""') + '"';
   return text;
 }
 function exportCadastroModelo(){
-  const lines = [CSV_COLUMNS.join(';')].concat(CSV_EXAMPLES.map(function(row){
+  const model = cadastroCsvModel();
+  const lines = [model.columns.join(';')].concat(model.rows.map(function(row){
     return row.map(csvEscape).join(';');
   }));
   const blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
-  link.download = 'sosystem-cadastro.csv';
+  link.download = 'sosystem-' + model.file + '.csv';
   document.body.appendChild(link);
   link.click();
   link.remove();
   setTimeout(function(){ URL.revokeObjectURL(link.href); }, 1000);
-  toast('Modelo baixado. Apague "sim" da coluna exemplo nas linhas que devem entrar.', 'success');
+  toast('Modelo de ' + model.label + ' baixado.', 'success');
 }
 function parseCsv(text){
   const source = String(text || '').replace(/^\uFEFF/, '');
@@ -4642,6 +4652,11 @@ function csvModule(value){
     operador:'funcionario', operadores:'funcionario'
   };
   return aliases[key] || '';
+}
+function csvModuleForChoice(choice){
+  if(choice === 'operador') return 'funcionario';
+  if(choice === 'maquina') return 'recurso';
+  return choice || '';
 }
 function csvYes(value){
   const key = String(value || '').trim().toLowerCase();
@@ -4700,6 +4715,8 @@ async function importCadastroCsv(input){
   let rows = [];
   try{ rows = parseCsv(await file.text()); }
   catch(error){ toast('Não foi possível ler o CSV.', 'error'); return; }
+  const fallbackModule = csvModuleForChoice(cadastroChoice);
+  rows.forEach(function(row){ if(!row.modulo && fallbackModule) row.modulo = fallbackModule; });
   const order = { setor: 1, operacao: 2, grupo: 3, familia: 4, item: 5, funcionario: 6, recurso: 7, equipamento: 8 };
   rows.sort(function(a, b){ return (order[csvModule(a.modulo)] || 9) - (order[csvModule(b.modulo)] || 9); });
   const counts = { setor: 0, operacao: 0, grupo: 0, familia: 0, item: 0, funcionario: 0, recurso: 0, equipamento: 0 };
@@ -4747,9 +4764,23 @@ async function importCadastroCsv(input){
       if(!nome){ errors.push('Família sem descrição.'); return; }
       const group = ensureGroup(row.grupo, errors);
       if(row.grupo && !group) return;
-      if(!findFamily(nome, group && group.id)){
-        state.families.push({ id: uid(), codigo: (row.codigo || suggestAlpha(state.families)).toUpperCase(), descricao: nome, nome: nome, grupoId: group ? group.id : '', itens: [] });
+      let family = findFamily(nome, group && group.id);
+      const created = !family;
+      if(!family){
+        family = { id: uid(), codigo: (row.codigo || suggestAlpha(state.families)).toUpperCase(), descricao: nome, nome: nome, grupoId: group ? group.id : '', itens: [] };
+        state.families.push(family);
         counts.familia++;
+      }
+      if(row.peca){
+        const product = productByCode(row.peca);
+        if(!product){ errors.push('Peça não cadastrada na família ' + nome + ': ' + row.peca + '.'); return; }
+        const setor = row.setor ? ensureSetor(row.setor, errors) : null;
+        const part = { codigo: product.codigo, quantidade: Number(row.quantidade) || 1, setorId: setor ? setor.id : (product.setorId || '') };
+        family.itens = family.itens || [];
+        const currentPart = family.itens.find(function(item){ return item.codigo === part.codigo; });
+        if(currentPart) currentPart.quantidade = part.quantidade;
+        else family.itens.push(part);
+        if(!created) counts.familia++;
       }
       return;
     }
@@ -4766,9 +4797,10 @@ async function importCadastroCsv(input){
       }
       const setor = ensureSetor(row.setor, errors);
       const classificacao = String(row.classificacao || 'PI').toUpperCase() === 'PF' ? 'PF' : 'PI';
+      const erpField = String(row.codigo_erp || '').trim();
       const rawCode = String(row.codigo || '').trim();
-      const codigoErp = rawCode.indexOf('.') >= 0 ? rawCode : genErpCode(classificacao);
-      const codigo = rawCode.indexOf('.') >= 0 ? suggestAlpha(state.products) : (rawCode || suggestAlpha(state.products)).toUpperCase();
+      const codigoErp = erpField || (rawCode.indexOf('.') >= 0 ? rawCode : genErpCode(classificacao));
+      const codigo = (rawCode && rawCode.indexOf('.') < 0 ? rawCode : suggestAlpha(state.products)).toUpperCase();
       const existing = state.products.find(function(product){
         return String(product.codigo).toLowerCase() === codigo.toLowerCase() || String(product.codigoErp || '').toLowerCase() === codigoErp.toLowerCase();
       });
@@ -4782,7 +4814,7 @@ async function importCadastroCsv(input){
         familiaId: family ? family.id : '',
         grupoId: group ? group.id : '',
         setorId: setor ? setor.id : '',
-        material: '',
+        material: row.material || (existing ? existing.material : '') || '',
         maquinas: existing ? (existing.maquinas || []) : [],
         rota: existing ? (existing.rota || []) : [],
         pintura: flags.pintura,
@@ -4799,11 +4831,19 @@ async function importCadastroCsv(input){
     }
     if(module === 'funcionario'){
       if(!canEdit('funcionarios')){ errors.push('Sem permissão para funcionários.'); return; }
-      if(!row.nome || !row.sobrenome){ errors.push('Funcionário sem nome e sobrenome.'); return; }
-      const current = state.employees.find(function(employee){ return row.codigo && (String(employee.numero) === row.codigo || String(employee.numero) === formatEmployeeNumber(parsePositiveInt(row.codigo))); });
-      const assigned = assignEmployeeNumber(row.codigo, current ? current.id : '');
+      const nome = row.nome || row.descricao;
+      const sobrenome = row.sobrenome || '';
+      if(!nome){ errors.push('Operador sem descrição.'); return; }
+      const rawCode = String(row.codigo || '').trim();
+      const numericCode = /^[0-9]+$/.test(rawCode);
+      const current = state.employees.find(function(employee){
+        if(rawCode && !numericCode && String(employee.codigo || '').toUpperCase() === rawCode.toUpperCase()) return true;
+        if(numericCode && String(employee.numero) === formatEmployeeNumber(parsePositiveInt(rawCode))) return true;
+        return false;
+      });
+      const assigned = assignEmployeeNumber(numericCode ? rawCode : '', current ? current.id : '');
       if(assigned.error){ errors.push(assigned.error); return; }
-      const data = { codigo: (current && current.codigo) || suggestAlpha(state.employees), numero: assigned.numero, nome: row.nome, sobrenome: row.sobrenome, funcao: row.funcao || 'Operador', turno: normalizeTurno(row.turno), vinculo: /terceir/i.test(row.vinculo) ? 'Terceiro' : 'Efetivo', ferias: current ? current.ferias : null };
+      const data = { codigo: (!numericCode && rawCode ? rawCode.toUpperCase() : ((current && current.codigo) || suggestAlpha(state.employees))), numero: assigned.numero, nome: nome, sobrenome: sobrenome, funcao: row.funcao || (current && current.funcao) || 'Operador', turno: normalizeTurno(row.turno || (current && current.turno)), vinculo: /terceir/i.test(row.vinculo || '') ? 'Terceiro' : ((current && current.vinculo) || 'Efetivo'), ferias: current ? current.ferias : null };
       if(current) Object.assign(current, data);
       else state.employees.push(Object.assign({ id: uid() }, data));
       counts.funcionario++;
@@ -4811,11 +4851,14 @@ async function importCadastroCsv(input){
     }
     if(module === 'recurso'){
       if(!canEdit('recursos')){ errors.push('Sem permissão para recursos.'); return; }
-      const codigo = (row.codigo || suggestAlpha(state.resources)).toUpperCase();
-      const descricao = row.descricao || row.nome || codigo;
+      const descricao = row.descricao || row.nome || row.codigo;
+      const current = state.resources.find(function(resource){
+        const code = String(resource.codigo || '').toLowerCase();
+        return (row.codigo && code === String(row.codigo).trim().toLowerCase()) || recordLabel(resource).toLowerCase() === String(descricao || '').toLowerCase();
+      });
+      const codigo = (row.codigo || (current && current.codigo) || suggestAlpha(state.resources)).toUpperCase();
       const setor = ensureSetor(row.setor || row.grupo, errors);
-      if(!setor){ errors.push('Máquina sem setor: ' + codigo + '.'); return; }
-      const current = state.resources.find(function(resource){ return String(resource.codigo || resource.nome).toLowerCase() === codigo.toLowerCase(); });
+      if(!setor){ errors.push('Máquina sem setor: ' + (descricao || codigo) + '.'); return; }
       const payload = { codigo: codigo, nome: codigo, descricao: descricao, setorId: setor.id, setor: recordLabel(setor), restricao: row.restricao || (current && current.restricao) || '', grupos: [], operacoes: current ? (current.operacoes || []) : [], funcionarios: current ? (current.funcionarios || []) : [], status: current ? (current.status || 'Parada') : 'Parada' };
       if(current) Object.assign(current, payload);
       else state.resources.push(Object.assign({ id: uid() }, payload));
@@ -4827,13 +4870,15 @@ async function importCadastroCsv(input){
   const byEquipment = {};
   equipmentRows.forEach(function(row){
     if(!canEdit('engenharia')){ errors.push('Sem permissão para equipamentos.'); return; }
-    const nome = row.nome || row.codigo;
-    if(!nome){ errors.push('Equipamento sem nome.'); return; }
-    if(!byEquipment[nome]) byEquipment[nome] = { familia: row.familia || '', itens: [] };
+    const nome = row.descricao || row.nome || row.codigo;
+    if(!nome){ errors.push('Equipamento sem descrição.'); return; }
+    if(!byEquipment[nome]) byEquipment[nome] = { familia: row.familia || '', codigo: '', itens: [] };
     if(row.familia) byEquipment[nome].familia = row.familia;
+    if(row.codigo && row.codigo !== nome) byEquipment[nome].codigo = String(row.codigo).toUpperCase();
     if(row.peca){
       const product = productByCode(row.peca);
-      byEquipment[nome].itens.push({ codigo: product ? product.codigo : row.peca, quantidade: Number(row.quantidade) || 1, setorId: product ? (product.setorId || '') : '' });
+      const setor = row.setor ? state.setores.find(function(item){ return recordLabel(item).toLowerCase() === String(row.setor).trim().toLowerCase(); }) : null;
+      byEquipment[nome].itens.push({ codigo: product ? product.codigo : row.peca, quantidade: Number(row.quantidade) || 1, setorId: setor ? setor.id : (product ? (product.setorId || '') : '') });
     }
   });
   Object.keys(byEquipment).forEach(function(nome){
@@ -4842,11 +4887,13 @@ async function importCadastroCsv(input){
       errors.push('Peça não cadastrada no equipamento ' + nome + ': ' + part.codigo + '.');
       return false;
     });
-    if(!parts.length) return;
-    const current = state.equipments.find(function(equipment){ return recordLabel(equipment).toLowerCase() === nome.toLowerCase() || String(equipment.codigo || '').toLowerCase() === nome.toLowerCase(); });
+    const rawCount = byEquipment[nome].itens.length;
+    if(!parts.length && rawCount) return;
+    const current = state.equipments.find(function(equipment){ return recordLabel(equipment).toLowerCase() === nome.toLowerCase() || String(equipment.codigo || '').toLowerCase() === nome.toLowerCase() || (byEquipment[nome].codigo && String(equipment.codigo || '').toUpperCase() === byEquipment[nome].codigo); });
     const family = findFamily(byEquipment[nome].familia || '', '');
+    const codigo = byEquipment[nome].codigo || (current && current.codigo) || suggestAlpha(state.equipments);
     if(current){
-      if(!current.codigo) current.codigo = suggestAlpha(state.equipments);
+      if(!current.codigo) current.codigo = codigo;
       current.nome = current.descricao || nome;
       current.descricao = current.descricao || nome;
       parts.forEach(function(part){
@@ -4854,17 +4901,17 @@ async function importCadastroCsv(input){
         if(existing) existing.quantidade = part.quantidade;
         else current.itens.push(part);
       });
-    } else state.equipments.push({ id: uid(), codigo: suggestAlpha(state.equipments), nome: nome, descricao: nome, familiaId: family ? family.id : '', itens: parts });
+    } else state.equipments.push({ id: uid(), codigo: codigo, nome: nome, descricao: nome, familiaId: family ? family.id : '', itens: parts });
     counts.equipamento++;
   });
   const applied = counts.setor + counts.operacao + counts.grupo + counts.familia + counts.item + counts.funcionario + counts.recurso + counts.equipamento;
   if(!applied && !errors.length){ toast('Nenhuma linha nova. As linhas de exemplo ficam de fora.', 'error'); return; }
   if(applied){
+    closeModal('modalCsv');
     await persist();
     renderActiveTab();
     applyAccess();
   }
-  const summary = ['setores ' + counts.setor, 'operações ' + counts.operacao, 'grupos ' + counts.grupo, 'famílias ' + counts.familia, 'itens ' + counts.item, 'funcionários ' + counts.funcionario, 'máquinas ' + counts.recurso, 'equipamentos ' + counts.equipamento].join(', ');
   toast('Cadastros aplicados: ' + summary + (skipped ? '. Exemplos ignorados: ' + skipped + '.' : ''), errors.length ? 'error' : 'success');
   if(errors.length) toast(errors.slice(0, 3).join(' '), 'error');
 }
@@ -4982,6 +5029,7 @@ window.createSupportTicket = createSupportTicket;
 window.updateSupportTicket = updateSupportTicket;
 window.exportCadastroModelo = exportCadastroModelo;
 window.importCadastroCsv = importCadastroCsv;
+window.openCsvModal = openCsvModal;
 
 init();
 })();
