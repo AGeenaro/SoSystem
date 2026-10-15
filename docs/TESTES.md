@@ -20,4 +20,4 @@ npm run build
 
 O banco desses testes é memória. Eles não gravam no Supabase e não exigem chave.
 
-Para ver o chão de fábrica no navegador, sirva a pasta `web` e percorra Monitoramento, Ordens, Apontamento, Recursos, Cadastro, Engenharia, Funcionários, Acompanhamento, Suporte e Configurações. A página `conta.html` só completa o fluxo de ponta a ponta com a API no ar e a tabela criada no Supabase.
+Para ver o chão de fábrica no navegador, sirva a pasta `web` e percorra Monitoramento, Ordens, Apontamento, Recursos, Cadastro (itens em Cadastro → Item), Funcionários, Acompanhamento, Suporte e Configurações. A página `conta.html` só completa o fluxo de ponta a ponta com a API no ar e a tabela criada no Supabase.

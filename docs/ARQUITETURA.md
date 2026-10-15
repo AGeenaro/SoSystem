@@ -6,7 +6,7 @@ O Prodfy deixou de ser um único arquivo HTML. Python não faz parte desta entre
 
 - `index.html` — estrutura das telas e modais
 - `css/app.css` — visual
-- `js/app.js` — monitoramento, ordens, apontamento, recursos, cadastro, engenharia, funcionários, acompanhamento, suporte e configurações
+- `js/app.js` — monitoramento, ordens, apontamento, recursos, cadastro (inclui itens), funcionários, acompanhamento, suporte e configurações
 - `js/config.js` — URL da API
 - `conta.html` e `js/conta.js` — cadastro, login e CRUD de usuários contra a API
 

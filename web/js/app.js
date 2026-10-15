@@ -574,7 +574,6 @@ function refreshAfterSync(){
   if(activeTab==='apontamento' && typeof renderApontamento === 'function') renderApontamento();
   if(activeTab==='recursos' && typeof renderRecursos === 'function') renderRecursos();
   if(activeTab==='cadastro' && typeof renderCadastro === 'function') renderCadastro();
-  if(activeTab==='engenharia' && typeof renderEngenharia === 'function') renderEngenharia();
   if(activeTab==='funcionarios' && typeof renderFuncionarios === 'function') renderFuncionarios();
   if(activeTab==='acompanhamento' && typeof renderAcompanhamento === 'function') renderAcompanhamento();
 }
@@ -707,7 +706,6 @@ const NAV = [
   {id:'apontamento', module:'apontamento', path:'/apontamento', label:'Apontamento', icn:'clock'},
   {id:'recursos', module:'recursos', path:'/recursos', label:'Recursos', icn:'wrench'},
   {id:'cadastro', module:'engenharia', path:'/cadastro', label:'Cadastro', icn:'plus'},
-  {id:'engenharia', module:'engenharia', path:'/engenharia', label:'Engenharia de Produto', icn:'gear'},
   {id:'funcionarios', module:'funcionarios', path:'/funcionarios', label:'Funcionários', icn:'users'},
   {id:'acompanhamento', module:'acompanhamento', path:'/acompanhamento', label:'Acompanhamento', icn:'search'},
   {id:'suporte', module:'suporte', path:'/suporte', label:'Suporte', icn:'message'},
@@ -779,6 +777,10 @@ function firstVisibleTab(){
 function tabFromPath(pathname){
   const path = (pathname || '/').replace(/\/index\.html$/, '').replace(/\/$/, '') || '/';
   if(path === '/' || path === '/login') return null;
+  if(path === '/engenharia'){
+    cadastroChoice = 'item';
+    return 'cadastro';
+  }
   const item = NAV.find(function(entry){ return entry.path === path; });
   return item ? item.id : null;
 }
@@ -860,6 +862,10 @@ async function refreshCompanyFoot(){
 }
 function setTab(id, options){
   options = options || {};
+  if(id === 'engenharia'){
+    id = 'cadastro';
+    cadastroChoice = 'item';
+  }
   if(!canView(moduleOf(id))) id = firstVisibleTab();
   activeTab = id;
   renderNav();
@@ -884,7 +890,6 @@ function renderActiveTab(){
   else if(activeTab==='apontamento') renderApontamento();
   else if(activeTab==='recursos') renderRecursos();
   else if(activeTab==='cadastro') renderCadastro();
-  else if(activeTab==='engenharia') renderEngenharia();
   else if(activeTab==='funcionarios') renderFuncionarios();
   else if(activeTab==='acompanhamento') renderAcompanhamento();
   else if(activeTab==='suporte') renderSuporte();
@@ -1235,7 +1240,6 @@ function renderShell(){
     <div class="tab-panel" id="panel-apontamento"></div>
     <div class="tab-panel" id="panel-recursos"></div>
     <div class="tab-panel" id="panel-cadastro"></div>
-    <div class="tab-panel" id="panel-engenharia"></div>
     <div class="tab-panel" id="panel-funcionarios"></div>
     <div class="tab-panel" id="panel-acompanhamento"></div>
     <div class="tab-panel" id="panel-suporte"></div>
@@ -2062,22 +2066,7 @@ function printOrder(orderId){
 /* ===================== ENGENHARIA DE PRODUTO ===================== */
 let engSearch = '';
 function renderEngenharia(){
-  const el = document.getElementById('panel-engenharia');
-  el.innerHTML = `
-    <div class="section-title">${icon('gear',19)} Engenharia de Produto</div>
-    <div class="section-sub">Consulta dos itens. O código interno é automático e editável; o ERP fica separado: <b>30.2000.XXXX</b> para PI e <b>30.3000.XXXX</b> para PF. Incluir e alterar é em Cadastro, na opção Item.</div>
-    <div class="toolbar">
-      <div class="search-box"><span class="search-ic">${icon('search',15)}</span><input placeholder="Buscar código ou descrição..." oninput="engSearch=this.value; renderEngenhariaTable();"></div>
-      <button class="btn btn-primary" data-edit="engenharia" onclick="openCadastroItem()">${icon('plus',14)} Novo item</button>
-    </div>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>Código</th><th>ERP</th><th>Descrição</th><th>Família</th><th>Setor</th><th style="width:90px;"></th></tr></thead>
-        <tbody id="engTbody"></tbody>
-      </table>
-    </div>
-  `;
-  renderEngenhariaTable();
+  openCadastroItem();
 }
 function renderCadastro(){
   const el = document.getElementById('panel-cadastro');
@@ -2279,12 +2268,7 @@ function renderProductList(){
   applyAccess();
 }
 function editProduct(codigo){
-  if(deny('engenharia')) return;
-  editingProductCode = codigo;
-  renderProductCatalog();
-  applyAccess();
-  const name = document.getElementById('itemDescricao');
-  if(name) name.focus();
+  openCadastroItem(codigo);
 }
 function cancelItemEdit(){
   editingProductCode = '';
@@ -4074,13 +4058,21 @@ function renderCadastroBody(){
     const material = fieldValue('cadMaterial', record ? (record.material || '') : '');
     const tempo = fieldValue('cadTempo', record ? (record.tempoFabricacaoMin || 1) : 1);
     const machines = checkedDraft('maquinas', record ? (record.maquinas || []) : []);
-    const ids = state.products.map(function(product){ return product.codigo; });
-    const rows = state.products.map(function(product){
+    const query = String(engSearch || '').trim().toLowerCase();
+    const filtered = state.products.filter(function(product){
+      if(!query) return true;
+      const family = familyById(product.familiaId);
+      const setor = setorById(product.setorId);
+      const hay = [product.codigo, product.codigoErp, product.descricao, product.material, family && recordLabel(family), setor && recordLabel(setor)].join(' ').toLowerCase();
+      return hay.indexOf(query) >= 0;
+    });
+    const ids = filtered.map(function(product){ return product.codigo; });
+    const rows = filtered.map(function(product){
       const family = familyById(product.familiaId);
       const setor = setorById(product.setorId);
       return `<tr>${rowSelect(product.codigo)}<td class="mono">${escapeHtml(product.codigo || '')}</td><td class="mono">${escapeHtml(product.codigoErp || '')}</td><td>${escapeHtml(product.descricao || '')}</td><td>${escapeHtml(family ? recordLabel(family) : '—')}</td><td>${escapeHtml(setor ? recordLabel(setor) : '—')}</td><td>${rowActions(product.codigo)}</td></tr>`;
     }).join('');
-    box.innerHTML = `<div class="section-title" style="font-size:16px;">Item</div><div class="section-sub">Peça unitária, como tambor ou rosca. O tamanho não entra aqui. O código interno é automático e editável; o ERP fica no outro campo.</div>
+    box.innerHTML = `<div class="section-title" style="font-size:16px;">Item</div><div class="section-sub">Peça unitária, consulta e cadastro no mesmo lugar. Código interno automático e editável; ERP separado: <b>30.2000.XXXX</b> (PI) e <b>30.3000.XXXX</b> (PF).</div>
       <div class="grid grid-2">${codeField(codigo)}
         <div class="field"><label>Código ERP</label><input id="cadErp" data-edit="engenharia" maxlength="20" value="${escapeHtml(erp)}"></div>
         ${descriptionField(descricao)}
@@ -4095,7 +4087,12 @@ function renderCadastroBody(){
       ${checkGrid('cadMaquinas', state.resources, machines, function(resource){
         return { code: resource.codigo || resource.nome || '', title: resource.descricao || resource.codigo || resource.nome || '' };
       })}
-      <div class="section-sub" style="margin-top:8px;">Rota ordenada</div>${routeEditor()}${saveButtons()}${listTable(['Código','ERP','Descrição','Família','Setor'], rows, ids)}`;
+      <div class="section-sub" style="margin-top:8px;">Rota ordenada</div>${routeEditor()}${saveButtons()}
+      <div class="toolbar" style="margin-top:16px;">
+        <div class="search-box"><span class="search-ic">${icon('search',15)}</span><input placeholder="Buscar código, ERP ou descrição..." value="${escapeHtml(engSearch || '')}" oninput="engSearch=this.value; renderCadastroBody(); applyAccess();"></div>
+        <span class="section-sub" style="margin:0;">${filtered.length} de ${state.products.length} itens</span>
+      </div>
+      ${listTable(['Código','ERP','Descrição','Família','Setor'], rows, ids)}`;
     return;
   }
   if(cadastroChoice === 'operacao'){
@@ -4381,7 +4378,6 @@ async function saveCadastro(){
   resetCadastroForm();
   await persist();
   renderCadastro();
-  if(activeTab === 'engenharia') renderEngenhariaTable();
   applyAccess();
   toast('Cadastro salvo.', 'success');
 }

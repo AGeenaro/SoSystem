@@ -2,7 +2,7 @@ export const openApiSpec = {
   openapi: "3.0.3",
   info: {
     title: "SoSystem API",
-    version: "2026.10.25",
+    version: "2026.10.26",
     description: "API REST com usuários e produção de fábrica. Autenticação JWT, validação, tratamento global de erros e rate limiting. O banco SQL fica no Supabase."
   },
   servers: [
