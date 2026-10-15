@@ -995,18 +995,60 @@ function orderItems(order){
   if(order.itens && order.itens.length) return order.itens;
   return [{ id: order.id + '-item', descricao: order.descricao || order.codigo, grupoId: order.grupoId || '', familiaId: order.familiaId || '', quantidade: Number(order.quantidadePlanejada)||0, produzida: orderProducedQty(order.id) }];
 }
+function orderPriorityValue(order){
+  const value = Number(order && order.prioridade);
+  return value === 1 || value === 3 ? value : 2;
+}
+function orderPriorityLabel(order){
+  const value = orderPriorityValue(order);
+  return value === 1 ? 'Alta' : (value === 3 ? 'Baixa' : 'Normal');
+}
+function orderPriorityBadge(order){
+  const value = orderPriorityValue(order);
+  const tone = value === 1 ? 'badge-red' : (value === 3 ? 'badge-gray' : 'badge-amber');
+  return '<span class="badge ' + tone + '">' + escapeHtml(orderPriorityLabel(order)) + '</span>';
+}
+function itemRouteProgress(item, order){
+  const qty = itemPlanned(item);
+  if(qty <= 0) return { planned: 0, done: 0 };
+  if(orderUsesRoute(order) || (item.rota && item.rota.length) || item.pintura || item.montagem){
+    let planned = qty;
+    let done = Math.min(itemProduced(item), qty);
+    if(item.pintura){ planned += qty; done += Math.min(itemPainted(item), qty); }
+    if(item.montagem){ planned += qty; done += Math.min(itemAssembled(item), qty); }
+    return { planned: planned, done: done };
+  }
+  return { planned: qty, done: Math.min(itemProduced(item), qty) };
+}
 function groupProgress(order){
   const buckets = {};
   orderItems(order).forEach(function(item){
     const name = itemSetorLabel(item) || 'Sem setor';
-    if(!buckets[name]) buckets[name] = { quantidade: 0, produzida: 0 };
-    buckets[name].quantidade += Number(item.quantidade) || 0;
-    buckets[name].produzida += Number(item.produzida) || 0;
+    if(!buckets[name]) buckets[name] = { planned: 0, done: 0, pending: [] };
+    const progress = itemRouteProgress(item, order);
+    buckets[name].planned += progress.planned;
+    buckets[name].done += progress.done;
+    const stage = itemOpenStage(item, order);
+    if(stage){
+      buckets[name].pending.push({
+        descricao: item.descricao || item.codigo || '',
+        equipamento: item.equipamentoNome || '',
+        etapa: stage.nome,
+        falta: stage.falta
+      });
+    } else if(!equipmentFabricated(item, order) && (item.pintura || item.montagem) && itemProduced(item) >= itemPlanned(item)){
+      buckets[name].pending.push({
+        descricao: item.descricao || item.codigo || '',
+        equipamento: item.equipamentoNome || '',
+        etapa: 'Aguarda o equipamento',
+        falta: 0
+      });
+    }
   });
-  return Object.keys(buckets).map(function(name){
+  return Object.keys(buckets).sort().map(function(name){
     const row = buckets[name];
-    const pct = row.quantidade > 0 ? Math.round((row.produzida / row.quantidade) * 1000) / 10 : 0;
-    return { name: name, pct: pct, quantidade: row.quantidade, produzida: row.produzida };
+    const pct = row.planned > 0 ? Math.round((row.done / row.planned) * 1000) / 10 : 0;
+    return { name: name, pct: pct, planned: row.planned, done: row.done, pending: row.pending };
   });
 }
 function itemPlanned(item){ return Number(item && item.quantidade) || 0; }
@@ -1591,10 +1633,11 @@ function renderRecursos(){
   const el = document.getElementById('panel-recursos');
   el.innerHTML = `
     <div class="section-title">${icon('wrench',19)} Recursos</div>
-    <div class="section-sub">Cadastro das máquinas, células e recursos utilizados no apontamento de produção e no monitoramento.</div>
+    <div class="section-sub">Visão do chão de fábrica: status da máquina, quem está nela e restrição. O cadastro completo (operações e operadores) fica em Cadastro → Máquina.</div>
     <div class="toolbar">
-      <div class="search-box"><span class="search-ic">${icon('search',15)}</span><input placeholder="Buscar código, descrição ou grupo..." oninput="recSearch=this.value; renderRecursosTable();"></div>
-      <button class="btn btn-primary" data-edit="recursos" onclick="openResourceModal()">${icon('plus',14)} Novo Recurso</button>
+      <div class="search-box"><span class="search-ic">${icon('search',15)}</span><input placeholder="Buscar código, descrição ou setor..." oninput="recSearch=this.value; renderRecursosTable();"></div>
+      <button class="btn btn-ghost" type="button" onclick="openCadastroMaquina()">Cadastro de máquina</button>
+      <button class="btn btn-primary" data-edit="recursos" onclick="openResourceModal()">${icon('plus',14)} Novo recurso</button>
     </div>
     <div class="table-wrap">
       <table>
@@ -1642,25 +1685,32 @@ function renderOrdens(){
   const el = document.getElementById('panel-ordens');
   el.innerHTML = `
     <div class="section-title">${icon('clipboard',19)} Ordens de Produção</div>
-    <div class="section-sub">O pedido vincula equipamentos já cadastrados. Cada peça segue a rota do item e o setor definido no equipamento. Pintura e montagem abrem no fim quando a rota pede. Com 100%, o pedido vai para expedição.</div>
+    <div class="section-sub">O pedido vincula equipamentos já cadastrados e recebe uma prioridade para a fila e a IA. Clique no pedido para ver o % por setor e o que falta para a entrega. Com 100%, vai para expedição.</div>
     <div class="toolbar">
       <div class="search-box"><span class="search-ic">${icon('search',15)}</span><input placeholder="Buscar por OP ou código..." oninput="ordensSearch=this.value; renderOrdensTable();"></div>
       <button class="btn btn-primary" data-edit="ordens" onclick="openOrderModal()">${icon('plus',14)} Nova Ordem de Produção</button>
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Pedido</th><th>Setor</th><th>Itens</th><th>Qtd.</th><th>Produzido</th><th>Status</th><th></th></tr></thead>
+        <thead><tr><th>Pedido</th><th>Prioridade</th><th>Setor</th><th>Itens</th><th>Conclusão</th><th>Status</th><th></th></tr></thead>
         <tbody id="ordensTbody"></tbody>
       </table>
     </div>
   `;
   renderOrdensTable();
 }
+function sortOrdersByPriority(list){
+  return (list || []).slice().sort(function(a, b){
+    const priority = orderPriorityValue(a) - orderPriorityValue(b);
+    if(priority) return priority;
+    return String(b.criadoEm || '').localeCompare(String(a.criadoEm || ''));
+  });
+}
 function renderOrdensTable(){
   const tbody = document.getElementById('ordensTbody');
   if(!tbody) return;
   const q = ordensSearch.trim().toLowerCase();
-  const list = state.orders.filter(o => !q || orderLabel(o).toLowerCase().includes(q) || o.codigo.toLowerCase().includes(q)).sort((a,b)=> b.criadoEm.localeCompare(a.criadoEm));
+  const list = sortOrdersByPriority(state.orders.filter(o => !q || orderLabel(o).toLowerCase().includes(q) || String(o.codigo || '').toLowerCase().includes(q)));
   tbody.innerHTML = list.length ? list.map(o=>{
     const progress = orderProgress(o);
     const items = orderItems(o);
@@ -1670,22 +1720,25 @@ function renderOrdensTable(){
       return item.nome + (times > 1 ? ' × ' + times : '');
     });
     const hint = routeHint(o);
-    return `<tr>
+    const missing = Math.max(0, Math.round((100 - progress.pct) * 10) / 10);
+    return `<tr style="cursor:pointer;" onclick="showOrderInfo('${o.id}')">
       <td>
         <div style="color:var(--blue); font-weight:700;">${orderLabel(o)}</div>
         <div style="font-size:11px; color:var(--text-muted);">${escapeHtml(machines.join(', ') || o.descricao || '')}</div>
       </td>
+      <td>${orderPriorityBadge(o)}</td>
       <td>${escapeHtml(groupNames.join(', ') || '—')}</td>
       <td>${items.length}</td>
-      <td class="mono">${progress.planned}</td>
-      <td style="min-width:120px;">
+      <td style="min-width:140px;">
         <div class="progress-track" style="margin-bottom:4px;"><div class="progress-fill" style="width:${Math.min(progress.pct, 100)}%;"></div></div>
-        <div style="font-size:10.5px; color:var(--text-faint);">${progress.pct}% · ${progress.produced}/${progress.planned}</div>
+        <div style="font-size:10.5px; color:var(--text-faint);">${progress.pct}% concluído · falta ${missing}%</div>
+        <div style="font-size:10.5px; color:var(--text-faint);">${progress.produced}/${progress.planned}</div>
         ${hint ? `<div style="font-size:10.5px; color:var(--text-muted); margin-top:2px;">${escapeHtml(hint)}</div>` : ''}
       </td>
-      <td>${orderStatusSelect(o)}</td>
-      <td style="white-space:nowrap;">
-        <button class="btn btn-sm btn-ghost" onclick="showOrderQR('${o.id}')">${icon('qrscan',13)} QR Code</button>
+      <td onclick="event.stopPropagation()">${orderStatusSelect(o)}</td>
+      <td style="white-space:nowrap;" onclick="event.stopPropagation()">
+        <button class="btn btn-sm btn-ghost" onclick="showOrderInfo('${o.id}')">${icon('info',13)} Ver</button>
+        <button class="btn btn-sm btn-ghost" onclick="showOrderQR('${o.id}')">${icon('qrscan',13)} QR</button>
         <button class="icon-btn" onclick="printOrder('${o.id}')" title="Imprimir Ordem">${icon('printer',15)}</button>
       </td>
     </tr>`;
@@ -1745,6 +1798,8 @@ function openOrderModal(){
     return `<option value="${item.id}">${escapeHtml(recordLabel(item))}</option>`;
   }).join('');
   document.getElementById('ordQtd').value = 1;
+  const prioridade = document.getElementById('ordPrioridade');
+  if(prioridade) prioridade.value = '2';
   const numeroField = document.getElementById('ordNumero');
   if(numeroField) numeroField.value = formatOrderNumber(state.nextOrderNum);
   const geradoSel = document.getElementById('ordGeradoPor');
@@ -1820,7 +1875,9 @@ async function saveOrder(shouldPrint){
   const numero = assignedNumber.numero;
   const quantidade = itens.reduce(function(sum, item){ return sum + item.quantidade; }, 0);
   const nomes = equipamentos.map(function(item){ return item.nome + (item.quantidade > 1 ? ' × ' + item.quantidade : ''); });
-  state.orders.push({ id: opId, numero, codigo: itens[0].codigo, descricao: nomes.join(', '), quantidadePlanejada: quantidade, tempoEstimadoTotalMin: tempo, status:'Não iniciado', setor:'', motivo:'', criadoEm: nowISO(), geradoPor, equipamentos: equipamentos, itens: itens });
+  const prioridadeField = document.getElementById('ordPrioridade');
+  const prioridade = orderPriorityValue({ prioridade: prioridadeField ? prioridadeField.value : 2 });
+  state.orders.push({ id: opId, numero, codigo: itens[0].codigo, descricao: nomes.join(', '), quantidadePlanejada: quantidade, tempoEstimadoTotalMin: tempo, status:'Não iniciado', prioridade: prioridade, setor:'', motivo:'', criadoEm: nowISO(), geradoPor, equipamentos: equipamentos, itens: itens });
   orderDraftEquipments = [];
   await persist();
   closeModal('modalOrder');
@@ -1829,26 +1886,68 @@ async function saveOrder(shouldPrint){
   refreshApontamentoDatalist();
   if(shouldPrint) printOrder(opId);
 }
-function showOrderInfo(orderId){
+let orderInfoSetorFilter = '';
+function openCadastroMaquina(){
+  cadastroChoice = 'maquina';
+  resetCadastroForm();
+  setTab('cadastro');
+}
+function renderOrderInfoBody(orderId){
   const order = orderById(orderId);
   if(!order) return;
+  const progress = orderProgress(order);
+  const missing = Math.max(0, Math.round((100 - progress.pct) * 10) / 10);
+  const sectors = groupProgress(order);
+  const filter = orderInfoSetorFilter;
+  const visible = filter ? sectors.filter(function(sector){ return sector.name === filter; }) : sectors;
   const apontadores = Array.from(new Set(state.punches.filter(p=>p.ordemId===orderId).map(p=>p.funcionarioId)));
+  const items = orderItems(order).filter(function(item){
+    if(!filter) return true;
+    return (itemSetorLabel(item) || 'Sem setor') === filter;
+  });
   document.getElementById('orderInfoBody').innerHTML = `
     <div style="margin-bottom:14px;">
       <div style="font-size:20px; font-weight:800;">${orderLabel(order)}</div>
-      <div style="color:var(--text-muted); font-size:13px;">${order.codigo} — ${order.descricao}</div>
-      <div style="margin-top:8px;">${orderStatusBadge(order.status)} ${order.motivo ? `<span class="section-sub">${escapeHtml(order.motivo)}</span>` : ''}</div>
-      <div style="margin-top:10px; font-weight:700;">Andamento: ${orderProgress(order).pct}%</div>
+      <div style="color:var(--text-muted); font-size:13px;">${escapeHtml(order.codigo || '')} — ${escapeHtml(order.descricao || '')}</div>
+      <div style="margin-top:8px; display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
+        ${orderStatusBadge(order.status)}
+        ${orderPriorityBadge(order)}
+        ${order.motivo ? `<span class="section-sub">${escapeHtml(order.motivo)}</span>` : ''}
+      </div>
+      <div style="margin-top:12px; font-weight:700;">Conclusão: ${progress.pct}% · falta ${missing}% para a entrega</div>
+      <div class="progress-track" style="margin-top:6px;"><div class="progress-fill" style="width:${Math.min(progress.pct, 100)}%;"></div></div>
       ${routeHint(order) ? `<div style="margin-top:4px; color:var(--text-muted);">${escapeHtml(routeHint(order))}</div>` : ''}
-      <div style="margin-top:6px;">${orderItems(order).map(function(item){
+      <div class="field" style="margin-top:12px;">
+        <label>Filtrar por setor</label>
+        <select onchange="filterOrderInfoSetor('${escapeHtml(order.id)}', this.value)">
+          <option value="">Todos os setores</option>
+          ${sectors.map(function(sector){
+            return `<option value="${escapeHtml(sector.name)}" ${sector.name === filter ? 'selected' : ''}>${escapeHtml(sector.name)} · ${sector.pct}%</option>`;
+          }).join('')}
+        </select>
+      </div>
+      <div style="margin-top:10px;">${visible.map(function(sector){
+        const pending = sector.pending.length ? sector.pending.map(function(line){
+          return `<div style="font-size:12px; color:var(--text-muted); margin-top:4px;">• ${escapeHtml(line.equipamento ? line.equipamento + ' · ' : '')}${escapeHtml(line.descricao)} · ${escapeHtml(line.etapa)}${line.falta ? ' · falta ' + line.falta : ''}</div>`;
+        }).join('') : '<div style="font-size:12px; color:var(--green-dark); margin-top:4px;">Setor concluído nesta etapa.</div>';
+        return `<div class="card" style="box-shadow:none; background:var(--surface-2); margin-top:8px;">
+          <div style="display:flex; justify-content:space-between; gap:8px; align-items:center;">
+            <b>${escapeHtml(sector.name)}</b>
+            <span class="mono">${sector.pct}% · ${sector.done}/${sector.planned}</span>
+          </div>
+          <div class="progress-track" style="margin-top:6px;"><div class="progress-fill" style="width:${Math.min(sector.pct, 100)}%;"></div></div>
+          ${pending}
+        </div>`;
+      }).join('') || '<div class="section-sub">Nenhum setor neste filtro.</div>'}</div>
+      <div style="margin-top:12px;"><label style="margin-bottom:6px;">Peças do filtro</label>${items.map(function(item){
         const family = familyById(item.familiaId);
         const stage = itemOpenStage(item, order);
         const waitingEquipment = !stage && itemProduced(item) >= itemPlanned(item) && (item.pintura || item.montagem) && !equipmentFabricated(item, order);
         const flags = [item.pintura ? ('pintura ' + itemPainted(item) + '/' + itemPlanned(item)) : '', item.montagem ? ('montagem ' + itemAssembled(item) + '/' + itemPlanned(item)) : ''].filter(Boolean).join(' · ');
         const machine = item.equipamentoNome ? item.equipamentoNome + ' · ' : '';
-        const where = stage ? (' · agora: ' + stage.nome) : (waitingEquipment ? ' · aguarda o equipamento' : ' · pronto');
+        const where = stage ? (' · agora: ' + stage.nome + ' · falta ' + stage.falta) : (waitingEquipment ? ' · aguarda o equipamento' : ' · pronto');
         return `<div>${escapeHtml(machine)}${escapeHtml(itemSetorLabel(item) || 'Sem setor')} · ${escapeHtml(family ? recordLabel(family) : 'Sem família')} · ${escapeHtml(item.descricao || item.codigo || '')} · fabricado ${itemProduced(item)}/${itemPlanned(item)}${flags ? ' · ' + escapeHtml(flags) : ''}${escapeHtml(where)}</div>`;
-      }).join('')}</div>
+      }).join('') || '<div class="section-sub">Nenhuma peça neste filtro.</div>'}</div>
     </div>
     <div class="card" style="box-shadow:none; background:var(--surface-2); margin-bottom:14px;">
       <div class="grid grid-2" style="gap:14px;">
@@ -1861,7 +1960,15 @@ function showOrderInfo(orderId){
       ${apontadores.length ? `<div style="display:flex; flex-wrap:wrap; gap:7px;">${apontadores.map(id=>employeeMiniChipHTML(id)).join('')}</div>` : '<div style="color:var(--text-faint); font-size:13px;">Nenhum apontamento registrado ainda.</div>'}
     </div>
   `;
+}
+function showOrderInfo(orderId){
+  orderInfoSetorFilter = '';
+  renderOrderInfoBody(orderId);
   openModal('modalOrderInfo');
+}
+function filterOrderInfoSetor(orderId, setor){
+  orderInfoSetorFilter = setor || '';
+  renderOrderInfoBody(orderId);
 }
 function showOrderQR(orderId){
   const order = orderById(orderId);
@@ -2908,13 +3015,13 @@ function renderAcompanhamento(){
   const el = document.getElementById('panel-acompanhamento');
   el.innerHTML = `
     <div class="section-title">${icon('search',19)} Acompanhamento de Produção</div>
-    <div class="section-sub">Pesquise por ordem de produção ou código da peça para verificar o status.</div>
+    <div class="section-sub">Lista por prioridade. Clique no pedido para ver o % por setor e o que falta para a entrega.</div>
     <div class="toolbar">
       <div class="search-box"><span class="search-ic">${icon('search',15)}</span><input placeholder="Buscar OP ou código..." oninput="acompSearch=this.value; renderAcompTable();"></div>
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Ordem</th><th>Código</th><th>Descrição</th><th>Progresso</th><th>Status</th><th>Refugo</th><th></th></tr></thead>
+        <thead><tr><th>Ordem</th><th>Prioridade</th><th>Código</th><th>Conclusão</th><th>Status</th><th>Refugo</th><th></th></tr></thead>
         <tbody id="acompTbody"></tbody>
       </table>
     </div>
@@ -2930,24 +3037,26 @@ function renderAcompTable(){
   const tbody = document.getElementById('acompTbody');
   if(!tbody) return;
   const q = acompSearch.trim().toLowerCase();
-  const list = state.orders.filter(o=> !q || orderLabel(o).toLowerCase().includes(q) || o.codigo.toLowerCase().includes(q)).sort((a,b)=>b.criadoEm.localeCompare(a.criadoEm));
+  const list = sortOrdersByPriority(state.orders.filter(o=> !q || orderLabel(o).toLowerCase().includes(q) || String(o.codigo || '').toLowerCase().includes(q)));
   tbody.innerHTML = list.length ? list.map(o=>{
     const progress = orderProgress(o);
     const produced = progress.produced;
     const scrap = orderScrapQty(o.id);
     const pct = Math.min(100, progress.pct);
-    return `<tr style="cursor:pointer;" onclick="showAcompDetail('${o.id}')">
+    const missing = Math.max(0, Math.round((100 - progress.pct) * 10) / 10);
+    return `<tr style="cursor:pointer;" onclick="showOrderInfo('${o.id}')">
       <td style="color:var(--blue); font-weight:700;">${orderLabel(o)}</td>
-      <td>${o.codigo}</td>
-      <td>${o.descricao}</td>
+      <td>${orderPriorityBadge(o)}</td>
+      <td>${escapeHtml(o.codigo || '')}</td>
       <td style="min-width:140px;">
         <div class="progress-track" style="margin-bottom:4px;"><div class="progress-fill" style="width:${pct}%;"></div></div>
-        <div style="font-size:10.5px; color:var(--text-faint);">${progress.pct}% · ${produced}/${progress.planned}</div>
+        <div style="font-size:10.5px; color:var(--text-faint);">${progress.pct}% · falta ${missing}% · ${produced}/${progress.planned}</div>
       </td>
       <td>${orderStatusBadge(o.status)}</td>
       <td class="mono">${scrap}</td>
       <td style="white-space:nowrap;">
-        <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); showOrderInfo('${o.id}')">${icon('info',13)} INFO</button>
+        <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); showOrderInfo('${o.id}')">${icon('info',13)} Ver</button>
+        <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); showAcompDetail('${o.id}')">Apontamentos</button>
         <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation(); showOrderQR('${o.id}')">${icon('qrscan',13)} QR</button>
         <button class="icon-btn" onclick="event.stopPropagation(); printOrder('${o.id}')" title="Imprimir Ordem">${icon('printer',15)}</button>
       </td>
@@ -2957,10 +3066,20 @@ function renderAcompTable(){
 function showAcompDetail(orderId){
   const order = orderById(orderId);
   const detail = document.getElementById('acompDetail');
+  if(!detail || !order) return;
+  const progress = orderProgress(order);
+  const sectors = groupProgress(order);
   const punches = state.punches.filter(p=>p.ordemId===orderId).sort((a,b)=>b.inicio.localeCompare(a.inicio));
   detail.innerHTML = `
     <div class="card">
-      <div class="section-title" style="font-size:14px;">Histórico de Apontamentos — ${orderLabel(order)}</div>
+      <div class="section-title" style="font-size:14px;">Entrega — ${orderLabel(order)} · ${progress.pct}% · ${orderPriorityLabel(order)}</div>
+      <div style="margin-top:10px;">${sectors.map(function(sector){
+        const pending = sector.pending.length ? sector.pending.map(function(line){
+          return `<div style="font-size:12px; color:var(--text-muted);">• ${escapeHtml(line.descricao)} · ${escapeHtml(line.etapa)}${line.falta ? ' · falta ' + line.falta : ''}</div>`;
+        }).join('') : '<div style="font-size:12px; color:var(--green-dark);">Concluído neste setor.</div>';
+        return `<div style="margin-top:8px;"><b>${escapeHtml(sector.name)}</b> · ${sector.pct}%${pending}</div>`;
+      }).join('') || '<div class="section-sub">Sem itens por setor.</div>'}</div>
+      <div class="section-title" style="font-size:14px; margin-top:16px;">Histórico de Apontamentos</div>
       <div class="table-wrap" style="margin-top:10px;">
         <table>
           <thead><tr><th>Funcionário</th><th>Recurso</th><th>Início</th><th>Fim</th><th>Produzido</th><th>Refugo</th><th>Status</th></tr></thead>
@@ -4977,6 +5096,8 @@ window.toggleSound = toggleSound;
 window.openOrderModal = openOrderModal;
 window.renderOrderPreview = renderOrderPreview;
 window.saveOrder = saveOrder;
+window.openCadastroMaquina = openCadastroMaquina;
+window.filterOrderInfoSetor = filterOrderInfoSetor;
 window.showOrderQR = showOrderQR;
 window.printOrder = printOrder;
 window.showOrderInfo = showOrderInfo;

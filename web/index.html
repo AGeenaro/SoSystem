@@ -159,6 +159,14 @@
       <input id="ordNumero" maxlength="20">
     </div>
     <div class="field">
+      <label>Prioridade <span class="field-hint">para organizar a fila e a IA</span></label>
+      <select id="ordPrioridade">
+        <option value="1">Alta</option>
+        <option value="2" selected>Normal</option>
+        <option value="3">Baixa</option>
+      </select>
+    </div>
+    <div class="field">
       <label>Equipamento</label>
       <select id="ordEquipamento" onchange="renderOrderPreview()"></select>
     </div>
@@ -303,7 +311,7 @@
 <script src="js/app.js"></script>
 <script>
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js?v=28').catch(function () {});
+  navigator.serviceWorker.register('sw.js?v=29').catch(function () {});
 }
 </script>
 </body>

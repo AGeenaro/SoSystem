@@ -1,4 +1,4 @@
-const CACHE = "prodfy-shell-v28";
+const CACHE = "prodfy-shell-v29";
 const FILES = ["./", "./index.html", "./conta.html", "./css/app.css", "./js/app.js", "./js/config.js", "./js/conta.js", "./js/study.js", "./assets/logo-sosystem.png"];
 
 self.addEventListener("install", (event) => {

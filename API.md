@@ -76,7 +76,7 @@ A resposta `429` inclui os cabeçalhos padrão de rate limit. `/health` fica for
 Resposta `200`:
 
 ```json
-{ "data": { "status": "ok", "service": "sosystem-api", "version": "2026.10.19" } }
+{ "data": { "status": "ok", "service": "sosystem-api", "version": "2026.10.20" } }
 ```
 
 ### `POST /api/auth/register`
@@ -236,7 +236,7 @@ Senha nova: 8 caracteres, uma maiúscula, um número e um caractere especial. Co
 
 `GET /api/logs` devolve os próprios eventos. O administrador suporte vê todos, com `valorAnterior` e `valorAtual`.
 
-Status de pedido: `Não iniciado`, `Iniciado/Parado`, `Bloqueado`, `Finalizado/Em Pintura`, `Finalizado/Em montagem`, `Finalizado`, `Encaminhado Expedição`. Parado e bloqueado exigem setor e motivo.
+Status de pedido: `Não iniciado`, `Iniciado/Parado`, `Bloqueado`, `Finalizado/Em Pintura`, `Finalizado/Em montagem`, `Finalizado`, `Encaminhado Expedição`. Parado e bloqueado exigem setor e motivo. Prioridade do pedido: `1` alta, `2` normal, `3` baixa — usada na fila e na sugestão da IA.
 
 ## Exemplo com curl
 

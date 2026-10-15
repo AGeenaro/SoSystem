@@ -36,8 +36,12 @@
         if (quantidade > 0 && produzida >= quantidade) return;
         var percentual = quantidade > 0 ? (produzida / quantidade) * 100 : 0;
         var isTarget = order.id === input.targetOrderId || label === input.targetOrderId;
+        var prioridade = Number(order.prioridade);
+        if (prioridade !== 1 && prioridade !== 3) prioridade = 2;
         var score = percentual / 10;
         if (isTarget) score += 1000;
+        if (prioridade === 1) score += 300;
+        else if (prioridade === 2) score += 100;
         if (percentual >= 90) score += 500 + percentual;
         if (status === "Bloqueado") score += 40;
         open.push({
@@ -49,6 +53,7 @@
           quantidade: quantidade,
           produzida: produzida,
           status: status,
+          prioridade: prioridade,
           score: score
         });
       });
