@@ -212,7 +212,7 @@ end $$;
 alter table public.production_records drop constraint if exists production_records_kind_check;
 alter table public.production_records
   add constraint production_records_kind_check
-  check (kind in ('employee', 'product', 'order', 'punch', 'resource', 'group', 'family', 'equipment'));
+  check (kind in ('employee', 'product', 'order', 'punch', 'resource', 'group', 'family', 'equipment', 'setor', 'operacao'));
 
 create table if not exists public.production_counters (
   company_id uuid primary key references public.companies(id),

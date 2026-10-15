@@ -82,7 +82,9 @@ const PRODUCTION_COLLECTIONS = [
   ['resource', 'resources', item => item.id],
   ['group', 'groups', item => item.id],
   ['family', 'families', item => item.id],
-  ['equipment', 'equipments', item => item.id]
+  ['equipment', 'equipments', item => item.id],
+  ['setor', 'setores', item => item.id],
+  ['operacao', 'operacoes', item => item.id]
 ];
 let fingerprints = {};
 let pendingDeletes = [];
@@ -98,15 +100,19 @@ function productCodeTaken(codigo, exceptIndex){
   if(!key) return false;
   return state.products.some(function(product, index){
     if(exceptIndex !== undefined && index === exceptIndex) return false;
-    return String(product.codigo || '').trim().toLowerCase() === key;
+    const erp = String(product.codigoErp || '').trim().toLowerCase();
+    const code = String(product.codigo || '').trim().toLowerCase();
+    return code === key || erp === key;
   });
 }
 function genErpCode(classificacao){
   const mid = classificacao==='PI' ? '2000' : '3000';
   const used = {};
   state.products.forEach(function(product){
-    const parts = String(product.codigo || '').split('.');
-    if(parts[0]==='30' && parts[1]===mid && /^\d{4}$/.test(parts[2] || '')) used[parts[2]] = true;
+    [product.codigo, product.codigoErp].forEach(function(value){
+      const parts = String(value || '').split('.');
+      if(parts[0]==='30' && parts[1]===mid && /^\d{4}$/.test(parts[2] || '')) used[parts[2]] = true;
+    });
   });
   for(let n = 1; n <= 9999; n++){
     const last4 = String(n).padStart(4, '0');
@@ -209,7 +215,7 @@ function employeeMiniChipHTML(id){
   return `<span class="employee-mini-chip">${employeeAvatarHTML(e,'inline-avatar-small')}<span>${e.nome} ${e.sobrenome}</span></span>`;
 }
 function emptyState(){
-  return { employees:[], products:[], orders:[], punches:[], resources:[], groups:[], families:[], equipments:[], nextOrderNum:1, nextEmployeeNum:1 };
+  return { employees:[], products:[], orders:[], punches:[], resources:[], groups:[], families:[], equipments:[], setores:[], operacoes:[], nextOrderNum:1, nextEmployeeNum:1 };
 }
 function activeCompanyId(){
   if(sessionUser && sessionUser.companyId) return sessionUser.companyId;
@@ -287,15 +293,18 @@ function loadCache(){
   pendingDeletes = [];
   try{
     const raw = localStorage.getItem(cacheStorageKey());
-    if(!raw) return;
+    if(raw){
     const parsed = JSON.parse(raw);
     state = Object.assign(emptyState(), parsed.state || {});
     PRODUCTION_COLLECTIONS.forEach(([, key])=>{ if(!Array.isArray(state[key])) state[key] = []; });
     fingerprints = parsed.fingerprints || {};
     pendingDeletes = Array.isArray(parsed.pendingDeletes) ? parsed.pendingDeletes : [];
+    }
   }catch(e){
     state = emptyState();
   }
+  normalizeState();
+  stripLegacyCatalog();
 }
 let sectorHold = null;
 function sectorKey(value){
@@ -310,62 +319,121 @@ function allowedSectorKeys(){
 }
 function restoreSectorHold(){
   if(!sectorHold) return;
-  ['groups','families','products','orders','punches','resources','equipments'].forEach(function(key){
+  ['groups','families','products','orders','punches','resources','equipments','setores','operacoes'].forEach(function(key){
     state[key] = (state[key] || []).concat(sectorHold[key] || []);
   });
   sectorHold = null;
+}
+function normalizeState(){
+  let changed = false;
+  const now = new Date().toISOString();
+  function ensureArray(item, key){
+    if(!item || Array.isArray(item[key])) return;
+    item[key] = [];
+    item.updatedAt = now;
+    changed = true;
+  }
+  state.setores = state.setores || [];
+  state.operacoes = state.operacoes || [];
+  (state.resources || []).forEach(function(resource){
+    ensureArray(resource, 'funcionarios');
+    ensureArray(resource, 'operacoes');
+    ensureArray(resource, 'grupos');
+  });
+  (state.families || []).forEach(function(family){ ensureArray(family, 'itens'); });
+  (state.equipments || []).forEach(function(equipment){ ensureArray(equipment, 'itens'); });
+  (state.products || []).forEach(function(product){
+    ensureArray(product, 'maquinas');
+    ensureArray(product, 'rota');
+  });
+  if(changed) mutationEpoch++;
+}
+function queueCatalogDelete(kind, id){
+  const now = new Date().toISOString();
+  delete fingerprints[kind + ':' + id];
+  const existing = pendingDeletes.find(function(item){ return item.kind === kind && item.id === id; });
+  if(existing){ existing.updatedAt = now; return; }
+  pendingDeletes.push({ kind: kind, id: id, updatedAt: now });
+}
+function stripLegacyCatalog(){
+  let changed = false;
+  function drop(kind, key, idOf, legacy){
+    state[key] = (state[key] || []).filter(function(item){
+      if(!legacy(item)) return true;
+      const id = String(idOf(item) || '');
+      if(id) queueCatalogDelete(kind, id);
+      changed = true;
+      return false;
+    });
+  }
+  drop('group', 'groups', function(item){ return item.id; }, function(item){ return !String(item.codigo || '').trim(); });
+  drop('family', 'families', function(item){ return item.id; }, function(item){ return !String(item.codigo || '').trim(); });
+  drop('product', 'products', function(item){ return item.codigo; }, function(item){
+    return !String(item.codigoErp || '').trim() && String(item.codigo || '').indexOf('.') >= 0;
+  });
+  drop('equipment', 'equipments', function(item){ return item.id; }, function(item){ return !String(item.codigo || '').trim(); });
+  drop('resource', 'resources', function(item){ return item.id; }, function(item){ return !String(item.codigo || '').trim(); });
+  (state.employees || []).forEach(function(employee){
+    if(String(employee.codigo || '').trim()) return;
+    employee.codigo = nextAlphaCode((state.employees || []).map(function(item){ return item.codigo; }));
+    employee.updatedAt = new Date().toISOString();
+    changed = true;
+  });
+  if(changed) mutationEpoch++;
 }
 function restrictStateToSectors(){
   restoreSectorHold();
   const allowed = allowedSectorKeys();
   if(!allowed) return;
-  const hold = { groups:[], families:[], products:[], orders:[], punches:[], resources:[], equipments:[] };
-  const groupOk = {};
-  state.groups.forEach(function(group){ groupOk[group.id] = allowed.indexOf(sectorKey(group.nome)) >= 0; });
-  state.groups = state.groups.filter(function(group){
-    if(groupOk[group.id]) return true;
-    hold.groups.push(group);
+  const hold = { groups:[], families:[], products:[], orders:[], punches:[], resources:[], equipments:[], setores:[], operacoes:[] };
+  const setorOk = {};
+  (state.setores || []).forEach(function(setor){
+    setorOk[setor.id] = allowed.indexOf(sectorKey(recordLabel(setor))) >= 0;
+  });
+  function sectorVisible(id){
+    if(!id || !Object.prototype.hasOwnProperty.call(setorOk, id)) return true;
+    return !!setorOk[id];
+  }
+  state.setores = state.setores.filter(function(setor){
+    if(setorOk[setor.id]) return true;
+    hold.setores.push(setor);
     return false;
   });
-  const familyOk = {};
-  state.families = state.families.filter(function(family){
-    const visible = !family.grupoId || groupOk[family.grupoId];
-    if(visible){ familyOk[family.id] = true; return true; }
-    hold.families.push(family);
-    return false;
-  });
-  const productOk = {};
   state.products = state.products.filter(function(product){
-    const visible = !product.familiaId || familyOk[product.familiaId];
-    if(visible){ productOk[String(product.codigo || '')] = true; return true; }
+    const ids = [product.setorId].concat((product.rota || []).map(function(step){ return step.setorId; })).filter(Boolean);
+    const visible = !ids.length || ids.some(sectorVisible);
+    if(visible) return true;
     hold.products.push(product);
     return false;
   });
-  state.equipments = state.equipments.filter(function(equipment){
-    const parts = equipment.itens || [];
-    const visible = !parts.length || parts.some(function(part){ return productOk[String(part.codigo || '')]; });
-    if(visible) return true;
-    hold.equipments.push(equipment);
+  state.resources = state.resources.filter(function(resource){
+    if(sectorVisible(resource.setorId)) return true;
+    if(!resource.setorId && resource.setor && resource.setor !== 'Geral'){
+      const visible = String(resource.setor).split(',').some(function(name){ return allowed.indexOf(sectorKey(name)) >= 0; });
+      if(visible) return true;
+    }
+    if(!resource.setorId && (!resource.setor || resource.setor === 'Geral')) return true;
+    hold.resources.push(resource);
     return false;
   });
-  state.resources = state.resources.filter(function(resource){
-    const ids = resource.grupos || [];
-    let visible = true;
-    if(ids.length) visible = ids.some(function(id){ return groupOk[id]; });
-    else if(resource.setor && resource.setor !== 'Geral'){
-      visible = String(resource.setor).split(',').some(function(name){ return allowed.indexOf(sectorKey(name)) >= 0; });
-    }
+  state.equipments = state.equipments.filter(function(equipment){
+    const parts = (equipment.itens || []).map(function(part){ return part.setorId; }).filter(Boolean);
+    const visible = !parts.length || parts.some(sectorVisible);
     if(visible) return true;
-    hold.resources.push(resource);
+    hold.equipments.push(equipment);
     return false;
   });
   const orderOk = {};
   state.orders = state.orders.filter(function(order){
     const items = order.itens || [];
-    const linked = items.filter(function(item){ return item.grupoId; });
     let visible = true;
-    if(linked.length) visible = linked.some(function(item){ return groupOk[item.grupoId]; });
-    else if(order.setor) visible = allowed.indexOf(sectorKey(order.setor)) >= 0;
+    if(items.length){
+      visible = items.some(function(item){
+        if(item.setorId) return sectorVisible(item.setorId);
+        if(item.setorNome) return allowed.indexOf(sectorKey(item.setorNome)) >= 0;
+        return true;
+      });
+    } else if(order.setor) visible = allowed.indexOf(sectorKey(order.setor)) >= 0;
     if(visible){ orderOk[order.id] = true; return true; }
     hold.orders.push(order);
     return false;
@@ -433,6 +501,8 @@ function applySnapshot(data){
   state = next;
   state.groups.forEach(function(item){ delete item.imagem; });
   state.families.forEach(function(item){ delete item.imagem; });
+  normalizeState();
+  stripLegacyCatalog();
   rebuildFingerprints();
   restrictStateToSectors();
 }
@@ -823,7 +893,41 @@ function closeModal(id){ document.getElementById(id).classList.remove('open'); }
 
 /* ===================== HELPERS ===================== */
 function employeeName(id){ const e = state.employees.find(x=>x.id===id); return e ? (e.nome+' '+e.sobrenome) : '—'; }
-function productByCode(codigo){ return state.products.find(p=>p.codigo===codigo); }
+function productByCode(codigo){
+  const key = String(codigo || '');
+  return state.products.find(function(product){ return product.codigo === key || product.codigoErp === key; });
+}
+function recordLabel(item){ return String((item && (item.descricao || item.nome)) || '').trim(); }
+function setorById(id){ return (state.setores || []).find(function(item){ return item.id === id; }) || null; }
+function operacaoById(id){ return (state.operacoes || []).find(function(item){ return item.id === id; }) || null; }
+function familyById(id){ return state.families.find(function(item){ return item.id === id; }) || null; }
+function groupById(id){ return state.groups.find(function(item){ return item.id === id; }) || null; }
+function itemSetorLabel(item){
+  if(!item) return '';
+  const setor = setorById(item.setorId);
+  if(setor) return recordLabel(setor);
+  if(item.setorNome) return String(item.setorNome);
+  const group = groupById(item.grupoId);
+  return group ? recordLabel(group) : '';
+}
+function routeFlags(rota){
+  const names = (rota || []).map(function(step){
+    const op = step && step.operacaoId ? operacaoById(step.operacaoId) : null;
+    return String((op && recordLabel(op)) || (step && step.nome) || '').toLowerCase();
+  }).join(' ');
+  return { pintura: names.indexOf('pint') >= 0, montagem: names.indexOf('mont') >= 0 };
+}
+function nextNumericCode(list){
+  let max = 0;
+  (list || []).forEach(function(item){
+    const number = parsePositiveInt(item && item.codigo);
+    if(number > max) max = number;
+  });
+  return String(max + 1);
+}
+function suggestAlpha(list){
+  return nextAlphaCode((list || []).map(function(item){ return item && item.codigo; }));
+}
 function orderLabel(order){ return (order && (order.numero || order.id)) || ''; }
 function orderById(id){ return state.orders.find(o=>o.id===id || o.numero===id); }
 function punchOrderLabel(punch){ const order = orderById(punch && punch.ordemId); return order ? orderLabel(order) : ((punch && punch.ordemId) || ''); }
@@ -891,8 +995,7 @@ function orderItems(order){
 function groupProgress(order){
   const buckets = {};
   orderItems(order).forEach(function(item){
-    const group = state.groups.find(function(entry){ return entry.id === item.grupoId; });
-    const name = group ? group.nome : 'Sem grupo';
+    const name = itemSetorLabel(item) || 'Sem setor';
     if(!buckets[name]) buckets[name] = { quantidade: 0, produzida: 0 };
     buckets[name].quantidade += Number(item.quantidade) || 0;
     buckets[name].produzida += Number(item.produzida) || 0;
@@ -919,9 +1022,15 @@ function equipmentFabricated(item, order){
 function itemOpenStage(item, order){
   const qty = itemPlanned(item);
   if(qty <= 0) return null;
-  if(itemProduced(item) < qty){
-    const group = state.groups.find(function(entry){ return entry.id === item.grupoId; });
-    return { key: 'fabricacao', nome: group ? group.nome : 'Fabricação', falta: qty - itemProduced(item) };
+  const rota = Array.isArray(item.rota) ? item.rota : [];
+  if(rota.length){
+    for(let index = 0; index < rota.length; index++){
+      const step = rota[index];
+      const done = Number(step.feita) || 0;
+      if(done < qty) return { key: 'etapa', index: index, nome: step.nome || step.setorNome || 'Operação', falta: qty - done };
+    }
+  } else if(itemProduced(item) < qty){
+    return { key: 'fabricacao', nome: itemSetorLabel(item) || 'Fabricação', falta: qty - itemProduced(item) };
   }
   if(!equipmentFabricated(item, order)) return null;
   if(item.pintura && itemPainted(item) < qty) return { key: 'pintura', nome: 'Pintura', falta: qty - itemPainted(item) };
@@ -938,7 +1047,13 @@ function applyItemQty(item, qty, order){
     }
     const take = Math.min(left, stage.falta);
     if(take <= 0) return;
-    if(stage.key === 'fabricacao') item.produzida = itemProduced(item) + take;
+    if(stage.key === 'etapa'){
+      const step = item.rota[stage.index];
+      step.feita = (Number(step.feita) || 0) + take;
+      const planned = itemPlanned(item);
+      const finished = item.rota.every(function(entry){ return (Number(entry.feita) || 0) >= planned; });
+      item.produzida = finished ? planned : Math.min.apply(null, item.rota.map(function(entry){ return Number(entry.feita) || 0; }));
+    } else if(stage.key === 'fabricacao') item.produzida = itemProduced(item) + take;
     else if(stage.key === 'pintura') item.pintada = itemPainted(item) + take;
     else item.montada = itemAssembled(item) + take;
     left -= take;
@@ -982,7 +1097,7 @@ function isOnVacation(emp){
   return true;
 }
 function employeeMachines(empId){
-  return state.resources.filter(function(resource){ return resource.funcionarios.indexOf(empId) >= 0; });
+  return state.resources.filter(function(resource){ return (resource.funcionarios || []).indexOf(empId) >= 0; });
 }
 function employeeLocation(empId){
   const names = employeeMachines(empId).map(function(resource){ return resource.nome; });
@@ -990,6 +1105,7 @@ function employeeLocation(empId){
 }
 function syncEmployeeMachines(empId, resourceIds){
   state.resources.forEach(function(resource){
+    if(!Array.isArray(resource.funcionarios)) resource.funcionarios = [];
     const linked = resource.funcionarios.indexOf(empId) >= 0;
     const should = resourceIds.indexOf(resource.id) >= 0;
     if(should && !linked) resource.funcionarios.push(empId);
@@ -1017,19 +1133,16 @@ function resourceGroupIds(resource){
   }).filter(Boolean);
 }
 function resourceGroupNames(resource){
-  const names = (resource.grupos || []).map(function(id){
-    const group = state.groups.find(function(item){ return item.id === id; });
-    return group ? group.nome : '';
-  }).filter(Boolean);
-  if(names.length) return names;
+  const setor = setorById(resource.setorId);
+  if(setor) return [recordLabel(setor)];
   if(resource.setor && resource.setor !== 'Geral') return String(resource.setor).split(',').map(function(name){ return name.trim(); }).filter(Boolean);
-  return [];
+  return (resource.grupos || []).map(function(id){
+    const group = state.groups.find(function(item){ return item.id === id; });
+    return group ? recordLabel(group) : '';
+  }).filter(Boolean);
 }
 function orderSector(order){
-  return Array.from(new Set(orderItems(order).map(function(item){
-    const group = state.groups.find(function(entry){ return entry.id === item.grupoId; });
-    return group ? group.nome : '';
-  }).filter(Boolean))).join(', ');
+  return Array.from(new Set(orderItems(order).map(itemSetorLabel).filter(Boolean))).join(', ');
 }
 function renderMachineChoices(containerId, selectedIds){
   const box = document.getElementById(containerId);
@@ -1156,7 +1269,7 @@ function renderDashboard(){
 function populateSetorSelect(){
   const sel = document.getElementById('dashSetorSelect');
   if(!sel) return;
-  const names = state.groups.map(function(group){ return group.nome; });
+  const names = (state.setores || []).map(recordLabel).filter(Boolean);
   state.resources.forEach(function(resource){
     resourceGroupNames(resource).forEach(function(name){
       if(names.indexOf(name) < 0) names.push(name);
@@ -1184,7 +1297,7 @@ function renderEmpScroll(){
   const holder = document.getElementById('empScrollList');
   if(!holder) return;
   const q = dashSearch.trim().toLowerCase();
-  const list = state.employees.filter(e => !q || (e.nome+' '+e.sobrenome).toLowerCase().includes(q) || e.funcao.toLowerCase().includes(q) || (e.numero||'').includes(q));
+  const list = state.employees.filter(e => !q || (e.nome+' '+e.sobrenome).toLowerCase().includes(q) || e.funcao.toLowerCase().includes(q) || (e.numero||'').includes(q) || String(e.codigo || '').toLowerCase().includes(q));
   const onVacationCount = state.employees.filter(isOnVacation).length;
   document.getElementById('empCountLabel').textContent = `${state.employees.length - onVacationCount} disponíveis · ${onVacationCount} férias`;
   holder.innerHTML = list.length ? list.map(e=>{
@@ -1353,44 +1466,51 @@ function donutSVG(abertas, andamento, concluidas){
 }
 
 /* --- resource CRUD & assignment --- */
+function fillResourceSetor(selectedId){
+  const select = document.getElementById('resSetor');
+  if(!select) return;
+  const options = (state.setores || []).map(function(setor){
+    return `<option value="${setor.id}" ${setor.id === selectedId ? 'selected' : ''}>${escapeHtml(recordLabel(setor))}</option>`;
+  }).join('');
+  select.innerHTML = `<option value="">Selecione o setor</option>` + options;
+}
 function openResourceModal(id){
   if(deny('recursos')) return;
   document.getElementById('resId').value = id || '';
   if(id){
     const r = resourceById(id);
-    document.getElementById('resModalTitle').textContent = 'Editar Célula';
-    document.getElementById('resNome').value = r.nome;
+    document.getElementById('resModalTitle').textContent = 'Editar Máquina';
+    document.getElementById('resNome').value = r.codigo || r.nome;
     document.getElementById('resDescricao').value = r.descricao;
     document.getElementById('resRestricao').value = r.restricao || '';
-    renderGroupChoices('resGrupos', resourceGroupIds(r));
+    fillResourceSetor(r.setorId || '');
   } else {
-    document.getElementById('resModalTitle').textContent = 'Nova Célula / Recurso';
-    document.getElementById('resNome').value = nextResourceCode();
+    document.getElementById('resModalTitle').textContent = 'Nova Máquina';
+    document.getElementById('resNome').value = suggestAlpha(state.resources);
     document.getElementById('resDescricao').value = '';
     document.getElementById('resRestricao').value = '';
-    renderGroupChoices('resGrupos', []);
+    fillResourceSetor('');
   }
   openModal('modalResource');
 }
 async function saveResource(){
   if(deny('recursos')) return;
   const id = document.getElementById('resId').value;
-  let nome = document.getElementById('resNome').value.trim();
+  let nome = document.getElementById('resNome').value.trim().toUpperCase();
   const descricao = document.getElementById('resDescricao').value.trim();
   const restricao = document.getElementById('resRestricao').value.trim();
-  const groupIds = Array.from(document.querySelectorAll('#resGrupos input:checked')).map(function(input){ return input.value; });
-  const setor = groupIds.map(function(id){
-    const group = state.groups.find(function(item){ return item.id === id; });
-    return group ? group.nome : '';
-  }).filter(Boolean).join(', ');
-  if(!nome) nome = nextResourceCode();
+  const setorId = document.getElementById('resSetor') ? document.getElementById('resSetor').value : '';
+  const setorRecord = setorById(setorId);
+  const setor = setorRecord ? recordLabel(setorRecord) : '';
+  if(!nome) nome = suggestAlpha(state.resources);
   if(!descricao){ toast('Preencha a descrição.', 'error'); return; }
-  if(state.resources.some(function(resource){ return resource.id !== id && String(resource.nome).toLowerCase() === nome.toLowerCase(); })){
-    toast('Já existe um recurso com este código.', 'error');
+  if(!setorId){ toast('Escolha o setor da máquina.', 'error'); return; }
+  if(state.resources.some(function(resource){ return resource.id !== id && String(resource.codigo || resource.nome).toLowerCase() === nome.toLowerCase(); })){
+    toast('Já existe uma máquina com este código.', 'error');
     return;
   }
-  if(id){ Object.assign(resourceById(id), {nome,descricao,setor,restricao,grupos:groupIds}); }
-  else{ state.resources.push({id:uid(), nome, descricao, setor, restricao, status:'Parada', funcionarios:[], grupos:groupIds}); }
+  if(id){ Object.assign(resourceById(id), {codigo:nome, nome:nome, descricao:descricao, setor:setor, setorId:setorId, restricao:restricao, grupos:[]}); }
+  else{ state.resources.push({id:uid(), codigo:nome, nome:nome, descricao:descricao, setor:setor, setorId:setorId, restricao:restricao, status:'Parada', funcionarios:[], operacoes:[], grupos:[]}); }
   await persist();
   closeModal('modalResource');
   populateSetorSelect();
@@ -1475,7 +1595,7 @@ function renderRecursos(){
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Código</th><th>Descrição</th><th>Grupo</th><th>Status</th><th>Funcionários</th><th style="width:110px;"></th></tr></thead>
+        <thead><tr><th>Código</th><th>Descrição</th><th>Setor</th><th>Status</th><th>Operadores</th><th style="width:110px;"></th></tr></thead>
         <tbody id="recTbody"></tbody>
       </table>
     </div>
@@ -1519,14 +1639,14 @@ function renderOrdens(){
   const el = document.getElementById('panel-ordens');
   el.innerHTML = `
     <div class="section-title">${icon('clipboard',19)} Ordens de Produção</div>
-    <div class="section-sub">O pedido vincula equipamentos já cadastrados. Cada peça vai para o setor do grupo. Pintura e montagem só abrem no fim, e apenas nas peças marcadas. Com 100%, o pedido vai para expedição.</div>
+    <div class="section-sub">O pedido vincula equipamentos já cadastrados. Cada peça segue a rota do item e o setor definido no equipamento. Pintura e montagem abrem no fim quando a rota pede. Com 100%, o pedido vai para expedição.</div>
     <div class="toolbar">
       <div class="search-box"><span class="search-ic">${icon('search',15)}</span><input placeholder="Buscar por OP ou código..." oninput="ordensSearch=this.value; renderOrdensTable();"></div>
       <button class="btn btn-primary" data-edit="ordens" onclick="openOrderModal()">${icon('plus',14)} Nova Ordem de Produção</button>
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Pedido</th><th>Grupo</th><th>Itens</th><th>Qtd.</th><th>Produzido</th><th>Status</th><th></th></tr></thead>
+        <thead><tr><th>Pedido</th><th>Setor</th><th>Itens</th><th>Qtd.</th><th>Produzido</th><th>Status</th><th></th></tr></thead>
         <tbody id="ordensTbody"></tbody>
       </table>
     </div>
@@ -1541,10 +1661,7 @@ function renderOrdensTable(){
   tbody.innerHTML = list.length ? list.map(o=>{
     const progress = orderProgress(o);
     const items = orderItems(o);
-    const groupNames = Array.from(new Set(items.map(function(item){
-      const group = state.groups.find(function(entry){ return entry.id === item.grupoId; });
-      return group ? group.nome : '';
-    }).filter(Boolean)));
+    const groupNames = Array.from(new Set(items.map(itemSetorLabel).filter(Boolean)));
     const machines = (o.equipamentos || []).map(function(item){
       const times = Number(item.quantidade) || 1;
       return item.nome + (times > 1 ? ' × ' + times : '');
@@ -1577,22 +1694,38 @@ function explodeEquipment(equipment, times){
   const count = Math.max(1, Number(times) || 1);
   return (equipment.itens || []).map(function(part){
     const product = productByCode(part.codigo);
-    const link = productGroup(product || { familiaId: '' });
+    const setor = setorById(part.setorId || (product && product.setorId));
+    const rota = ((product && product.rota) || []).map(function(step){
+      const operation = operacaoById(step.operacaoId);
+      const stepSetor = setorById(step.setorId) || setor;
+      return {
+        operacaoId: step.operacaoId || '',
+        nome: operation ? recordLabel(operation) : 'Operação',
+        setorId: stepSetor ? stepSetor.id : '',
+        setorNome: stepSetor ? recordLabel(stepSetor) : '',
+        feita: 0
+      };
+    });
+    const flags = routeFlags(rota);
     const each = Math.max(0, Number(part.quantidade) || 0);
     return {
       id: uid(),
-      codigo: part.codigo,
+      codigo: product ? product.codigo : part.codigo,
+      codigoErp: product ? (product.codigoErp || '') : '',
       descricao: product ? product.descricao : part.codigo,
-      grupoId: link.group ? link.group.id : '',
-      familiaId: product ? (product.familiaId || '') : '',
+      grupoId: product ? (product.grupoId || '') : '',
+      familiaId: product ? (product.familiaId || '') : (equipment.familiaId || ''),
+      setorId: setor ? setor.id : '',
+      setorNome: setor ? recordLabel(setor) : '',
       quantidade: each * count,
       produzida: 0,
       pintada: 0,
       montada: 0,
-      pintura: !!(product && product.pintura),
-      montagem: !!(product && product.montagem),
+      pintura: flags.pintura || !!(product && product.pintura),
+      montagem: flags.montagem || !!(product && product.montagem),
+      rota: rota,
       equipamentoId: equipment.id,
-      equipamentoNome: equipment.nome,
+      equipamentoNome: recordLabel(equipment),
       tempo: Number(product && product.tempoFabricacaoMin) || 0
     };
   }).filter(function(item){ return item.quantidade > 0; });
@@ -1606,7 +1739,7 @@ function openOrderModal(){
   orderDraftEquipments = [];
   const select = document.getElementById('ordEquipamento');
   select.innerHTML = state.equipments.map(function(item){
-    return `<option value="${item.id}">${escapeHtml(item.nome)}</option>`;
+    return `<option value="${item.id}">${escapeHtml(recordLabel(item))}</option>`;
   }).join('');
   document.getElementById('ordQtd').value = 1;
   const numeroField = document.getElementById('ordNumero');
@@ -1624,11 +1757,11 @@ function renderOrderPreview(){
   if(!prev) return;
   if(!equipment){ prev.innerHTML = 'Escolha um equipamento cadastrado.'; return; }
   const lines = explodeEquipment(equipment, qtd).map(function(item){
-    const group = state.groups.find(function(entry){ return entry.id === item.grupoId; });
     const flags = [item.pintura ? 'pintura no fim' : '', item.montagem ? 'montagem no fim' : ''].filter(Boolean).join(' · ');
-    return `<div>${escapeHtml(group ? group.nome : 'Sem setor')} · ${escapeHtml(item.descricao)} · ${item.quantidade}${flags ? ' · ' + escapeHtml(flags) : ''}</div>`;
+    const route = (item.rota || []).map(function(step){ return step.nome; }).filter(Boolean).join(' → ');
+    return `<div>${escapeHtml(itemSetorLabel(item) || 'Sem setor')} · ${escapeHtml(item.descricao)} · ${item.quantidade}${route ? ' · ' + escapeHtml(route) : ''}${flags ? ' · ' + escapeHtml(flags) : ''}</div>`;
   }).join('');
-  prev.innerHTML = `<div><b>${escapeHtml(equipment.nome)}</b> × ${qtd || 0}</div><div style="margin-top:6px;">${lines || 'Este equipamento ainda não tem peças.'}</div>`;
+  prev.innerHTML = `<div><b>${escapeHtml(recordLabel(equipment))}</b> × ${qtd || 0}</div><div style="margin-top:6px;">${lines || 'Este equipamento ainda não tem peças.'}</div>`;
 }
 function addOrderEquipment(){
   const equipment = equipmentById(document.getElementById('ordEquipamento').value);
@@ -1705,14 +1838,13 @@ function showOrderInfo(orderId){
       <div style="margin-top:10px; font-weight:700;">Andamento: ${orderProgress(order).pct}%</div>
       ${routeHint(order) ? `<div style="margin-top:4px; color:var(--text-muted);">${escapeHtml(routeHint(order))}</div>` : ''}
       <div style="margin-top:6px;">${orderItems(order).map(function(item){
-        const group = state.groups.find(function(entry){ return entry.id === item.grupoId; });
-        const family = state.families.find(function(entry){ return entry.id === item.familiaId; });
+        const family = familyById(item.familiaId);
         const stage = itemOpenStage(item, order);
         const waitingEquipment = !stage && itemProduced(item) >= itemPlanned(item) && (item.pintura || item.montagem) && !equipmentFabricated(item, order);
         const flags = [item.pintura ? ('pintura ' + itemPainted(item) + '/' + itemPlanned(item)) : '', item.montagem ? ('montagem ' + itemAssembled(item) + '/' + itemPlanned(item)) : ''].filter(Boolean).join(' · ');
         const machine = item.equipamentoNome ? item.equipamentoNome + ' · ' : '';
         const where = stage ? (' · agora: ' + stage.nome) : (waitingEquipment ? ' · aguarda o equipamento' : ' · pronto');
-        return `<div>${escapeHtml(machine)}${escapeHtml(group ? group.nome : 'Sem grupo')} · ${escapeHtml(family ? family.nome : 'Sem família')} · ${escapeHtml(item.descricao || item.codigo || '')} · fabricado ${itemProduced(item)}/${itemPlanned(item)}${flags ? ' · ' + escapeHtml(flags) : ''}${escapeHtml(where)}</div>`;
+        return `<div>${escapeHtml(machine)}${escapeHtml(itemSetorLabel(item) || 'Sem setor')} · ${escapeHtml(family ? recordLabel(family) : 'Sem família')} · ${escapeHtml(item.descricao || item.codigo || '')} · fabricado ${itemProduced(item)}/${itemPlanned(item)}${flags ? ' · ' + escapeHtml(flags) : ''}${escapeHtml(where)}</div>`;
       }).join('')}</div>
     </div>
     <div class="card" style="box-shadow:none; background:var(--surface-2); margin-bottom:14px;">
@@ -1773,8 +1905,8 @@ function printOrder(orderId){
       <table class="print-table">
         <thead><tr><th>Equipamento</th><th>Setor</th><th>Peça</th><th>Qtd.</th><th>Pintura</th><th>Montagem</th></tr></thead>
         <tbody>${orderItems(order).map(function(item){
-          const group = state.groups.find(function(entry){ return entry.id === item.grupoId; });
-          return `<tr><td>${escapeHtml(item.equipamentoNome || '—')}</td><td>${escapeHtml(group ? group.nome : '—')}</td><td>${escapeHtml(item.descricao || item.codigo || '')}</td><td>${itemPlanned(item)}</td><td>${item.pintura ? 'Sim' : 'Não'}</td><td>${item.montagem ? 'Sim' : 'Não'}</td></tr>`;
+          const route = (item.rota || []).map(function(step){ return step.nome; }).filter(Boolean).join(' → ');
+          return `<tr><td>${escapeHtml(item.equipamentoNome || '—')}</td><td>${escapeHtml(itemSetorLabel(item) || '—')}${route ? '<div>' + escapeHtml(route) + '</div>' : ''}</td><td>${escapeHtml(item.descricao || item.codigo || '')}</td><td>${itemPlanned(item)}</td><td>${item.pintura ? 'Sim' : 'Não'}</td><td>${item.montagem ? 'Sim' : 'Não'}</td></tr>`;
         }).join('')}</tbody>
       </table>
       <div class="print-section-title">Apontamento de Produção — preenchimento manual</div>
@@ -1798,14 +1930,14 @@ function renderEngenharia(){
   const el = document.getElementById('panel-engenharia');
   el.innerHTML = `
     <div class="section-title">${icon('gear',19)} Engenharia de Produto</div>
-    <div class="section-sub">Cadastro de códigos ERP, descrições, classificação e tempos de fabricação utilizados para gerar as ordens de produção. Padrão de código: <b>30.2000.XXXX</b> para PI (produto intermediário) e <b>30.3000.XXXX</b> para PF (produto final).</div>
+    <div class="section-sub">Consulta dos itens. O código interno é AA e o ERP fica separado: <b>30.2000.XXXX</b> para PI e <b>30.3000.XXXX</b> para PF. Incluir e alterar é em Cadastro, na opção Item.</div>
     <div class="toolbar">
       <div class="search-box"><span class="search-ic">${icon('search',15)}</span><input placeholder="Buscar código ou descrição..." oninput="engSearch=this.value; renderEngenhariaTable();"></div>
-      <button class="btn btn-primary" data-edit="engenharia" onclick="addProductRow()">${icon('plus',14)} Novo Código</button>
+      <button class="btn btn-primary" data-edit="engenharia" onclick="openCadastroItem()">${icon('plus',14)} Novo item</button>
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th style="width:16%;">Código ERP</th><th style="width:10%;">Classificação</th><th>Descrição</th><th style="width:16%;">Tempo (min/peça)</th><th style="width:16%;">Família</th><th style="width:60px;"></th></tr></thead>
+        <thead><tr><th>Código</th><th>ERP</th><th>Descrição</th><th>Família</th><th>Setor</th><th style="width:90px;"></th></tr></thead>
         <tbody id="engTbody"></tbody>
       </table>
     </div>
@@ -1815,20 +1947,26 @@ function renderEngenharia(){
 function renderCadastro(){
   const el = document.getElementById('panel-cadastro');
   if(!el) return;
+  const options = [
+    ['setor', 'Setor', 'Lugar da fábrica. Ex.: Chaparia, Usinagem.'],
+    ['grupo', 'Grupo', 'Categoria acima da família. Ex.: Separação.'],
+    ['familia', 'Família', 'Linha do produto e o conjunto padrão de peças.'],
+    ['item', 'Item', 'Peça unitária, material, máquinas e rota.'],
+    ['operacao', 'Operação', 'Etapas como cortar, dobrar e soldar.'],
+    ['operador', 'Operador', 'Pessoa, turno e máquinas.'],
+    ['maquina', 'Máquina', 'Setor, operações e operadores.'],
+    ['equipamento', 'Equipamento', 'Um modelo da família, com as peças copiadas.']
+  ];
   el.innerHTML = `
     <div class="section-title">${icon('plus',19)} Cadastro</div>
-    <div class="section-sub">Itens, grupos, famílias e equipamentos. O grupo é o setor da peça.</div>
-    <div class="card" id="productCatalog" style="margin-bottom:14px;"></div>
-    <div class="grid grid-2">
-      <div class="card" id="groupCatalog"></div>
-      <div class="card" id="familyCatalog"></div>
-    </div>
-    <div class="card" id="equipmentCatalog" style="margin-top:14px;"></div>
-    <div class="card" id="groupItems" style="margin-top:14px;"></div>
+    <div class="section-sub">Ordem sugerida: setor, operação e máquina; depois grupo, família e item; por último o equipamento, que herda as peças da família.</div>
+    <div class="cadastro-choices">${options.map(function(choice){
+      const active = cadastroChoice === choice[0] ? ' active' : '';
+      return `<button type="button" class="settings-choice${active}" onclick="setCadastroChoice('${choice[0]}')"><b>${choice[1]}</b><span>${choice[2]}</span></button>`;
+    }).join('')}</div>
+    <div class="card" id="cadastroBody"></div>
   `;
-  renderProductCatalog();
-  renderCatalogs();
-  renderEquipmentCatalog();
+  renderCadastroBody();
 }
 let itemSearch = '';
 let itemGroupFilter = '';
@@ -1855,7 +1993,7 @@ function syncProductOnOrders(oldCode, oldDescricao, product){
       item.codigo = product.codigo;
       if(item.descricao === oldDescricao) item.descricao = product.descricao;
       item.familiaId = product.familiaId || '';
-      item.grupoId = grupoId;
+      item.grupoId = product.grupoId || grupoId;
       item.pintura = !!product.pintura;
       item.montagem = !!product.montagem;
     });
@@ -1866,6 +2004,11 @@ function syncProductOnOrders(oldCode, oldDescricao, product){
   });
   state.equipments.forEach(function(equipment){
     (equipment.itens || []).forEach(function(part){
+      if(part.codigo === oldCode) part.codigo = product.codigo;
+    });
+  });
+  state.families.forEach(function(family){
+    (family.itens || []).forEach(function(part){
       if(part.codigo === oldCode) part.codigo = product.codigo;
     });
   });
@@ -2076,28 +2219,26 @@ function renderEngenhariaTable(){
   const tbody = document.getElementById('engTbody');
   if(!tbody) return;
   const q = engSearch.trim().toLowerCase();
-  const list = state.products.filter(p=> !q || p.codigo.toLowerCase().includes(q) || p.descricao.toLowerCase().includes(q));
-  tbody.innerHTML = list.length ? list.map((p)=>{
-    const realIdx = state.products.indexOf(p);
+  const list = state.products.filter(function(product){
+    const blob = [product.codigo, product.codigoErp, product.descricao].join(' ').toLowerCase();
+    return !q || blob.indexOf(q) >= 0;
+  });
+  tbody.innerHTML = list.length ? list.map(function(product){
+    const family = familyById(product.familiaId);
+    const setor = setorById(product.setorId);
     return `<tr>
-      <td class="editable-td mono"><input data-edit="engenharia" value="${p.codigo}" onchange="updateProduct(${realIdx},'codigo',this.value)"></td>
-      <td><select data-edit="engenharia" class="class-select class-${p.classificacao}" onchange="updateClassificacao(${realIdx}, this.value)">
-        <option value="PI" ${p.classificacao==='PI'?'selected':''}>PI</option>
-        <option value="PF" ${p.classificacao==='PF'?'selected':''}>PF</option>
-      </select></td>
-      <td class="editable-td"><input data-edit="engenharia" value="${p.descricao}" onchange="updateProduct(${realIdx},'descricao',this.value)"></td>
-      <td class="editable-td"><input data-edit="engenharia" type="number" step="0.1" min="0" value="${p.tempoFabricacaoMin}" onchange="updateProduct(${realIdx},'tempoFabricacaoMin',this.value)"></td>
-      <td class="editable-td"><select data-edit="engenharia" onchange="updateProduct(${realIdx},'familiaId',this.value)"><option value="">Família</option>${state.families.map(function(family){ return `<option value="${family.id}" ${p.familiaId===family.id?'selected':''}>${escapeHtml(family.nome)}</option>`; }).join('')}</select></td>
-      <td><button class="icon-btn danger" data-edit="engenharia" onclick="removeProduct(${realIdx})" title="Remover">${icon('trash',14)}</button></td>
+      <td class="mono">${escapeHtml(product.codigo || '')}</td>
+      <td class="mono">${escapeHtml(product.codigoErp || '')}</td>
+      <td>${escapeHtml(product.descricao || '')}</td>
+      <td>${escapeHtml(family ? recordLabel(family) : '—')}</td>
+      <td>${escapeHtml(setor ? recordLabel(setor) : '—')}</td>
+      <td><button class="btn btn-sm" type="button" data-edit="engenharia" onclick="openCadastroItem('${escapeHtml(product.codigo)}')">Editar</button></td>
     </tr>`;
-  }).join('') : `<tr class="empty-row"><td colspan="5">Nenhum código cadastrado. Clique em "Novo Código" para começar.</td></tr>`;
+  }).join('') : `<tr class="empty-row"><td colspan="6">Nenhum item cadastrado. Abra Cadastro e escolha Item.</td></tr>`;
   applyAccess();
 }
 async function addProductRow(){
-  if(deny('engenharia')) return;
-  state.products.push({codigo: genErpCode('PF'), descricao:'Nova peça', tempoFabricacaoMin:1, classificacao:'PF'});
-  await persist();
-  renderEngenhariaTable();
+  openCadastroItem();
 }
 async function updateProduct(idx, field, value){
   if(deny('engenharia')) return;
@@ -2122,11 +2263,12 @@ async function updateClassificacao(idx, newClass){
   const oldCode = p.codigo;
   const oldDescricao = p.descricao;
   p.classificacao = newClass;
-  const parts = (p.codigo||'').split('.');
+  const source = String(p.codigoErp || (String(p.codigo || '').indexOf('.') >= 0 ? p.codigo : '') || '');
+  const parts = source.split('.');
   const last4 = (parts[2] && /^\d{4}$/.test(parts[2])) ? parts[2] : '';
   let codigo = last4 ? ('30.' + (newClass==='PI'?'2000':'3000') + '.' + last4) : genErpCode(newClass);
   if(productCodeTaken(codigo, idx)) codigo = genErpCode(newClass);
-  p.codigo = codigo;
+  p.codigoErp = codigo;
   syncProductOnOrders(oldCode, oldDescricao, p);
   await persist();
   renderEngenhariaTable();
@@ -2159,7 +2301,7 @@ function renderFuncionarios(){
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th style="width:70px;">Nº</th><th>Nome</th><th>Função</th><th>Turno</th><th>Vínculo</th><th>Situação</th><th style="width:110px;"></th></tr></thead>
+        <thead><tr><th style="width:70px;">Código</th><th style="width:70px;">Nº</th><th>Nome</th><th>Função</th><th>Turno</th><th>Vínculo</th><th>Situação</th><th style="width:110px;"></th></tr></thead>
         <tbody id="funcTbody"></tbody>
       </table>
     </div>
@@ -2170,11 +2312,12 @@ function renderFuncionariosTable(){
   const tbody = document.getElementById('funcTbody');
   if(!tbody) return;
   const q = funcSearch.trim().toLowerCase();
-  const list = state.employees.filter(e => !q || (e.nome+' '+e.sobrenome).toLowerCase().includes(q) || e.funcao.toLowerCase().includes(q) || (e.numero||'').includes(q));
+  const list = state.employees.filter(e => !q || (e.nome+' '+e.sobrenome).toLowerCase().includes(q) || e.funcao.toLowerCase().includes(q) || (e.numero||'').includes(q) || String(e.codigo || '').toLowerCase().includes(q));
   tbody.innerHTML = list.length ? list.map(e=>{
     const vac = isOnVacation(e);
     const loc = employeeLocation(e.id);
     return `<tr class="${vac?'row-vacation':''}">
+      <td class="mono">${escapeHtml(e.codigo || '—')}</td>
       <td class="mono" style="font-weight:800; color:${vac?'var(--red-dark)':'var(--blue)'};">${e.numero||'—'}</td>
       <td>
         <div style="display:flex; align-items:center; gap:11px;">
@@ -2191,7 +2334,7 @@ function renderFuncionariosTable(){
         <button class="icon-btn danger" data-edit="funcionarios" onclick="removeEmployee('${e.id}')" title="Remover">${icon('trash',14)}</button>
       </td>
     </tr>`;
-  }).join('') : `<tr class="empty-row"><td colspan="6">Nenhum funcionário cadastrado ainda.</td></tr>`;
+  }).join('') : `<tr class="empty-row"><td colspan="8">Nenhum funcionário cadastrado ainda.</td></tr>`;
   applyAccess();
 }
 function toggleFeriasFields(){
@@ -2204,6 +2347,7 @@ function openEmployeeModal(id){
     const e = state.employees.find(x=>x.id===id);
     document.getElementById('empModalTitle').textContent = 'Editar Funcionário';
     document.getElementById('empNumero').value = e.numero || '';
+    document.getElementById('empCodigo').value = e.codigo || '';
     document.getElementById('empNome').value = e.nome;
     document.getElementById('empSobrenome').value = e.sobrenome;
     document.getElementById('empFuncao').value = e.funcao;
@@ -2215,6 +2359,7 @@ function openEmployeeModal(id){
   } else {
     document.getElementById('empModalTitle').textContent = 'Novo Funcionário';
     document.getElementById('empNumero').value = formatEmployeeNumber(state.nextEmployeeNum);
+    document.getElementById('empCodigo').value = suggestAlpha(state.employees);
     document.getElementById('empNome').value = '';
     document.getElementById('empSobrenome').value = '';
     document.getElementById('empFuncao').value = '';
@@ -2246,14 +2391,16 @@ async function saveEmployee(){
   const machineIds = Array.from(document.querySelectorAll('#empMaquinas input:checked')).map(function(input){ return input.value; });
   const assignedNumber = assignEmployeeNumber(document.getElementById('empNumero').value, id);
   if(assignedNumber.error){ toast(assignedNumber.error, 'error'); return; }
+  const claimed = claimCode(state.employees, document.getElementById('empCodigo').value || suggestAlpha(state.employees), id);
+  if(claimed.error){ toast(claimed.error, 'error'); return; }
   const novoNumero = assignedNumber.numero;
   let employeeId = id;
   if(id){
     const e = state.employees.find(x=>x.id===id);
-    Object.assign(e, {numero:novoNumero, nome,sobrenome,funcao,turno,vinculo,ferias});
+    Object.assign(e, {codigo:claimed.codigo, numero:novoNumero, nome,sobrenome,funcao,turno,vinculo,ferias});
   } else {
     employeeId = uid();
-    state.employees.push({id:employeeId, numero:novoNumero, nome, sobrenome, funcao, turno, vinculo, ferias});
+    state.employees.push({id:employeeId, codigo:claimed.codigo, numero:novoNumero, nome, sobrenome, funcao, turno, vinculo, ferias});
   }
   syncEmployeeMachines(employeeId, machineIds);
   await persist();
@@ -2267,7 +2414,7 @@ async function removeEmployee(id){
   if(deny('funcionarios')) return;
   if(!confirm('Remover este funcionário?')) return;
   state.employees = state.employees.filter(e=>e.id!==id);
-  state.resources.forEach(r=>{ r.funcionarios = r.funcionarios.filter(eid=>eid!==id); });
+  state.resources.forEach(r=>{ r.funcionarios = (r.funcionarios || []).filter(eid=>eid!==id); });
   await persist();
   renderFuncionariosTable();
   refreshApontamentoDatalist();
@@ -2348,7 +2495,7 @@ function renderIniciarModalBody(){
       <button type="button" class="btn btn-ghost btn-sm" style="margin-top:10px;" onclick="toggleQuickMachine()">Cadastrar máquina</button>
       <div id="quickMachineBox" style="display:${apShowNewMachine?'block':'none'}; margin-top:10px;">
         <div class="field-row">
-          <div class="field"><label>Código <span class="field-hint">automático, editável</span></label><input id="quickResNome" value="${escapeHtml(nextResourceCode())}" maxlength="40"></div>
+          <div class="field"><label>Código <span class="field-hint">automático, editável</span></label><input id="quickResNome" value="${escapeHtml(suggestAlpha(state.resources))}" maxlength="12"></div>
           <div class="field"><label>Descrição</label><input id="quickResDescricao" placeholder="Ex: Torno"></div>
         </div>
         <button type="button" class="btn btn-primary btn-sm" onclick="saveQuickMachine()">Salvar máquina</button>
@@ -2465,7 +2612,7 @@ async function saveQuickEmployee(){
   if(assignedNumber.error){ toast(assignedNumber.error, 'error'); return; }
   const numero = assignedNumber.numero;
   const id = uid();
-  state.employees.push({ id: id, numero: numero, nome: nome, sobrenome: sobrenome, funcao: funcao, turno: '1º Turno', vinculo: 'Efetivo', ferias: null });
+  state.employees.push({ id: id, codigo: suggestAlpha(state.employees), numero: numero, nome: nome, sobrenome: sobrenome, funcao: funcao, turno: '1º Turno', vinculo: 'Efetivo', ferias: null });
   const machineIds = Array.from(document.querySelectorAll('#quickEmpMaquinas input:checked')).map(function(input){ return input.value; });
   syncEmployeeMachines(id, machineIds);
   await persist();
@@ -2477,15 +2624,15 @@ async function saveQuickEmployee(){
 }
 async function saveQuickMachine(){
   if(deny('apontamento')) return;
-  let nome = document.getElementById('quickResNome').value.trim();
-  if(!nome) nome = nextResourceCode();
+  let nome = document.getElementById('quickResNome').value.trim().toUpperCase();
+  if(!nome) nome = suggestAlpha(state.resources);
   const descricao = document.getElementById('quickResDescricao').value.trim() || nome;
-  if(!nome){ toast('Informe o código da máquina.', 'error'); return; }
-  if(state.resources.some(function(resource){ return resource.nome.toLowerCase() === nome.toLowerCase(); })){
+  if(state.resources.some(function(resource){ return String(resource.codigo || resource.nome).toLowerCase() === nome.toLowerCase(); })){
     toast('Já existe uma máquina com este código.', 'error');
     return;
   }
-  const resource = { id: uid(), nome: nome, descricao: descricao, setor: '', restricao: '', status: 'Parada', funcionarios: [], grupos: [] };
+  const setor = state.setores[0] || null;
+  const resource = { id: uid(), codigo: nome, nome: nome, descricao: descricao, setorId: setor ? setor.id : '', setor: setor ? recordLabel(setor) : '', restricao: '', status: 'Parada', funcionarios: [], operacoes: [], grupos: [] };
   if(apFuncionarioId) resource.funcionarios.push(apFuncionarioId);
   state.resources.push(resource);
   await persist();
@@ -2586,7 +2733,23 @@ async function endPunch(punchId){
       p.quantidadeRefugada = 0;
       return;
     }
-    if(item && prod > 0) applyItemQty(item, prod, order);
+    if(item && prod > 0){
+      const resource = state.resources.find(function(entry){ return entry.nome === p.recurso || entry.codigo === p.recurso; });
+      const product = productByCode(item.codigo);
+      const allowed = product && Array.isArray(product.maquinas) && product.maquinas.length ? product.maquinas : null;
+      const stage = itemOpenStage(item, order);
+      const step = stage && stage.key === 'etapa' ? item.rota[stage.index] : null;
+      const blocked = (step && step.maquinaId && (!resource || resource.id !== step.maquinaId)) || (allowed && resource && allowed.indexOf(resource.id) < 0);
+      if(blocked){
+        toast('Esta peça não pode ser feita nesta máquina.', 'error');
+        p.fim = null;
+        p.status = 'Aberto';
+        p.quantidadeProduzida = 0;
+        p.quantidadeRefugada = 0;
+        return;
+      }
+      applyItemQty(item, prod, order);
+    }
     recalcOrderStatus(order);
   }
   await persist();
@@ -2941,11 +3104,11 @@ function currentCompanyProfile(){
 }
 function sectorCheckMarkup(selected){
   const names = [];
-  (state.groups || []).forEach(function(group){
-    const name = String(group.nome || '').trim();
+  (state.setores || []).forEach(function(setor){
+    const name = recordLabel(setor);
     if(name && names.indexOf(name) < 0) names.push(name);
   });
-  if(!names.length) return '<div class="section-sub">Ainda não há setores. Cadastre os grupos em Cadastro. Sem marcação, o perfil vê todos os setores.</div>';
+  if(!names.length) return '<div class="section-sub">Ainda não há setores. Cadastre em Cadastro, na opção Setor. Sem marcação, o perfil vê todos os setores.</div>';
   return `<div class="perm-grid" id="profileSectors">${names.map(function(name){
     const checked = (selected || []).some(function(item){ return sectorKey(item) === sectorKey(name); }) ? 'checked' : '';
     return `<label class="perm-item"><input type="checkbox" value="${escapeHtml(name)}" ${checked}> ${escapeHtml(name)}</label>`;
@@ -3480,209 +3643,572 @@ async function commitOrderStatus(order, next, motivo){
   if(activeTab === 'acompanhamento') renderAcompTable();
   toast('Status atualizado.', 'success');
 }
-function renderCatalogs(){
-  const groups = document.getElementById('groupCatalog');
-  const families = document.getElementById('familyCatalog');
-  if(!groups || !families) return;
-  groups.innerHTML = `<div class="section-title" style="font-size:16px;">Cadastro Grupo</div>
-    <div class="section-sub">O grupo é o setor da peça. Ex.: Usinagem, Chaparia, Solda.</div>
-    <div class="field"><label>Nome</label><input id="groupName" data-edit="engenharia"></div>
-    <button class="btn btn-primary" data-edit="engenharia" type="button" onclick="saveGroup()">Salvar grupo</button>
-    <div style="margin-top:12px;">${state.groups.map(function(group){
-      return `<span style="display:inline-flex;align-items:center;gap:4px;margin:4px;">
-        <button class="btn btn-sm" type="button" onclick="showGroupItems('${group.id}')">${escapeHtml(group.nome)}</button>
-        <button class="icon-btn danger" data-edit="engenharia" type="button" onclick="deleteGroup('${group.id}')" title="Excluir grupo">${icon('trash',14)}</button>
-      </span>`;
-    }).join('') || '<div class="section-sub">Nenhum grupo.</div>'}</div>`;
-  families.innerHTML = `<div class="section-title" style="font-size:16px;">Cadastro Família</div>
-    <div class="section-sub">Ex.: Ponteiras, Chapas, Tubos, Arruelas.</div>
-    <div class="field"><label>Nome</label><input id="familyName" data-edit="engenharia"></div>
-    <div class="field"><label>Grupo</label><select id="familyGroup" data-edit="engenharia">${state.groups.map(function(group){ return `<option value="${group.id}">${escapeHtml(group.nome)}</option>`; }).join('')}</select></div>
-    <button class="btn btn-primary" data-edit="engenharia" type="button" onclick="saveFamily()">Salvar família</button>
-    <div style="margin-top:12px;">${state.families.map(function(family){
-      return `<span style="display:inline-flex;align-items:center;gap:4px;margin:4px;">
-        <button class="btn btn-sm" type="button" onclick="showFamilyModels('${family.id}')">${escapeHtml(family.nome)}</button>
-        <button class="icon-btn danger" data-edit="engenharia" type="button" onclick="deleteFamily('${family.id}')" title="Excluir família">${icon('trash',14)}</button>
-      </span>`;
-    }).join('') || '<div class="section-sub">Nenhuma família.</div>'}</div>`;
-}
-let equipmentNameDraft = '';
-let equipmentParts = [];
-function setEquipmentName(value){ equipmentNameDraft = value; }
-function renderEquipmentCatalog(){
-  const box = document.getElementById('equipmentCatalog');
-  if(!box) return;
-  const options = state.products.map(function(product){
-    const link = productGroup(product);
-    const sector = link.group ? link.group.nome : 'Sem setor';
-    return `<option value="${escapeHtml(product.codigo)}">${escapeHtml(product.descricao)} · ${escapeHtml(sector)}</option>`;
-  }).join('');
-  const parts = equipmentParts.map(function(part, index){
-    const product = productByCode(part.codigo);
-    return `<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;margin-top:6px;">
-      <span>${escapeHtml(product ? product.descricao : part.codigo)} · ${part.quantidade}</span>
-      <button class="icon-btn danger" type="button" onclick="removeEquipmentPart(${index})" title="Tirar peça">${icon('trash',14)}</button>
-    </div>`;
-  }).join('');
-  const saved = state.equipments.map(function(equipment){
-    const summary = (equipment.itens || []).map(function(part){
-      const product = productByCode(part.codigo);
-      return (product ? product.descricao : part.codigo) + ' × ' + part.quantidade;
-    }).join(', ');
-    return `<div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start;margin-top:8px;">
-      <div><b>${escapeHtml(equipment.nome)}</b><div style="font-size:12px;color:var(--text-muted);">${escapeHtml(summary || 'Sem peças')}</div></div>
-      <button class="icon-btn danger" data-edit="engenharia" type="button" onclick="deleteEquipment('${equipment.id}')" title="Excluir equipamento">${icon('trash',14)}</button>
-    </div>`;
-  }).join('');
-  box.innerHTML = `<div class="section-title" style="font-size:16px;">Cadastro Equipamento</div>
-    <div class="section-sub">O equipamento junta as peças. Ex.: Decanter 183, Flotador 400, Tanque 10m³.</div>
-    <div class="field"><label>Nome</label><input id="equipmentName" data-edit="engenharia" value="${escapeHtml(equipmentNameDraft)}" oninput="setEquipmentName(this.value)" placeholder="Ex.: Decanter 183"></div>
-    <div class="field-row">
-      <div class="field grow"><label>Peça</label><select id="equipmentPart" data-edit="engenharia">${options || '<option value="">Cadastre um item antes</option>'}</select></div>
-      <div class="field"><label>Quantidade</label><input id="equipmentQty" data-edit="engenharia" type="number" min="1" value="1"></div>
-    </div>
-    <button class="btn btn-ghost" data-edit="engenharia" type="button" onclick="addEquipmentPart()">Adicionar peça</button>
-    <div>${parts || '<div class="section-sub" style="margin-top:8px;">Nenhuma peça nesta composição.</div>'}</div>
-    <button class="btn btn-primary" data-edit="engenharia" type="button" style="margin-top:10px;" onclick="saveEquipment()">Salvar equipamento</button>
-    <div style="margin-top:12px;">${saved || '<div class="section-sub">Nenhum equipamento.</div>'}</div>`;
-}
-function addEquipmentPart(){
-  if(deny('engenharia')) return;
-  const name = document.getElementById('equipmentName');
-  if(name) equipmentNameDraft = name.value;
-  const codigo = document.getElementById('equipmentPart').value;
-  const quantidade = Number(document.getElementById('equipmentQty').value);
-  if(!codigo || !quantidade || quantidade <= 0){ toast('Escolha a peça e a quantidade.', 'error'); return; }
-  const existing = equipmentParts.find(function(part){ return part.codigo === codigo; });
-  if(existing) existing.quantidade += quantidade;
-  else equipmentParts.push({ codigo: codigo, quantidade: quantidade });
-  renderEquipmentCatalog();
-  applyAccess();
-}
-function removeEquipmentPart(index){
-  equipmentParts.splice(index, 1);
-  renderEquipmentCatalog();
-  applyAccess();
-}
-async function saveEquipment(){
-  if(deny('engenharia')) return;
-  const nome = (document.getElementById('equipmentName').value || '').trim();
-  if(!nome){ toast('Informe o nome do equipamento.', 'error'); return; }
-  if(!equipmentParts.length){ toast('Adicione ao menos uma peça.', 'error'); return; }
-  state.equipments.push({ id: uid(), nome: nome, itens: equipmentParts.map(function(part){ return { codigo: part.codigo, quantidade: part.quantidade }; }) });
-  equipmentNameDraft = '';
-  equipmentParts = [];
-  await persist();
-  renderEquipmentCatalog();
-  applyAccess();
-  toast('Equipamento cadastrado.', 'success');
-}
-async function deleteEquipment(id){
-  if(deny('engenharia')) return;
-  const equipment = equipmentById(id);
-  if(!equipment) return;
-  if(!confirm('Excluir o equipamento ' + equipment.nome + '? Pedidos já gerados continuam com a composição gravada.')) return;
-  state.equipments = state.equipments.filter(function(item){ return item.id !== id; });
-  await persist();
-  renderEquipmentCatalog();
-  applyAccess();
-}
-async function saveGroup(){
-  if(deny('engenharia')) return;
-  const nome = document.getElementById('groupName').value.trim();
-  if(!nome){ toast('Informe o nome do grupo.', 'error'); return; }
-  state.groups.push({ id: uid(), nome: nome });
-  await persist();
-  renderCatalogs();
-  applyAccess();
-}
-async function saveFamily(){
-  if(deny('engenharia')) return;
-  const nome = document.getElementById('familyName').value.trim();
-  const grupoId = document.getElementById('familyGroup').value;
-  if(!nome || !grupoId){ toast('Informe a família e o grupo.', 'error'); return; }
-  state.families.push({ id: uid(), nome: nome, grupoId: grupoId });
-  await persist();
-  renderCatalogs();
-  renderProductCatalog();
-  renderEngenhariaTable();
-  applyAccess();
-}
-function dropLinkedOrders(familyIds, productCodes, groupIds){
-  const removed = state.orders.filter(function(order){
-    const items = order.itens || [];
-    if(productCodes.indexOf(order.codigo) >= 0) return true;
-    return items.some(function(item){
-      return familyIds.indexOf(item.familiaId) >= 0 || groupIds.indexOf(item.grupoId) >= 0;
-    });
-  }).map(function(order){ return order.id; });
-  state.orders = state.orders.filter(function(order){ return removed.indexOf(order.id) < 0; });
-  state.punches = state.punches.filter(function(punch){ return removed.indexOf(punch.ordemId) < 0; });
-}
-async function deleteGroup(id){
-  if(deny('engenharia')) return;
-  const group = state.groups.find(function(item){ return item.id === id; });
-  if(!group) return;
-  const families = state.families.filter(function(item){ return item.grupoId === id; });
-  const familyIds = families.map(function(item){ return item.id; });
-  const models = state.products.filter(function(item){ return familyIds.indexOf(item.familiaId) >= 0; });
-  const confirmed = confirm('Excluir o grupo ' + group.nome + '?\n\nTudo que estiver vinculado será excluído: ' + families.length + ' família(s), ' + models.length + ' modelo(s) e as ordens desses modelos.');
-  if(!confirmed) return;
-  dropLinkedOrders(familyIds, models.map(function(item){ return item.codigo; }), [id]);
-  state.products = state.products.filter(function(item){ return familyIds.indexOf(item.familiaId) < 0; });
-  state.families = state.families.filter(function(item){ return item.grupoId !== id; });
-  state.groups = state.groups.filter(function(item){ return item.id !== id; });
-  state.resources.forEach(function(resource){
-    if(Array.isArray(resource.grupos)) resource.grupos = resource.grupos.filter(function(groupId){ return groupId !== id; });
+let cadastroChoice = 'setor';
+let cadastroEditId = '';
+let kitDraft = [];
+let routeDraft = [];
+let textDraft = {};
+const TURNO_OPTIONS = ['1º Turno', '2º Turno', '3º Turno', 'Turno Comercial', 'Administrativo'];
+
+function claimCode(list, raw, exceptId){
+  const codigo = String(raw || '').trim().toUpperCase();
+  if(!codigo) return { error: 'Informe o código.' };
+  const taken = (list || []).some(function(item){
+    if(exceptId && (item.id === exceptId || item.codigo === exceptId)) return false;
+    return String(item.codigo || '').trim().toUpperCase() === codigo;
   });
-  await persist();
-  renderCatalogs();
-  if(typeof renderProductCatalog === 'function') renderProductCatalog();
-  if(typeof renderEngenhariaTable === 'function') renderEngenhariaTable();
-  const box = document.getElementById('groupItems');
-  if(box) box.innerHTML = '';
+  if(taken) return { error: 'Este código já existe.' };
+  return { codigo: codigo };
+}
+function cadastroInput(id){
+  const el = document.getElementById(id);
+  return el ? String(el.value || '').trim() : '';
+}
+function readChecks(id){
+  return Array.from(document.querySelectorAll('#' + id + ' input:checked')).map(function(input){ return input.value; });
+}
+function fieldValue(id, fallback){
+  if(Object.prototype.hasOwnProperty.call(textDraft, id)) return textDraft[id];
+  return fallback == null ? '' : fallback;
+}
+function checkedDraft(key, fallback){
+  if(Object.prototype.hasOwnProperty.call(textDraft, key)) return textDraft[key];
+  return fallback || [];
+}
+function rememberTexts(){
+  ['cadCodigo','cadDescricao','cadErp','cadGrupo','cadFamilia','cadSetor','cadMaterial','cadTurno','cadClasse','cadTempo'].forEach(function(id){
+    const el = document.getElementById(id);
+    if(el) textDraft[id] = el.value;
+  });
+  if(document.getElementById('cadMaquinas')) textDraft.maquinas = readChecks('cadMaquinas');
+  if(document.getElementById('cadOperacoes')) textDraft.operacoes = readChecks('cadOperacoes');
+  if(document.getElementById('cadOperadores')) textDraft.operadores = readChecks('cadOperadores');
+}
+function pullKitDraft(){
+  document.querySelectorAll('[data-kit-index]').forEach(function(row){
+    const index = Number(row.getAttribute('data-kit-index'));
+    if(!kitDraft[index]) return;
+    const item = row.querySelector('.kit-item');
+    const qty = row.querySelector('.kit-qty');
+    const setor = row.querySelector('.kit-setor');
+    if(item) kitDraft[index].codigo = item.value;
+    if(qty) kitDraft[index].quantidade = Math.max(0, Number(qty.value) || 0);
+    if(setor) kitDraft[index].setorId = setor.value;
+  });
+}
+function pullRouteDraft(){
+  document.querySelectorAll('[data-route-index]').forEach(function(row){
+    const index = Number(row.getAttribute('data-route-index'));
+    if(!routeDraft[index]) return;
+    const operation = row.querySelector('.route-op');
+    const setor = row.querySelector('.route-setor');
+    const machine = row.querySelector('.route-maq');
+    if(operation) routeDraft[index].operacaoId = operation.value;
+    if(setor) routeDraft[index].setorId = setor.value;
+    if(machine) routeDraft[index].maquinaId = machine.value;
+  });
+}
+function resetCadastroForm(){
+  cadastroEditId = '';
+  kitDraft = [];
+  routeDraft = [];
+  textDraft = {};
+}
+function setCadastroChoice(choice){
+  cadastroChoice = choice;
+  resetCadastroForm();
+  renderCadastro();
   applyAccess();
-  toast('Grupo excluído com os vínculos.', 'success');
 }
-async function deleteFamily(id){
-  if(deny('engenharia')) return;
-  const family = state.families.find(function(item){ return item.id === id; });
-  if(!family) return;
-  const models = state.products.filter(function(item){ return item.familiaId === id; });
-  const confirmed = confirm('Excluir a família ' + family.nome + '?\n\nTudo que estiver vinculado será excluído: ' + models.length + ' modelo(s) e as ordens desses modelos.');
-  if(!confirmed) return;
-  dropLinkedOrders([id], models.map(function(item){ return item.codigo; }), []);
-  state.products = state.products.filter(function(item){ return item.familiaId !== id; });
-  state.families = state.families.filter(function(item){ return item.id !== id; });
-  await persist();
-  renderCatalogs();
-  if(typeof renderProductCatalog === 'function') renderProductCatalog();
-  if(typeof renderEngenhariaTable === 'function') renderEngenhariaTable();
-  const box = document.getElementById('groupItems');
-  if(box) box.innerHTML = '';
+function guardCadastro(){
+  if(cadastroChoice === 'operador' && (canEdit('funcionarios') || canEdit('engenharia'))) return false;
+  if(cadastroChoice === 'maquina' && (canEdit('recursos') || canEdit('engenharia'))) return false;
+  if(cadastroChoice !== 'operador' && cadastroChoice !== 'maquina' && canEdit('engenharia')) return false;
+  const module = cadastroChoice === 'operador' ? 'funcionarios' : (cadastroChoice === 'maquina' ? 'recursos' : 'engenharia');
+  return deny(module);
+}
+function suggestedCadastroCode(){
+  if(cadastroChoice === 'setor') return nextNumericCode(state.setores);
+  if(cadastroChoice === 'grupo') return nextNumericCode(state.groups);
+  if(cadastroChoice === 'familia') return suggestAlpha(state.families);
+  if(cadastroChoice === 'item') return suggestAlpha(state.products);
+  if(cadastroChoice === 'operacao') return suggestAlpha(state.operacoes);
+  if(cadastroChoice === 'operador') return suggestAlpha(state.employees);
+  if(cadastroChoice === 'maquina') return suggestAlpha(state.resources);
+  return suggestAlpha(state.equipments);
+}
+function cadastroRecord(id){
+  if(!id) return null;
+  if(cadastroChoice === 'setor') return setorById(id);
+  if(cadastroChoice === 'grupo') return groupById(id);
+  if(cadastroChoice === 'familia') return familyById(id);
+  if(cadastroChoice === 'item') return state.products.find(function(item){ return item.codigo === id; }) || null;
+  if(cadastroChoice === 'operacao') return operacaoById(id);
+  if(cadastroChoice === 'operador') return state.employees.find(function(item){ return item.id === id; }) || null;
+  if(cadastroChoice === 'maquina') return resourceById(id);
+  return equipmentById(id);
+}
+function selectOptions(items, selected, blank){
+  const head = blank ? `<option value="">${escapeHtml(blank)}</option>` : '';
+  return head + (items || []).map(function(item){
+    return `<option value="${escapeHtml(item.id)}" ${item.id === selected ? 'selected' : ''}>${escapeHtml(recordLabel(item))}</option>`;
+  }).join('');
+}
+function productOptions(selected){
+  const head = '<option value="">Selecione o item</option>';
+  return head + state.products.map(function(product){
+    return `<option value="${escapeHtml(product.codigo)}" ${product.codigo === selected ? 'selected' : ''}>${escapeHtml((product.codigo || '') + ' — ' + (product.descricao || ''))}</option>`;
+  }).join('');
+}
+function checkGrid(id, items, selected, label){
+  if(!items.length) return '<div class="section-sub">Nenhum cadastro ainda.</div>';
+  return `<div class="perm-grid" id="${id}">${items.map(function(item){
+    const checked = (selected || []).indexOf(item.id) >= 0 ? 'checked' : '';
+    return `<label class="perm-item"><input data-edit="engenharia" type="checkbox" value="${escapeHtml(item.id)}" ${checked}> ${escapeHtml(label(item))}</label>`;
+  }).join('')}</div>`;
+}
+function rowActions(id){
+  return `<button class="btn btn-sm" type="button" onclick="editCadastro('${escapeHtml(id)}')">Editar</button> <button class="icon-btn danger" data-edit="engenharia" type="button" onclick="deleteCadastro('${escapeHtml(id)}')" title="Excluir">${icon('trash',14)}</button>`;
+}
+function codeField(value){
+  return `<div class="field"><label>Código <span class="field-hint">automático, editável</span></label><input id="cadCodigo" data-edit="engenharia" maxlength="12" value="${escapeHtml(value || '')}"></div>`;
+}
+function descriptionField(value, label){
+  return `<div class="field"><label>${label || 'Descrição'}</label><input id="cadDescricao" data-edit="engenharia" maxlength="120" value="${escapeHtml(value || '')}"></div>`;
+}
+function saveButtons(){
+  return `<div style="display:flex; gap:8px; margin-top:12px;"><button class="btn btn-primary" data-edit="engenharia" type="button" onclick="saveCadastro()">Salvar</button><button class="btn btn-ghost" type="button" onclick="setCadastroChoice('${cadastroChoice}')">Limpar</button></div>`;
+}
+function kitEditor(){
+  const head = '<div class="kit-head"><span>Id do item</span><span>Descrição</span><span>Qtd.</span><span>Setor</span><span></span></div>';
+  const rows = kitDraft.map(function(part, index){
+    const product = productByCode(part.codigo);
+    return `<div class="kit-row" data-kit-index="${index}">
+      <select class="kit-item" data-edit="engenharia" onchange="refreshCadastroDraft()">${productOptions(part.codigo)}</select>
+      <span>${escapeHtml(product ? product.descricao : '—')}</span>
+      <input class="kit-qty" data-edit="engenharia" type="number" min="0" step="1" value="${Number(part.quantidade) || 0}">
+      <select class="kit-setor" data-edit="engenharia">${selectOptions(state.setores, part.setorId || '', 'Setor')}</select>
+      <button class="icon-btn danger" data-edit="engenharia" type="button" onclick="removeKitRow(${index})" title="Tirar peça">${icon('trash',14)}</button>
+    </div>`;
+  }).join('');
+  return head + rows + `<button class="btn btn-ghost btn-sm" data-edit="engenharia" type="button" style="margin-top:8px;" onclick="addKitRow()">Adicionar peça</button>`;
+}
+function routeEditor(){
+  const rows = routeDraft.map(function(step, index){
+    const machines = state.resources.map(function(resource){
+      return `<option value="${escapeHtml(resource.id)}" ${resource.id === step.maquinaId ? 'selected' : ''}>${escapeHtml((resource.codigo || resource.nome) + ' — ' + (resource.descricao || ''))}</option>`;
+    }).join('');
+    return `<div class="kit-row" data-route-index="${index}">
+      <select class="route-op" data-edit="engenharia">${selectOptions(state.operacoes, step.operacaoId || '', 'Operação')}</select>
+      <select class="route-setor" data-edit="engenharia">${selectOptions(state.setores, step.setorId || '', 'Setor')}</select>
+      <select class="route-maq" data-edit="engenharia"><option value="">Máquina opcional</option>${machines}</select>
+      <span></span>
+      <span style="display:flex; gap:4px;">
+        <button class="btn btn-sm" type="button" onclick="moveRouteRow(${index},-1)">↑</button>
+        <button class="btn btn-sm" type="button" onclick="moveRouteRow(${index},1)">↓</button>
+        <button class="icon-btn danger" data-edit="engenharia" type="button" onclick="removeRouteRow(${index})">${icon('trash',14)}</button>
+      </span>
+    </div>`;
+  }).join('');
+  return `<div class="kit-head"><span>Operação</span><span>Setor</span><span>Máquina</span><span></span><span></span></div>${rows}
+    <button class="btn btn-ghost btn-sm" data-edit="engenharia" type="button" style="margin-top:8px;" onclick="addRouteRow()">Adicionar etapa</button>
+    <div class="section-sub">A ordem é a sequência: 1 cortar, 2 dobrar, 3 soldar.</div>`;
+}
+function listTable(headers, body){
+  const cols = headers.length + 1;
+  return `<div class="table-wrap" style="margin-top:14px;"><table><thead><tr>${headers.map(function(header){ return '<th>' + header + '</th>'; }).join('')}<th style="width:120px;"></th></tr></thead><tbody>${body || '<tr class="empty-row"><td colspan="' + cols + '">Nenhum cadastro ainda.</td></tr>'}</tbody></table></div>`;
+}
+function renderCadastroBody(){
+  const box = document.getElementById('cadastroBody');
+  if(!box) return;
+  const record = cadastroRecord(cadastroEditId);
+  const codigo = fieldValue('cadCodigo', record ? (record.codigo || '') : suggestedCadastroCode());
+  const descricao = fieldValue('cadDescricao', record ? (cadastroChoice === 'operador' ? ((record.nome || '') + ' ' + (record.sobrenome || '')).trim() : recordLabel(record)) : '');
+  if(cadastroChoice === 'setor'){
+    const rows = state.setores.map(function(setor){
+      return `<tr><td class="mono">${escapeHtml(setor.codigo || '')}</td><td>${escapeHtml(recordLabel(setor))}</td><td>${rowActions(setor.id)}</td></tr>`;
+    }).join('');
+    box.innerHTML = `<div class="section-title" style="font-size:16px;">Setor</div><div class="section-sub">Lugar da fábrica. O código é numérico.</div><div class="grid grid-2">${codeField(codigo)}${descriptionField(descricao)}</div>${saveButtons()}${listTable(['Código','Descrição'], rows)}`;
+    return;
+  }
+  if(cadastroChoice === 'grupo'){
+    const rows = state.groups.map(function(group){
+      const families = state.families.filter(function(family){ return family.grupoId === group.id; }).map(recordLabel).join(', ');
+      return `<tr><td class="mono">${escapeHtml(group.codigo || '')}</td><td>${escapeHtml(recordLabel(group))}</td><td>${escapeHtml(families || '—')}</td><td>${rowActions(group.id)}</td></tr>`;
+    }).join('');
+    const detail = state.groups.map(function(group){
+      const families = state.families.filter(function(family){ return family.grupoId === group.id; });
+      const blocks = families.map(function(family){
+        const items = state.products.filter(function(product){ return product.familiaId === family.id; }).map(function(product){ return product.codigo + ' ' + (product.descricao || ''); }).join(', ');
+        return `<div>${escapeHtml(recordLabel(family))}: ${escapeHtml(items || 'sem itens')}</div>`;
+      }).join('') || '<div class="section-sub">Nenhuma família neste grupo.</div>';
+      return `<div style="margin-top:8px;"><b>${escapeHtml((group.codigo || '') + ' ' + recordLabel(group))}</b>${blocks}</div>`;
+    }).join('');
+    box.innerHTML = `<div class="section-title" style="font-size:16px;">Grupo</div><div class="section-sub">Categoria acima da família. Ex.: Separação reúne Decanter e Prensa. O código é numérico.</div><div class="grid grid-2">${codeField(codigo)}${descriptionField(descricao)}</div>${saveButtons()}${listTable(['Código','Descrição','Famílias'], rows)}<div style="margin-top:12px;">${detail}</div>`;
+    return;
+  }
+  if(cadastroChoice === 'familia'){
+    const grupoId = fieldValue('cadGrupo', record ? (record.grupoId || '') : '');
+    const rows = state.families.map(function(family){
+      const group = groupById(family.grupoId);
+      return `<tr><td class="mono">${escapeHtml(family.codigo || '')}</td><td>${escapeHtml(recordLabel(family))}</td><td>${escapeHtml(group ? recordLabel(group) : '—')}</td><td>${(family.itens || []).length}</td><td>${rowActions(family.id)}</td></tr>`;
+    }).join('');
+    box.innerHTML = `<div class="section-title" style="font-size:16px;">Família</div><div class="section-sub">Linha do produto. Ex.: Decanter é a família; os tamanhos ficam no equipamento. Aqui fica o conjunto padrão de peças.</div>
+      <div class="grid grid-2">${codeField(codigo)}${descriptionField(descricao)}
+        <div class="field"><label>Grupo</label><select id="cadGrupo" data-edit="engenharia">${selectOptions(state.groups, grupoId, 'Selecione o grupo')}</select></div>
+      </div>
+      <div class="section-sub" style="margin-top:8px;">Conjunto padrão</div>${kitEditor()}${saveButtons()}${listTable(['Código','Descrição','Grupo','Peças'], rows)}`;
+    return;
+  }
+  if(cadastroChoice === 'item'){
+    const grupoId = fieldValue('cadGrupo', record ? (record.grupoId || '') : '');
+    const familiaId = fieldValue('cadFamilia', record ? (record.familiaId || '') : '');
+    const families = state.families.filter(function(family){ return !grupoId || family.grupoId === grupoId; });
+    const classe = fieldValue('cadClasse', record ? (record.classificacao || 'PI') : 'PI');
+    const erp = fieldValue('cadErp', record ? (record.codigoErp || '') : genErpCode(classe));
+    const setorId = fieldValue('cadSetor', record ? (record.setorId || '') : '');
+    const material = fieldValue('cadMaterial', record ? (record.material || '') : '');
+    const tempo = fieldValue('cadTempo', record ? (record.tempoFabricacaoMin || 1) : 1);
+    const machines = checkedDraft('maquinas', record ? (record.maquinas || []) : []);
+    const rows = state.products.map(function(product){
+      const family = familyById(product.familiaId);
+      const setor = setorById(product.setorId);
+      return `<tr><td class="mono">${escapeHtml(product.codigo || '')}</td><td class="mono">${escapeHtml(product.codigoErp || '')}</td><td>${escapeHtml(product.descricao || '')}</td><td>${escapeHtml(family ? recordLabel(family) : '—')}</td><td>${escapeHtml(setor ? recordLabel(setor) : '—')}</td><td>${rowActions(product.codigo)}</td></tr>`;
+    }).join('');
+    box.innerHTML = `<div class="section-title" style="font-size:16px;">Item</div><div class="section-sub">Peça unitária, como tambor ou rosca. O tamanho não entra aqui. O código interno é AA e o ERP fica no outro campo.</div>
+      <div class="grid grid-2">${codeField(codigo)}
+        <div class="field"><label>Código ERP</label><input id="cadErp" data-edit="engenharia" maxlength="20" value="${escapeHtml(erp)}"></div>
+        ${descriptionField(descricao)}
+        <div class="field"><label>Material</label><input id="cadMaterial" data-edit="engenharia" maxlength="80" value="${escapeHtml(material)}" placeholder="Ex.: aço inox"></div>
+        <div class="field"><label>Grupo</label><select id="cadGrupo" data-edit="engenharia" onchange="onItemGroupChange()">${selectOptions(state.groups, grupoId, 'Selecione o grupo')}</select></div>
+        <div class="field"><label>Família</label><select id="cadFamilia" data-edit="engenharia">${selectOptions(families, familiaId, 'Selecione a família')}</select></div>
+        <div class="field"><label>Setor</label><select id="cadSetor" data-edit="engenharia">${selectOptions(state.setores, setorId, 'Selecione o setor')}</select></div>
+        <div class="field"><label>Classificação</label><select id="cadClasse" data-edit="engenharia"><option value="PI" ${classe === 'PI' ? 'selected' : ''}>PI — intermediário</option><option value="PF" ${classe === 'PF' ? 'selected' : ''}>PF — final</option></select></div>
+        <div class="field"><label>Tempo (min/peça)</label><input id="cadTempo" data-edit="engenharia" type="number" min="0" step="0.1" value="${escapeHtml(tempo)}"></div>
+      </div>
+      <div class="section-sub">Máquinas em que esta peça pode ser feita. As outras ficam proibidas.</div>
+      ${checkGrid('cadMaquinas', state.resources, machines, function(resource){ return (resource.codigo || resource.nome) + ' — ' + (resource.descricao || ''); })}
+      <div class="section-sub" style="margin-top:8px;">Rota ordenada</div>${routeEditor()}${saveButtons()}${listTable(['Código','ERP','Descrição','Família','Setor'], rows)}`;
+    return;
+  }
+  if(cadastroChoice === 'operacao'){
+    const rows = state.operacoes.map(function(operation){
+      return `<tr><td class="mono">${escapeHtml(operation.codigo || '')}</td><td>${escapeHtml(recordLabel(operation))}</td><td>${rowActions(operation.id)}</td></tr>`;
+    }).join('');
+    box.innerHTML = `<div class="section-title" style="font-size:16px;">Operação</div><div class="section-sub">Etapa de processo. Ex.: cortar, dobrar, calandrar, soldar, jatear, tornear, montar. A sequência fica no item.</div><div class="grid grid-2">${codeField(codigo)}${descriptionField(descricao)}</div>${saveButtons()}${listTable(['Código','Descrição'], rows)}`;
+    return;
+  }
+  if(cadastroChoice === 'operador'){
+    const turno = fieldValue('cadTurno', record ? (record.turno || '1º Turno') : '1º Turno');
+    const machines = checkedDraft('maquinas', record ? employeeMachines(record.id).map(function(resource){ return resource.id; }) : []);
+    const rows = state.employees.map(function(employee){
+      const names = employeeMachines(employee.id).map(function(resource){ return resource.codigo || resource.nome; }).join(', ');
+      return `<tr><td class="mono">${escapeHtml(employee.codigo || '')}</td><td>${escapeHtml(((employee.nome || '') + ' ' + (employee.sobrenome || '')).trim())}</td><td>${escapeHtml(employee.turno || '')}</td><td>${escapeHtml(names || '—')}</td><td>${rowActions(employee.id)}</td></tr>`;
+    }).join('');
+    box.innerHTML = `<div class="section-title" style="font-size:16px;">Operador</div><div class="section-sub">A mesma pessoa do cadastro de funcionários. O vínculo com a máquina aparece dos dois lados.</div>
+      <div class="grid grid-2">${codeField(codigo)}${descriptionField(descricao)}
+        <div class="field"><label>Turno</label><select id="cadTurno" data-edit="engenharia">${TURNO_OPTIONS.map(function(item){ return `<option ${item === turno ? 'selected' : ''}>${escapeHtml(item)}</option>`; }).join('')}</select></div>
+      </div>
+      <div class="section-sub">Máquinas deste operador</div>
+      ${checkGrid('cadMaquinas', state.resources, machines, function(resource){ return (resource.codigo || resource.nome) + ' — ' + (resource.descricao || ''); })}
+      ${saveButtons()}${listTable(['Código','Descrição','Turno','Máquinas'], rows)}`;
+    return;
+  }
+  if(cadastroChoice === 'maquina'){
+    const setorId = fieldValue('cadSetor', record ? (record.setorId || '') : '');
+    const operations = checkedDraft('operacoes', record ? (record.operacoes || []) : []);
+    const operators = checkedDraft('operadores', record ? (record.funcionarios || []) : []);
+    const rows = state.resources.map(function(resource){
+      const setor = setorById(resource.setorId);
+      return `<tr><td class="mono">${escapeHtml(resource.codigo || resource.nome || '')}</td><td>${escapeHtml(resource.descricao || '')}</td><td>${escapeHtml(setor ? recordLabel(setor) : (resource.setor || '—'))}</td><td>${rowActions(resource.id)}</td></tr>`;
+    }).join('');
+    box.innerHTML = `<div class="section-title" style="font-size:16px;">Máquina</div><div class="section-sub">Recurso de produção: setor, operações que executa e operadores vinculados.</div>
+      <div class="grid grid-2">${codeField(codigo)}${descriptionField(descricao)}
+        <div class="field"><label>Setor</label><select id="cadSetor" data-edit="engenharia">${selectOptions(state.setores, setorId, 'Selecione o setor')}</select></div>
+      </div>
+      <div class="section-sub">Operações que esta máquina executa</div>
+      ${checkGrid('cadOperacoes', state.operacoes, operations, recordLabel)}
+      <div class="section-sub">Operadores vinculados</div>
+      ${checkGrid('cadOperadores', state.employees, operators, function(employee){ return ((employee.codigo || '') + ' ' + (employee.nome || '') + ' ' + (employee.sobrenome || '')).trim(); })}
+      ${saveButtons()}${listTable(['Código','Descrição','Setor'], rows)}`;
+    return;
+  }
+  const familiaId = fieldValue('cadFamilia', record ? (record.familiaId || '') : '');
+  const rows = state.equipments.map(function(equipment){
+    const family = familyById(equipment.familiaId);
+    return `<tr><td class="mono">${escapeHtml(equipment.codigo || '')}</td><td>${escapeHtml(recordLabel(equipment))}</td><td>${escapeHtml(family ? recordLabel(family) : '—')}</td><td>${(equipment.itens || []).length}</td><td>${rowActions(equipment.id)}</td></tr>`;
+  }).join('');
+  box.innerHTML = `<div class="section-title" style="font-size:16px;">Equipamento</div><div class="section-sub">Um modelo da família. Ex.: Decanter 220. Ao escolher a família, as peças padrão são copiadas e podem ser ajustadas.</div>
+    <div class="grid grid-2">${codeField(codigo)}${descriptionField(descricao)}
+      <div class="field"><label>Família</label><select id="cadFamilia" data-edit="engenharia" onchange="onEquipmentFamilyChange()">${selectOptions(state.families, familiaId, 'Selecione a família')}</select></div>
+    </div>
+    ${kitEditor()}${saveButtons()}${listTable(['Código','Descrição','Família','Peças'], rows)}`;
+}
+function refreshCadastroDraft(){
+  pullKitDraft();
+  pullRouteDraft();
+  rememberTexts();
+  renderCadastro();
   applyAccess();
-  toast('Família excluída com os vínculos.', 'success');
 }
-function showGroupItems(groupId){
-  const group = state.groups.find(function(item){ return item.id === groupId; });
-  const box = document.getElementById('groupItems');
-  if(!group || !box) return;
-  const families = state.families.filter(function(item){ return item.grupoId === groupId; });
-  const familyIds = families.map(function(item){ return item.id; });
-  const models = state.products.filter(function(item){ return familyIds.indexOf(item.familiaId) >= 0; });
-  box.innerHTML = `<div class="section-title" style="font-size:16px;">${escapeHtml(group.nome)}</div>
-    <div class="section-sub">Famílias e modelos vinculados.</div>
-    <div>${families.map(function(item){ return escapeHtml(item.nome); }).join(', ') || 'Nenhuma família.'}</div>
-    <div style="margin-top:8px;">${models.map(function(item){ return `<div>${escapeHtml(item.codigo)} — ${escapeHtml(item.descricao)}</div>`; }).join('') || 'Nenhum modelo.'}</div>`;
+function addKitRow(){
+  pullKitDraft();
+  rememberTexts();
+  kitDraft.push({ codigo: '', quantidade: 1, setorId: '' });
+  renderCadastro();
+  applyAccess();
 }
-function showFamilyModels(familyId){
-  const family = state.families.find(function(item){ return item.id === familyId; });
-  const box = document.getElementById('groupItems');
-  if(!family || !box) return;
-  const models = state.products.filter(function(item){ return item.familiaId === familyId; });
-  box.innerHTML = `<div class="section-title" style="font-size:16px;">${escapeHtml(family.nome)}</div>
-    ${models.map(function(item){ return `<div>${escapeHtml(item.codigo)} — ${escapeHtml(item.descricao)}</div>`; }).join('') || '<div>Nenhum modelo nesta família.</div>'}`;
+function removeKitRow(index){
+  pullKitDraft();
+  rememberTexts();
+  kitDraft.splice(index, 1);
+  renderCadastro();
+  applyAccess();
 }
+function addRouteRow(){
+  pullRouteDraft();
+  rememberTexts();
+  routeDraft.push({ operacaoId: '', setorId: '', maquinaId: '' });
+  renderCadastro();
+  applyAccess();
+}
+function removeRouteRow(index){
+  pullRouteDraft();
+  rememberTexts();
+  routeDraft.splice(index, 1);
+  renderCadastro();
+  applyAccess();
+}
+function moveRouteRow(index, delta){
+  pullRouteDraft();
+  rememberTexts();
+  const next = index + delta;
+  if(next < 0 || next >= routeDraft.length) return;
+  const step = routeDraft.splice(index, 1)[0];
+  routeDraft.splice(next, 0, step);
+  renderCadastro();
+  applyAccess();
+}
+function onItemGroupChange(){
+  pullRouteDraft();
+  rememberTexts();
+  renderCadastro();
+  applyAccess();
+}
+function onEquipmentFamilyChange(){
+  rememberTexts();
+  const family = familyById(cadastroInput('cadFamilia'));
+  kitDraft = ((family && family.itens) || []).map(function(part){
+    return { codigo: part.codigo, quantidade: Number(part.quantidade) || 1, setorId: part.setorId || '' };
+  });
+  renderCadastro();
+  applyAccess();
+}
+function editCadastro(id){
+  cadastroEditId = id;
+  textDraft = {};
+  const record = cadastroRecord(id);
+  kitDraft = ((record && record.itens) || []).map(function(part){
+    return { codigo: part.codigo, quantidade: Number(part.quantidade) || 1, setorId: part.setorId || '' };
+  });
+  routeDraft = ((record && record.rota) || []).map(function(step){
+    return { operacaoId: step.operacaoId || '', setorId: step.setorId || '', maquinaId: step.maquinaId || '' };
+  });
+  renderCadastro();
+  applyAccess();
+}
+function openCadastroItem(codigo){
+  cadastroChoice = 'item';
+  textDraft = {};
+  kitDraft = [];
+  if(codigo){
+    cadastroEditId = codigo;
+    const product = state.products.find(function(item){ return item.codigo === codigo; });
+    routeDraft = ((product && product.rota) || []).map(function(step){
+      return { operacaoId: step.operacaoId || '', setorId: step.setorId || '', maquinaId: step.maquinaId || '' };
+    });
+  } else {
+    cadastroEditId = '';
+    routeDraft = [];
+  }
+  setTab('cadastro');
+}
+function cleanKit(){
+  return kitDraft.filter(function(part){ return part.codigo && Number(part.quantidade) > 0; }).map(function(part){
+    return { codigo: part.codigo, quantidade: Number(part.quantidade) || 1, setorId: part.setorId || '' };
+  });
+}
+function cleanRoute(){
+  return routeDraft.filter(function(step){ return step.operacaoId; }).map(function(step){
+    return { operacaoId: step.operacaoId, setorId: step.setorId || '', maquinaId: step.maquinaId || '' };
+  });
+}
+function setorUsed(id){
+  if(state.products.some(function(product){ return product.setorId === id || (product.rota || []).some(function(step){ return step.setorId === id; }); })) return true;
+  if(state.resources.some(function(resource){ return resource.setorId === id; })) return true;
+  if(state.families.some(function(family){ return (family.itens || []).some(function(part){ return part.setorId === id; }); })) return true;
+  return state.equipments.some(function(equipment){ return (equipment.itens || []).some(function(part){ return part.setorId === id; }); });
+}
+async function saveCadastro(){
+  if(guardCadastro()) return;
+  pullKitDraft();
+  pullRouteDraft();
+  const descricao = cadastroInput('cadDescricao');
+  if(!descricao){ toast('Informe a descrição.', 'error'); return; }
+  const claimed = claimCode(cadastroChoice === 'item' ? state.products : (cadastroChoice === 'operador' ? state.employees : (cadastroChoice === 'maquina' ? state.resources : (cadastroChoice === 'setor' ? state.setores : (cadastroChoice === 'grupo' ? state.groups : (cadastroChoice === 'familia' ? state.families : (cadastroChoice === 'operacao' ? state.operacoes : state.equipments)))))), cadastroInput('cadCodigo') || suggestedCadastroCode(), cadastroEditId);
+  if(claimed.error){ toast(claimed.error, 'error'); return; }
+  const codigo = claimed.codigo;
+  if(cadastroChoice === 'setor'){
+    if(cadastroEditId){
+      const setor = setorById(cadastroEditId);
+      if(setor) Object.assign(setor, { codigo: codigo, descricao: descricao, nome: descricao });
+    } else state.setores.push({ id: uid(), codigo: codigo, descricao: descricao, nome: descricao });
+  } else if(cadastroChoice === 'grupo'){
+    if(cadastroEditId){
+      const group = groupById(cadastroEditId);
+      if(group) Object.assign(group, { codigo: codigo, descricao: descricao, nome: descricao });
+    } else state.groups.push({ id: uid(), codigo: codigo, descricao: descricao, nome: descricao });
+  } else if(cadastroChoice === 'familia'){
+    const grupoId = cadastroInput('cadGrupo');
+    if(!grupoId){ toast('Escolha o grupo da família.', 'error'); return; }
+    const payload = { codigo: codigo, descricao: descricao, nome: descricao, grupoId: grupoId, itens: cleanKit() };
+    if(cadastroEditId){
+      const family = familyById(cadastroEditId);
+      if(family) Object.assign(family, payload);
+    } else state.families.push(Object.assign({ id: uid() }, payload));
+  } else if(cadastroChoice === 'item'){
+    const codigoErp = cadastroInput('cadErp') || genErpCode(cadastroInput('cadClasse') || 'PI');
+    if(state.products.some(function(product){ return product.codigo !== cadastroEditId && String(product.codigoErp || '').toLowerCase() === codigoErp.toLowerCase(); })){
+      toast('Este código ERP já existe.', 'error');
+      return;
+    }
+    const rota = cleanRoute();
+    const flags = routeFlags(rota);
+    const payload = {
+      codigo: codigo,
+      codigoErp: codigoErp,
+      descricao: descricao,
+      grupoId: cadastroInput('cadGrupo'),
+      familiaId: cadastroInput('cadFamilia'),
+      setorId: cadastroInput('cadSetor'),
+      material: cadastroInput('cadMaterial'),
+      classificacao: cadastroInput('cadClasse') === 'PF' ? 'PF' : 'PI',
+      tempoFabricacaoMin: Math.max(0, Number(cadastroInput('cadTempo')) || 0),
+      maquinas: readChecks('cadMaquinas'),
+      rota: rota,
+      pintura: flags.pintura,
+      montagem: flags.montagem
+    };
+    if(!payload.grupoId && payload.familiaId){
+      const family = familyById(payload.familiaId);
+      payload.grupoId = family ? (family.grupoId || '') : '';
+    }
+    if(!payload.familiaId || !payload.setorId){ toast('Escolha a família e o setor do item.', 'error'); return; }
+    const current = cadastroEditId ? state.products.find(function(product){ return product.codigo === cadastroEditId; }) : null;
+    if(current){
+      const oldCode = current.codigo;
+      const oldDescricao = current.descricao;
+      Object.assign(current, payload);
+      syncProductOnOrders(oldCode, oldDescricao, current);
+    } else state.products.push(payload);
+  } else if(cadastroChoice === 'operacao'){
+    if(cadastroEditId){
+      const operation = operacaoById(cadastroEditId);
+      if(operation) Object.assign(operation, { codigo: codigo, descricao: descricao, nome: descricao });
+    } else state.operacoes.push({ id: uid(), codigo: codigo, descricao: descricao, nome: descricao });
+  } else if(cadastroChoice === 'operador'){
+    const turno = cadastroInput('cadTurno') || '1º Turno';
+    const machines = readChecks('cadMaquinas');
+    if(cadastroEditId){
+      const employee = state.employees.find(function(item){ return item.id === cadastroEditId; });
+      if(employee) Object.assign(employee, { codigo: codigo, nome: descricao, sobrenome: '', turno: turno, funcao: employee.funcao || 'Operador' });
+      syncEmployeeMachines(cadastroEditId, machines);
+    } else {
+      const assigned = assignEmployeeNumber('', '');
+      if(assigned.error){ toast(assigned.error, 'error'); return; }
+      const employeeId = uid();
+      state.employees.push({ id: employeeId, codigo: codigo, numero: assigned.numero, nome: descricao, sobrenome: '', funcao: 'Operador', turno: turno, vinculo: 'Efetivo', ferias: null });
+      syncEmployeeMachines(employeeId, machines);
+    }
+  } else if(cadastroChoice === 'maquina'){
+    const setorId = cadastroInput('cadSetor');
+    if(!setorId){ toast('Escolha o setor da máquina.', 'error'); return; }
+    const setor = setorById(setorId);
+    const current = cadastroEditId ? resourceById(cadastroEditId) : null;
+    const payload = {
+      codigo: codigo,
+      nome: codigo,
+      descricao: descricao,
+      setorId: setorId,
+      setor: setor ? recordLabel(setor) : '',
+      operacoes: readChecks('cadOperacoes'),
+      funcionarios: readChecks('cadOperadores'),
+      grupos: [],
+      restricao: current ? (current.restricao || '') : '',
+      status: current ? (current.status || 'Parada') : 'Parada'
+    };
+    if(current) Object.assign(current, payload);
+    else state.resources.push(Object.assign({ id: uid() }, payload));
+  } else {
+    const familiaId = cadastroInput('cadFamilia');
+    if(!familiaId){ toast('Escolha a família do equipamento.', 'error'); return; }
+    const payload = { codigo: codigo, descricao: descricao, nome: descricao, familiaId: familiaId, itens: cleanKit() };
+    if(cadastroEditId){
+      const equipment = equipmentById(cadastroEditId);
+      if(equipment) Object.assign(equipment, payload);
+    } else state.equipments.push(Object.assign({ id: uid() }, payload));
+  }
+  resetCadastroForm();
+  await persist();
+  renderCadastro();
+  if(activeTab === 'engenharia') renderEngenhariaTable();
+  applyAccess();
+  toast('Cadastro salvo.', 'success');
+}
+async function deleteCadastro(id){
+  if(guardCadastro()) return;
+  const record = cadastroRecord(id);
+  if(!record) return;
+  const label = recordLabel(record) || record.codigo || id;
+  if(cadastroChoice === 'setor' && setorUsed(id)){
+    toast('Este setor está em uso. Tire o vínculo antes de excluir.', 'error');
+    return;
+  }
+  if(!confirm('Excluir ' + label + '? Pedidos já gerados continuam com a composição gravada.')) return;
+  if(cadastroChoice === 'setor') state.setores = state.setores.filter(function(item){ return item.id !== id; });
+  else if(cadastroChoice === 'grupo'){
+    state.families.forEach(function(family){ if(family.grupoId === id) family.grupoId = ''; });
+    state.products.forEach(function(product){ if(product.grupoId === id) product.grupoId = ''; });
+    state.groups = state.groups.filter(function(item){ return item.id !== id; });
+  } else if(cadastroChoice === 'familia'){
+    state.products.forEach(function(product){ if(product.familiaId === id) product.familiaId = ''; });
+    state.equipments.forEach(function(equipment){ if(equipment.familiaId === id) equipment.familiaId = ''; });
+    state.families = state.families.filter(function(item){ return item.id !== id; });
+  } else if(cadastroChoice === 'item'){
+    state.families.forEach(function(family){ family.itens = (family.itens || []).filter(function(part){ return part.codigo !== id; }); });
+    state.equipments.forEach(function(equipment){ equipment.itens = (equipment.itens || []).filter(function(part){ return part.codigo !== id; }); });
+    state.products = state.products.filter(function(product){ return product.codigo !== id; });
+  } else if(cadastroChoice === 'operacao'){
+    state.products.forEach(function(product){ product.rota = (product.rota || []).filter(function(step){ return step.operacaoId !== id; }); });
+    state.resources.forEach(function(resource){ resource.operacoes = (resource.operacoes || []).filter(function(operationId){ return operationId !== id; }); });
+    state.operacoes = state.operacoes.filter(function(item){ return item.id !== id; });
+  } else if(cadastroChoice === 'operador'){
+    state.employees = state.employees.filter(function(employee){ return employee.id !== id; });
+    state.resources.forEach(function(resource){ resource.funcionarios = (resource.funcionarios || []).filter(function(employeeId){ return employeeId !== id; }); });
+  } else if(cadastroChoice === 'maquina'){
+    state.products.forEach(function(product){
+      product.maquinas = (product.maquinas || []).filter(function(resourceId){ return resourceId !== id; });
+      product.rota = (product.rota || []).map(function(step){ return step.maquinaId === id ? Object.assign({}, step, { maquinaId: '' }) : step; });
+    });
+    state.resources = state.resources.filter(function(resource){ return resource.id !== id; });
+  } else state.equipments = state.equipments.filter(function(equipment){ return equipment.id !== id; });
+  if(cadastroEditId === id) resetCadastroForm();
+  await persist();
+  renderCadastro();
+  applyAccess();
+  toast('Cadastro excluído.', 'success');
+}
+
 function renderTaskBoard(){
   const board = document.getElementById('taskBoard');
   if(!board) return;
@@ -4035,14 +4561,16 @@ async function updateSupportTicket(id, status){
   }catch(error){ toast(error.message, 'error'); }
 }
 
-const CSV_COLUMNS = ['modulo','codigo','nome','sobrenome','descricao','funcao','turno','vinculo','grupo','familia','classificacao','tempo_min','pintura','montagem','peca','quantidade','restricao','exemplo'];
+const CSV_COLUMNS = ['modulo','codigo','nome','sobrenome','descricao','funcao','turno','vinculo','grupo','familia','classificacao','tempo_min','pintura','montagem','peca','quantidade','restricao','setor','exemplo'];
 const CSV_EXAMPLES = [
-  ['grupo','','Usinagem','','','','','','','','','','','','','','','sim'],
-  ['familia','','Chapas','','','','','','Usinagem','','','','','','','','','sim'],
-  ['item','30.3000.0001','Ponteira 20mm','','','','','','Usinagem','Chapas','PF','1','nao','nao','','','','sim'],
-  ['funcionario','0001','Ana','Souza','','Operadora','1º Turno','Efetivo','','','','','','','','','','sim'],
-  ['recurso','C0001','','','Torno CNC','','','','Usinagem','','','','','','','','só tubos até 2 polegadas','sim'],
-  ['equipamento','','Decanter 183','','','','','','','','','','','','30.3000.0001','2','','sim']
+  ['setor','1','Chaparia','','','','','','','','','','','','','','','','sim'],
+  ['operacao','','Cortar','','','','','','','','','','','','','','','','sim'],
+  ['grupo','1','Separação','','','','','','','','','','','','','','','','sim'],
+  ['familia','','Decanter','','','','','','Separação','','','','','','','','','','sim'],
+  ['item','30.2000.0001','Tambor','','','','','','Separação','Decanter','PI','1','nao','nao','','','','Chaparia','sim'],
+  ['funcionario','0001','Ana','Souza','','Operadora','1º Turno','Efetivo','','','','','','','','','','','sim'],
+  ['maquina','','','','Torno','','','','','','','','','','','','','Chaparia','sim'],
+  ['equipamento','','Decanter 220','','','','','','','Decanter','','','','','30.2000.0001','2','','','sim']
 ];
 function updateCsvActions(){
   const box = document.getElementById('csvActions');
@@ -4107,8 +4635,11 @@ function csvModule(value){
     familia:'familia', familias:'familia',
     item:'item', produto:'item', produtos:'item', peca:'item',
     funcionario:'funcionario', funcionarios:'funcionario', colaborador:'funcionario',
-    recurso:'recurso', recursos:'recurso', celula:'recurso', maquina:'recurso',
-    equipamento:'equipamento', equipamentos:'equipamento'
+    recurso:'recurso', recursos:'recurso', celula:'recurso', maquina:'recurso', maquinas:'recurso',
+    equipamento:'equipamento', equipamentos:'equipamento',
+    setor:'setor', setores:'setor',
+    operacao:'operacao', operacoes:'operacao',
+    operador:'funcionario', operadores:'funcionario'
   };
   return aliases[key] || '';
 }
@@ -4132,22 +4663,30 @@ function normalizeTurno(value){
 }
 function findGroupByName(nome){
   const key = String(nome || '').trim().toLowerCase();
-  return state.groups.find(function(group){ return String(group.nome || '').trim().toLowerCase() === key; }) || null;
+  return state.groups.find(function(group){ return recordLabel(group).toLowerCase() === key; }) || null;
 }
-function ensureGroup(nome, errors){
+function ensureNamed(list, nome, errors, label){
   const clean = String(nome || '').trim();
   if(!clean) return null;
-  let group = findGroupByName(clean);
-  if(group) return group;
-  if(!canEdit('engenharia')){ errors.push('Sem permissão para criar o grupo ' + clean + '.'); return null; }
-  group = { id: uid(), nome: clean };
-  state.groups.push(group);
-  return group;
+  let found = list.find(function(item){ return recordLabel(item).toLowerCase() === clean.toLowerCase(); });
+  if(found) return found;
+  if(!canEdit('engenharia')){ errors.push('Sem permissão para criar ' + label + ' ' + clean + '.'); return null; }
+  const numeric = list === state.setores || list === state.groups;
+  found = { id: uid(), codigo: numeric ? nextNumericCode(list) : suggestAlpha(list), descricao: clean, nome: clean };
+  if(list === state.families) found.itens = [];
+  list.push(found);
+  return found;
+}
+function ensureGroup(nome, errors){
+  return ensureNamed(state.groups, nome, errors, 'o grupo');
+}
+function ensureSetor(nome, errors){
+  return ensureNamed(state.setores, nome, errors, 'o setor');
 }
 function findFamily(nome, groupId){
   const key = String(nome || '').trim().toLowerCase();
   return state.families.find(function(family){
-    return String(family.nome || '').trim().toLowerCase() === key && (!groupId || family.grupoId === groupId);
+    return recordLabel(family).toLowerCase() === key && (!groupId || family.grupoId === groupId);
   }) || null;
 }
 async function importCadastroCsv(input){
@@ -4161,9 +4700,9 @@ async function importCadastroCsv(input){
   let rows = [];
   try{ rows = parseCsv(await file.text()); }
   catch(error){ toast('Não foi possível ler o CSV.', 'error'); return; }
-  const order = { grupo: 1, familia: 2, item: 3, funcionario: 4, recurso: 5, equipamento: 6 };
+  const order = { setor: 1, operacao: 2, grupo: 3, familia: 4, item: 5, funcionario: 6, recurso: 7, equipamento: 8 };
   rows.sort(function(a, b){ return (order[csvModule(a.modulo)] || 9) - (order[csvModule(b.modulo)] || 9); });
-  const counts = { grupo: 0, familia: 0, item: 0, funcionario: 0, recurso: 0, equipamento: 0 };
+  const counts = { setor: 0, operacao: 0, grupo: 0, familia: 0, item: 0, funcionario: 0, recurso: 0, equipamento: 0 };
   const errors = [];
   let skipped = 0;
   const equipmentRows = [];
@@ -4171,19 +4710,45 @@ async function importCadastroCsv(input){
     if(csvExample(row)){ skipped++; return; }
     const module = csvModule(row.modulo);
     if(!module){ if(row.modulo) errors.push('Módulo desconhecido: ' + row.modulo + '.'); else skipped++; return; }
+    if(module === 'setor'){
+      if(!canEdit('engenharia')){ errors.push('Sem permissão para setores.'); return; }
+      const nome = row.nome || row.descricao;
+      if(!nome){ errors.push('Setor sem descrição.'); return; }
+      if(!state.setores.some(function(item){ return recordLabel(item).toLowerCase() === nome.toLowerCase(); })){
+        const codigo = row.codigo || nextNumericCode(state.setores);
+        state.setores.push({ id: uid(), codigo: String(codigo), descricao: nome, nome: nome });
+        counts.setor++;
+      }
+      return;
+    }
+    if(module === 'operacao'){
+      if(!canEdit('engenharia')){ errors.push('Sem permissão para operações.'); return; }
+      const nome = row.nome || row.descricao;
+      if(!nome){ errors.push('Operação sem descrição.'); return; }
+      if(!state.operacoes.some(function(item){ return recordLabel(item).toLowerCase() === nome.toLowerCase(); })){
+        state.operacoes.push({ id: uid(), codigo: (row.codigo || suggestAlpha(state.operacoes)).toUpperCase(), descricao: nome, nome: nome });
+        counts.operacao++;
+      }
+      return;
+    }
     if(module === 'grupo'){
       if(!canEdit('engenharia')){ errors.push('Sem permissão para grupos.'); return; }
-      if(!row.nome){ errors.push('Grupo sem nome.'); return; }
-      if(!findGroupByName(row.nome)){ state.groups.push({ id: uid(), nome: row.nome }); counts.grupo++; }
+      const nome = row.nome || row.descricao;
+      if(!nome){ errors.push('Grupo sem descrição.'); return; }
+      if(!findGroupByName(nome)){
+        state.groups.push({ id: uid(), codigo: String(row.codigo || nextNumericCode(state.groups)), descricao: nome, nome: nome });
+        counts.grupo++;
+      }
       return;
     }
     if(module === 'familia'){
       if(!canEdit('engenharia')){ errors.push('Sem permissão para famílias.'); return; }
-      if(!row.nome){ errors.push('Família sem nome.'); return; }
+      const nome = row.nome || row.descricao;
+      if(!nome){ errors.push('Família sem descrição.'); return; }
       const group = ensureGroup(row.grupo, errors);
       if(row.grupo && !group) return;
-      if(!findFamily(row.nome, group && group.id)){
-        state.families.push({ id: uid(), nome: row.nome, grupoId: group ? group.id : '' });
+      if(!findFamily(nome, group && group.id)){
+        state.families.push({ id: uid(), codigo: (row.codigo || suggestAlpha(state.families)).toUpperCase(), descricao: nome, nome: nome, grupoId: group ? group.id : '', itens: [] });
         counts.familia++;
       }
       return;
@@ -4195,23 +4760,33 @@ async function importCadastroCsv(input){
       const group = ensureGroup(row.grupo, errors);
       let family = row.familia ? findFamily(row.familia, group && group.id) : null;
       if(row.familia && !family){
-        if(!canEdit('engenharia')){ errors.push('Família não encontrada: ' + row.familia + '.'); return; }
-        family = { id: uid(), nome: row.familia, grupoId: group ? group.id : '' };
+        family = { id: uid(), codigo: suggestAlpha(state.families), descricao: row.familia, nome: row.familia, grupoId: group ? group.id : '', itens: [] };
         state.families.push(family);
         counts.familia++;
       }
-      const classificacao = String(row.classificacao || 'PF').toUpperCase() === 'PI' ? 'PI' : 'PF';
-      let codigo = row.codigo;
-      if(!codigo) codigo = genErpCode(classificacao);
-      const existing = state.products.find(function(product){ return String(product.codigo).toLowerCase() === String(codigo).toLowerCase(); });
+      const setor = ensureSetor(row.setor, errors);
+      const classificacao = String(row.classificacao || 'PI').toUpperCase() === 'PF' ? 'PF' : 'PI';
+      const rawCode = String(row.codigo || '').trim();
+      const codigoErp = rawCode.indexOf('.') >= 0 ? rawCode : genErpCode(classificacao);
+      const codigo = rawCode.indexOf('.') >= 0 ? suggestAlpha(state.products) : (rawCode || suggestAlpha(state.products)).toUpperCase();
+      const existing = state.products.find(function(product){
+        return String(product.codigo).toLowerCase() === codigo.toLowerCase() || String(product.codigoErp || '').toLowerCase() === codigoErp.toLowerCase();
+      });
+      const flags = { pintura: csvYes(row.pintura), montagem: csvYes(row.montagem) };
       const payload = {
-        codigo: codigo,
+        codigo: existing ? existing.codigo : codigo,
+        codigoErp: codigoErp,
         descricao: descricao,
         tempoFabricacaoMin: Number(String(row.tempo_min || '1').replace(',', '.')) || 1,
         classificacao: classificacao,
         familiaId: family ? family.id : '',
-        pintura: csvYes(row.pintura),
-        montagem: csvYes(row.montagem)
+        grupoId: group ? group.id : '',
+        setorId: setor ? setor.id : '',
+        material: '',
+        maquinas: existing ? (existing.maquinas || []) : [],
+        rota: existing ? (existing.rota || []) : [],
+        pintura: flags.pintura,
+        montagem: flags.montagem
       };
       if(existing){
         const oldCode = existing.codigo;
@@ -4228,7 +4803,7 @@ async function importCadastroCsv(input){
       const current = state.employees.find(function(employee){ return row.codigo && (String(employee.numero) === row.codigo || String(employee.numero) === formatEmployeeNumber(parsePositiveInt(row.codigo))); });
       const assigned = assignEmployeeNumber(row.codigo, current ? current.id : '');
       if(assigned.error){ errors.push(assigned.error); return; }
-      const data = { numero: assigned.numero, nome: row.nome, sobrenome: row.sobrenome, funcao: row.funcao || 'Operador', turno: normalizeTurno(row.turno), vinculo: /terceir/i.test(row.vinculo) ? 'Terceiro' : 'Efetivo', ferias: current ? current.ferias : null };
+      const data = { codigo: (current && current.codigo) || suggestAlpha(state.employees), numero: assigned.numero, nome: row.nome, sobrenome: row.sobrenome, funcao: row.funcao || 'Operador', turno: normalizeTurno(row.turno), vinculo: /terceir/i.test(row.vinculo) ? 'Terceiro' : 'Efetivo', ferias: current ? current.ferias : null };
       if(current) Object.assign(current, data);
       else state.employees.push(Object.assign({ id: uid() }, data));
       counts.funcionario++;
@@ -4236,19 +4811,14 @@ async function importCadastroCsv(input){
     }
     if(module === 'recurso'){
       if(!canEdit('recursos')){ errors.push('Sem permissão para recursos.'); return; }
-      const codigo = row.codigo || nextResourceCode();
+      const codigo = (row.codigo || suggestAlpha(state.resources)).toUpperCase();
       const descricao = row.descricao || row.nome || codigo;
-      const groupIds = String(row.grupo || '').split(/[|,]/).map(function(name){ return name.trim(); }).filter(Boolean).map(function(name){
-        const group = ensureGroup(name, errors);
-        return group ? group.id : '';
-      }).filter(Boolean);
-      const setor = groupIds.map(function(id){
-        const group = state.groups.find(function(item){ return item.id === id; });
-        return group ? group.nome : '';
-      }).filter(Boolean).join(', ');
-      const current = state.resources.find(function(resource){ return String(resource.nome).toLowerCase() === codigo.toLowerCase(); });
-      if(current) Object.assign(current, { nome: codigo, descricao: descricao, restricao: row.restricao || current.restricao || '', grupos: groupIds, setor: setor });
-      else state.resources.push({ id: uid(), nome: codigo, descricao: descricao, setor: setor, restricao: row.restricao || '', status: 'Parada', funcionarios: [], grupos: groupIds });
+      const setor = ensureSetor(row.setor || row.grupo, errors);
+      if(!setor){ errors.push('Máquina sem setor: ' + codigo + '.'); return; }
+      const current = state.resources.find(function(resource){ return String(resource.codigo || resource.nome).toLowerCase() === codigo.toLowerCase(); });
+      const payload = { codigo: codigo, nome: codigo, descricao: descricao, setorId: setor.id, setor: recordLabel(setor), restricao: row.restricao || (current && current.restricao) || '', grupos: [], operacoes: current ? (current.operacoes || []) : [], funcionarios: current ? (current.funcionarios || []) : [], status: current ? (current.status || 'Parada') : 'Parada' };
+      if(current) Object.assign(current, payload);
+      else state.resources.push(Object.assign({ id: uid() }, payload));
       counts.recurso++;
       return;
     }
@@ -4259,34 +4829,42 @@ async function importCadastroCsv(input){
     if(!canEdit('engenharia')){ errors.push('Sem permissão para equipamentos.'); return; }
     const nome = row.nome || row.codigo;
     if(!nome){ errors.push('Equipamento sem nome.'); return; }
-    if(!byEquipment[nome]) byEquipment[nome] = [];
-    if(row.peca) byEquipment[nome].push({ codigo: row.peca, quantidade: Number(row.quantidade) || 1 });
+    if(!byEquipment[nome]) byEquipment[nome] = { familia: row.familia || '', itens: [] };
+    if(row.familia) byEquipment[nome].familia = row.familia;
+    if(row.peca){
+      const product = productByCode(row.peca);
+      byEquipment[nome].itens.push({ codigo: product ? product.codigo : row.peca, quantidade: Number(row.quantidade) || 1, setorId: product ? (product.setorId || '') : '' });
+    }
   });
   Object.keys(byEquipment).forEach(function(nome){
-    const parts = byEquipment[nome].filter(function(part){
+    const parts = byEquipment[nome].itens.filter(function(part){
       if(productByCode(part.codigo)) return true;
       errors.push('Peça não cadastrada no equipamento ' + nome + ': ' + part.codigo + '.');
       return false;
     });
     if(!parts.length) return;
-    const current = state.equipments.find(function(equipment){ return String(equipment.nome).toLowerCase() === nome.toLowerCase(); });
+    const current = state.equipments.find(function(equipment){ return recordLabel(equipment).toLowerCase() === nome.toLowerCase() || String(equipment.codigo || '').toLowerCase() === nome.toLowerCase(); });
+    const family = findFamily(byEquipment[nome].familia || '', '');
     if(current){
+      if(!current.codigo) current.codigo = suggestAlpha(state.equipments);
+      current.nome = current.descricao || nome;
+      current.descricao = current.descricao || nome;
       parts.forEach(function(part){
         const existing = (current.itens || []).find(function(item){ return item.codigo === part.codigo; });
         if(existing) existing.quantidade = part.quantidade;
         else current.itens.push(part);
       });
-    } else state.equipments.push({ id: uid(), nome: nome, itens: parts });
+    } else state.equipments.push({ id: uid(), codigo: suggestAlpha(state.equipments), nome: nome, descricao: nome, familiaId: family ? family.id : '', itens: parts });
     counts.equipamento++;
   });
-  const applied = counts.grupo + counts.familia + counts.item + counts.funcionario + counts.recurso + counts.equipamento;
+  const applied = counts.setor + counts.operacao + counts.grupo + counts.familia + counts.item + counts.funcionario + counts.recurso + counts.equipamento;
   if(!applied && !errors.length){ toast('Nenhuma linha nova. As linhas de exemplo ficam de fora.', 'error'); return; }
   if(applied){
     await persist();
     renderActiveTab();
     applyAccess();
   }
-  const summary = ['grupos ' + counts.grupo, 'famílias ' + counts.familia, 'itens ' + counts.item, 'funcionários ' + counts.funcionario, 'recursos ' + counts.recurso, 'equipamentos ' + counts.equipamento].join(', ');
+  const summary = ['setores ' + counts.setor, 'operações ' + counts.operacao, 'grupos ' + counts.grupo, 'famílias ' + counts.familia, 'itens ' + counts.item, 'funcionários ' + counts.funcionario, 'máquinas ' + counts.recurso, 'equipamentos ' + counts.equipamento].join(', ');
   toast('Cadastros aplicados: ' + summary + (skipped ? '. Exemplos ignorados: ' + skipped + '.' : ''), errors.length ? 'error' : 'success');
   if(errors.length) toast(errors.slice(0, 3).join(' '), 'error');
 }
@@ -4353,14 +4931,21 @@ window.closeEmployeePhoto = closeEmployeePhoto;
 window.showForgotPassword = showForgotPassword;
 window.togglePassword = togglePassword;
 window.changeOrderStatus = changeOrderStatus;
-window.deleteGroup = deleteGroup;
-window.deleteFamily = deleteFamily;
 window.addOrderEquipment = addOrderEquipment;
 window.removeOrderDraftItem = removeOrderDraftItem;
-window.addEquipmentPart = addEquipmentPart;
-window.removeEquipmentPart = removeEquipmentPart;
-window.saveEquipment = saveEquipment;
-window.deleteEquipment = deleteEquipment;
+window.setCadastroChoice = setCadastroChoice;
+window.saveCadastro = saveCadastro;
+window.editCadastro = editCadastro;
+window.deleteCadastro = deleteCadastro;
+window.addKitRow = addKitRow;
+window.removeKitRow = removeKitRow;
+window.addRouteRow = addRouteRow;
+window.removeRouteRow = removeRouteRow;
+window.moveRouteRow = moveRouteRow;
+window.refreshCadastroDraft = refreshCadastroDraft;
+window.onItemGroupChange = onItemGroupChange;
+window.onEquipmentFamilyChange = onEquipmentFamilyChange;
+window.openCadastroItem = openCadastroItem;
 window.refreshItemCode = refreshItemCode;
 window.fillItemFamilies = fillItemFamilies;
 window.onItemFilterText = onItemFilterText;
@@ -4370,10 +4955,6 @@ window.editProduct = editProduct;
 window.cancelItemEdit = cancelItemEdit;
 window.removeProductByCode = removeProductByCode;
 window.saveProductItem = saveProductItem;
-window.saveGroup = saveGroup;
-window.saveFamily = saveFamily;
-window.showGroupItems = showGroupItems;
-window.showFamilyModels = showFamilyModels;
 window.printTasks = printTasks;
 window.createStudy = createStudy;
 window.applyStudy = applyStudy;
