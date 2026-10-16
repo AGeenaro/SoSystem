@@ -683,7 +683,18 @@ function nowBR(){ return new Date(new Date().toLocaleString('en-US', {timeZone:'
 function fmtTime(d){ return d.toLocaleTimeString('pt-BR', {timeZone:'America/Sao_Paulo', hour:'2-digit', minute:'2-digit', second:'2-digit'}); }
 function fmtDate(d){ return d.toLocaleDateString('pt-BR', {timeZone:'America/Sao_Paulo', weekday:'short', day:'2-digit', month:'short', year:'numeric'}); }
 function fmtDateShort(d){ return d.toLocaleDateString('pt-BR', {timeZone:'America/Sao_Paulo'}); }
-function fmtDateTime(iso){ if(!iso) return '—'; return new Date(iso).toLocaleString('pt-BR', {timeZone:'America/Sao_Paulo', day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit', second:'2-digit'}); }
+function fmtDateTime(iso){
+  if(!iso) return '—';
+  return new Date(iso).toLocaleString('pt-BR', {
+    timeZone:'America/Sao_Paulo',
+    day:'2-digit',
+    month:'2-digit',
+    year:'numeric',
+    hour:'2-digit',
+    minute:'2-digit',
+    second:'2-digit'
+  });
+}
 function todayISODate(){ return new Date().toLocaleDateString('en-CA', {timeZone:'America/Sao_Paulo'}); }
 function isTodayBR(iso){ if(!iso) return false; return new Date(iso).toLocaleDateString('en-CA', {timeZone:'America/Sao_Paulo'}) === todayISODate(); }
 function nowISO(){ return new Date().toISOString(); }
@@ -1118,18 +1129,48 @@ function orderItems(order){
   if(order.itens && order.itens.length) return order.itens;
   return [{ id: order.id + '-item', descricao: order.descricao || order.codigo, grupoId: order.grupoId || '', familiaId: order.familiaId || '', quantidade: Number(order.quantidadePlanejada)||0, produzida: orderProducedQty(order.id) }];
 }
+const ORDER_PRIORITIES = [
+  { value: 1, label: 'Urgente' },
+  { value: 2, label: 'Alta' },
+  { value: 3, label: 'Média' },
+  { value: 4, label: 'Baixa' },
+  { value: 5, label: 'Baixíssima' }
+];
 function orderPriorityValue(order){
   const value = Number(order && order.prioridade);
-  return value === 1 || value === 3 ? value : 2;
+  return value >= 1 && value <= 5 ? value : 3;
 }
 function orderPriorityLabel(order){
-  const value = orderPriorityValue(order);
-  return value === 1 ? 'Alta' : (value === 3 ? 'Baixa' : 'Normal');
+  const found = ORDER_PRIORITIES.find(function(item){ return item.value === orderPriorityValue(order); });
+  return found ? found.label : 'Média';
+}
+function orderPriorityTone(value){
+  if(value === 1) return 'badge-red';
+  if(value === 2) return 'badge-amber';
+  if(value === 3) return 'badge-blue';
+  if(value === 4) return 'badge-gray';
+  return 'badge-gray';
 }
 function orderPriorityBadge(order){
   const value = orderPriorityValue(order);
-  const tone = value === 1 ? 'badge-red' : (value === 3 ? 'badge-gray' : 'badge-amber');
-  return '<span class="badge ' + tone + '">' + escapeHtml(orderPriorityLabel(order)) + '</span>';
+  return '<span class="badge ' + orderPriorityTone(value) + '">' + escapeHtml(orderPriorityLabel(order)) + '</span>';
+}
+function orderPrioritySelect(order){
+  const current = orderPriorityValue(order);
+  const options = ORDER_PRIORITIES.map(function(item){
+    return `<option value="${item.value}" ${item.value === current ? 'selected' : ''}>${escapeHtml(item.label)}</option>`;
+  }).join('');
+  return `<select class="status-select" data-edit="ordens" onclick="event.stopPropagation()" onchange="changeOrderPriority('${order.id}', this.value)">${options}</select>`;
+}
+async function changeOrderPriority(orderId, raw){
+  if(deny('ordens')) return;
+  const order = orderById(orderId);
+  if(!order) return;
+  const value = Math.max(1, Math.min(5, Number(raw) || 3));
+  order.prioridade = value;
+  await persist();
+  renderOrdensTable();
+  toast('Prioridade atualizada.', 'success');
 }
 function itemRouteProgress(item, order){
   const qty = itemPlanned(item);
@@ -1850,7 +1891,7 @@ function renderOrdensTable(){
         <div style="color:var(--blue); font-weight:700;">${orderLabel(o)}</div>
         <div style="font-size:11px; color:var(--text-muted);">${escapeHtml(machines.join(', ') || o.descricao || '')}</div>
       </td>
-      <td>${orderPriorityBadge(o)}</td>
+      <td onclick="event.stopPropagation()">${orderPrioritySelect(o)}</td>
       <td>${escapeHtml(groupNames.join(', ') || '—')}</td>
       <td>${items.length}</td>
       <td style="min-width:140px;">
@@ -1923,7 +1964,7 @@ function openOrderModal(){
   }).join('');
   document.getElementById('ordQtd').value = 1;
   const prioridade = document.getElementById('ordPrioridade');
-  if(prioridade) prioridade.value = '2';
+  if(prioridade) prioridade.value = '3';
   const numeroField = document.getElementById('ordNumero');
   if(numeroField){
     numeroField.value = '';
@@ -2004,7 +2045,7 @@ async function saveOrder(shouldPrint){
   const quantidade = itens.reduce(function(sum, item){ return sum + item.quantidade; }, 0);
   const nomes = equipamentos.map(function(item){ return item.nome + (item.quantidade > 1 ? ' × ' + item.quantidade : ''); });
   const prioridadeField = document.getElementById('ordPrioridade');
-  const prioridade = orderPriorityValue({ prioridade: prioridadeField ? prioridadeField.value : 2 });
+  const prioridade = orderPriorityValue({ prioridade: prioridadeField ? prioridadeField.value : 3 });
   state.orders.push({ id: opId, numero, codigo: itens[0].codigo, descricao: nomes.join(', '), quantidadePlanejada: quantidade, tempoEstimadoTotalMin: tempo, status:'Não iniciado', prioridade: prioridade, setor:'', motivo:'', criadoEm: nowISO(), geradoPor, equipamentos: equipamentos, itens: itens });
   orderDraftEquipments = [];
   await persist();
@@ -3347,6 +3388,53 @@ function roleCheckMarkup(){
 let settingsChoice = 'usuario';
 let userSearch = '';
 let companySearch = '';
+let userPage = 1;
+let userPageSize = 20;
+let companyPage = 1;
+let companyPageSize = 20;
+let logCache = [];
+const LIST_PAGE_SIZES = [10, 20, 50, 100];
+function sliceListPage(items, page, pageSize){
+  const list = items || [];
+  const size = LIST_PAGE_SIZES.indexOf(Number(pageSize)) >= 0 ? Number(pageSize) : 20;
+  const total = list.length;
+  const pages = Math.max(1, Math.ceil(total / size) || 1);
+  let current = Math.max(1, Number(page) || 1);
+  if(current > pages) current = pages;
+  const start = (current - 1) * size;
+  return {
+    pageItems: list.slice(start, start + size),
+    total: total,
+    pages: pages,
+    page: current,
+    pageSize: size,
+    from: total ? start + 1 : 0,
+    to: Math.min(start + size, total)
+  };
+}
+function listPagerHtml(prefix, pageInfo){
+  const sizes = LIST_PAGE_SIZES.map(function(n){
+    return `<option value="${n}" ${pageInfo.pageSize === n ? 'selected' : ''}>${n}</option>`;
+  }).join('');
+  return `<div class="cadastro-pager">
+    <label class="cadastro-pager-size">Mostrar <select onchange="setListPageSize('${prefix}', this.value)">${sizes}</select></label>
+    <span class="section-sub" style="margin:0;">${pageInfo.from}–${pageInfo.to} de ${pageInfo.total}</span>
+    <div class="cadastro-pager-nav">
+      <button class="btn btn-sm" type="button" ${pageInfo.page <= 1 ? 'disabled' : ''} onclick="setListPage('${prefix}', ${pageInfo.page - 1})">Anterior</button>
+      <span class="cadastro-pager-page">Pág. ${pageInfo.page} / ${pageInfo.pages}</span>
+      <button class="btn btn-sm" type="button" ${pageInfo.page >= pageInfo.pages ? 'disabled' : ''} onclick="setListPage('${prefix}', ${pageInfo.page + 1})">Próxima</button>
+    </div>
+  </div>`;
+}
+function setListPageSize(prefix, size){
+  const next = LIST_PAGE_SIZES.indexOf(Number(size)) >= 0 ? Number(size) : 20;
+  if(prefix === 'user'){ userPageSize = next; userPage = 1; renderAccessUsersTable(); return; }
+  if(prefix === 'company'){ companyPageSize = next; companyPage = 1; renderCompanyTable(); return; }
+}
+function setListPage(prefix, page){
+  if(prefix === 'user'){ userPage = Math.max(1, Number(page) || 1); renderAccessUsersTable(); return; }
+  if(prefix === 'company'){ companyPage = Math.max(1, Number(page) || 1); renderCompanyTable(); return; }
+}
 function renderConfiguracoes(){
   const el = document.getElementById('panel-configuracoes');
   if(!el || !sessionUser) return;
@@ -3396,6 +3484,7 @@ function renderSettingsPanel(){
           <thead><tr><th>Código</th><th>Descrição</th><th>Perfil</th><th>Empresa</th><th>Bloqueado</th><th>Cadastro</th><th>Último acesso</th><th style="width:90px;"></th></tr></thead>
           <tbody id="accessUsersBody"><tr class="empty-row"><td colspan="8">Carregando contas…</td></tr></tbody>
         </table></div>
+        <div id="accessUsersPager"></div>
       </div>
       <div class="card" style="margin-top:14px;" id="passwordRequestList">Carregando pedidos de senha…</div>` : `<div class="card">Contas novas são criadas por um administrador. Os seus dados ficam em Perfil de Usuário.</div>`;
     if(canManageUsers()){
@@ -3485,6 +3574,7 @@ function closeAccessUserForm(){
 }
 function onUserSearch(value){
   userSearch = value;
+  userPage = 1;
   renderAccessUsersTable();
   const search = document.getElementById('userSearchInput');
   if(search){
@@ -3495,6 +3585,7 @@ function onUserSearch(value){
 }
 function renderAccessUsersTable(){
   const body = document.getElementById('accessUsersBody');
+  const pager = document.getElementById('accessUsersPager');
   if(!body) return;
   const query = String(userSearch || '').trim().toLowerCase();
   const list = (accessUserCache || []).filter(function(user){
@@ -3502,7 +3593,9 @@ function renderAccessUsersTable(){
     const hay = [user.code, user.name, user.email, ROLE_LABELS[user.role] || user.role, userCompanyLabel(user)].join(' ').toLowerCase();
     return hay.indexOf(query) >= 0;
   });
-  body.innerHTML = list.map(function(user){
+  const page = sliceListPage(list, userPage, userPageSize);
+  userPage = page.page;
+  body.innerHTML = page.pageItems.map(function(user){
     const mine = sessionUser && sessionUser.id === user.id;
     const missing = user.role !== 'administrador_suporte' && !user.companyId;
     return `<tr>
@@ -3519,6 +3612,7 @@ function renderAccessUsersTable(){
       </td>
     </tr>`;
   }).join('') || `<tr class="empty-row"><td colspan="8">Nenhuma conta.</td></tr>`;
+  if(pager) pager.innerHTML = listPagerHtml('user', page);
 }
 async function loadAccessUsers(){
   const body = document.getElementById('accessUsersBody');
@@ -3594,17 +3688,19 @@ async function loadCompanyProfiles(){
   try{
     companyProfiles = (await accountApi('/api/companies/' + companyId + '/profiles')).data || [];
     if(companyProfileRoles().indexOf(profileRole) < 0) profileRole = 'visualizador';
-    box.innerHTML = `<form onsubmit="saveCompanyProfile(event)">
+    box.innerHTML = `<form class="profile-form" onsubmit="saveCompanyProfile(event)">
       <div class="section-title" style="font-size:16px;">Perfil de usuário por empresa</div>
       <div class="section-sub">Cada empresa tem o próprio ADM, operador e visualizador. Dá para liberar tudo, só visualizar ou esconder módulos e setores.</div>
-      <div class="field"><label>Perfil</label>
+      <div class="field" style="max-width:280px;"><label>Perfil</label>
         <select id="roleProfile" onchange="showProfileRole(this.value)">${companyProfileRoles().map(function(role){
           return `<option value="${role}" ${role===profileRole?'selected':''}>${ROLE_LABELS[role]}</option>`;
         }).join('')}</select>
       </div>
       <div id="profileChecks">${roleCheckMarkup()}</div>
-      <button class="btn" type="button" onclick="setSettingsChoice('empresa')">Voltar</button>
-      <button class="btn btn-primary" type="submit">Salvar perfil</button>
+      <div class="cadastro-save-row">
+        <button class="btn" type="button" onclick="setSettingsChoice('empresa')">Voltar</button>
+        <button class="btn btn-primary" type="submit">Salvar perfil</button>
+      </div>
     </form>`;
   }catch(error){
     box.textContent = error.message;
@@ -5119,7 +5215,43 @@ function closeCompanyForm(){
 }
 function onCompanySearch(value){
   companySearch = value;
-  renderCompanySettings();
+  companyPage = 1;
+  renderCompanyTable();
+  const search = document.getElementById('companySearchInput');
+  if(search){
+    search.focus();
+    const len = search.value.length;
+    try{ search.setSelectionRange(len, len); }catch(err){}
+  }
+}
+function filteredCompanies(){
+  const query = String(companySearch || '').trim().toLowerCase();
+  return (knownCompanies || []).filter(function(company){
+    if(!query) return true;
+    return [company.code, company.name, company.codeMode].join(' ').toLowerCase().indexOf(query) >= 0;
+  });
+}
+function renderCompanyTable(){
+  const body = document.getElementById('companyTableBody');
+  const pager = document.getElementById('companyPager');
+  const count = document.getElementById('companyListCount');
+  if(!body) return;
+  const selected = activeCompanyId();
+  const manager = canManageUsers();
+  const filtered = filteredCompanies();
+  const page = sliceListPage(filtered, companyPage, companyPageSize);
+  companyPage = page.page;
+  if(count) count.textContent = 'Versão ' + ((window.PRODIFY_CONFIG && window.PRODIFY_CONFIG.version) || '') + ' · ' + filtered.length + ' de ' + (knownCompanies || []).length;
+  body.innerHTML = page.pageItems.map(function(company){
+    return `<tr>
+      <td class="mono">${escapeHtml(company.code || '—')}</td>
+      <td>${escapeHtml(company.name || '')}${company.id===selected ? ' · <b>ativa</b>' : ''}</td>
+      <td>${company.codeMode === 'manual' ? 'Digitados' : 'Auto'}</td>
+      <td>${company.blocked ? '<span style="color:var(--red-dark);font-weight:700;">Bloqueada</span>' : 'Ativa'}</td>
+      <td>${manager ? `<button class="icon-btn" type="button" onclick="openCompanyForm('${company.id}')" title="Editar">${icon('edit',14)}</button>` : ''}</td>
+    </tr>`;
+  }).join('') || '<tr class="empty-row"><td colspan="5">Nenhuma empresa cadastrada.</td></tr>';
+  if(pager) pager.innerHTML = listPagerHtml('company', page);
 }
 async function renderCompanySettings(){
   const box = document.getElementById('companySettings');
@@ -5130,17 +5262,12 @@ async function renderCompanySettings(){
   const selected = activeCompanyId();
   const suporte = sessionUser.role === 'administrador_suporte';
   const manager = canManageUsers();
-  const query = String(companySearch || '').trim().toLowerCase();
-  const filtered = companies.filter(function(company){
-    if(!query) return true;
-    return [company.code, company.name, company.codeMode].join(' ').toLowerCase().indexOf(query) >= 0;
-  });
   box.innerHTML = `
     <div class="card">
       <div class="cadastro-list-head">
         <div>
           <div class="section-title" style="font-size:16px;">Empresas</div>
-          <div class="section-sub" style="margin:0;">Versão ${escapeHtml((window.PRODIFY_CONFIG && window.PRODIFY_CONFIG.version) || '')} · ${filtered.length} de ${companies.length}</div>
+          <div class="section-sub" style="margin:0;" id="companyListCount"></div>
         </div>
         <div class="cadastro-list-actions">
           ${suporte ? '<button class="btn btn-primary" type="button" onclick="openCompanyForm()">Cadastrar empresa</button>' : ''}
@@ -5153,24 +5280,13 @@ async function renderCompanySettings(){
       </div>
       <div class="table-wrap" style="margin-top:12px;"><table>
         <thead><tr><th>Id</th><th>Descrição</th><th>Códigos</th><th>Status</th><th style="width:90px;"></th></tr></thead>
-        <tbody>${filtered.map(function(company){
-          return `<tr>
-            <td class="mono">${escapeHtml(company.code || '—')}</td>
-            <td>${escapeHtml(company.name || '')}${company.id===selected ? ' · <b>ativa</b>' : ''}</td>
-            <td>${company.codeMode === 'manual' ? 'Digitados' : 'Auto'}</td>
-            <td>${company.blocked ? '<span style="color:var(--red-dark);font-weight:700;">Bloqueada</span>' : 'Ativa'}</td>
-            <td>${manager ? `<button class="icon-btn" type="button" onclick="openCompanyForm('${company.id}')" title="Editar">${icon('edit',14)}</button>` : ''}</td>
-          </tr>`;
-        }).join('') || '<tr class="empty-row"><td colspan="5">Nenhuma empresa cadastrada.</td></tr>'}</tbody>
+        <tbody id="companyTableBody"></tbody>
       </table></div>
+      <div id="companyPager"></div>
     </div>
     <div class="card" style="margin-top:14px;" id="logList">Carregando logs…</div>`;
+  renderCompanyTable();
   loadOwnLogs();
-  const search = document.getElementById('companySearchInput');
-  if(search && document.activeElement === search){
-    const len = search.value.length;
-    try{ search.setSelectionRange(len, len); }catch(err){}
-  }
 }
 async function selectCompany(id){
   if(!id || (sessionUser && sessionUser.role !== 'administrador_suporte')) return;
@@ -5254,16 +5370,82 @@ async function resolvePasswordRequest(id){
     await loadPasswordRequests();
   }catch(error){ toast(error.message, 'error'); }
 }
+function logActionKind(entry){
+  const action = String((entry && entry.action) || '').toLowerCase();
+  if(!entry.valorAnterior && entry.valorAtual) return 'Create';
+  if(entry.valorAnterior && entry.valorAtual == null) return 'Delete';
+  if(/exclu|delet|recus|removid/.test(action)) return 'Delete';
+  if(/criad|create|abert|login|pedido_senha$/.test(action)) return 'Create';
+  if(entry.valorAnterior && entry.valorAtual) return 'Update';
+  return 'Update';
+}
+function logActionLabel(entry){
+  const kind = logActionKind(entry);
+  const map = {
+    Create: 'Create',
+    Update: 'Update',
+    Delete: 'Delete'
+  };
+  return map[kind] || kind;
+}
+function logCompanyLabel(entry){
+  if(!entry || !entry.companyId) return '—';
+  const company = (knownCompanies || []).find(function(item){ return item.id === entry.companyId; });
+  if(company) return (company.code ? company.code + ' — ' : '') + (company.name || company.id);
+  return entry.companyId;
+}
+function logActorLabel(entry){
+  return (entry && (entry.actorEmail || entry.actorId)) || '—';
+}
+function prettyLogJson(value){
+  if(value == null) return '—';
+  try{ return JSON.stringify(value, null, 2); }catch(err){ return String(value); }
+}
+function renderLogList(){
+  const box = document.getElementById('logList');
+  if(!box) return;
+  const title = sessionUser && sessionUser.role === 'administrador_suporte' ? 'Logs do sistema' : 'Meus logs';
+  const rows = (logCache || []).slice(0, 100).map(function(entry, index){
+    return `<tr>
+      <td><span class="badge ${logActionKind(entry) === 'Delete' ? 'badge-red' : (logActionKind(entry) === 'Create' ? 'badge-green' : 'badge-blue')}">${escapeHtml(logActionLabel(entry))}</span>
+        <div class="section-sub" style="margin:4px 0 0;">${escapeHtml(entry.action || '')} · ${escapeHtml(entry.entityKind || '')}</div>
+      </td>
+      <td>${escapeHtml(logActorLabel(entry))}</td>
+      <td>${escapeHtml(logCompanyLabel(entry))}</td>
+      <td class="mono">${escapeHtml(fmtDateTime(entry.createdAt))}</td>
+      <td><button class="btn btn-sm btn-log" type="button" onclick="openLogDetail(${index})">Log</button></td>
+    </tr>`;
+  }).join('');
+  box.innerHTML = `<div class="section-title" style="font-size:16px;">${title}</div>
+    <div class="section-sub">Create, Update e Delete com quem fez, empresa e horário. O botão Log abre o antes e o depois.</div>
+    <div class="table-wrap log-table" style="margin-top:12px;"><table>
+      <thead><tr><th>O que foi feito</th><th>Quem fez</th><th>Empresa</th><th>Data e horário</th><th style="width:90px;"></th></tr></thead>
+      <tbody>${rows || '<tr class="empty-row"><td colspan="5">Nenhum evento ainda.</td></tr>'}</tbody>
+    </table></div>`;
+}
+function openLogDetail(index){
+  const entry = logCache[index];
+  if(!entry) return;
+  const title = document.getElementById('logDetailTitle');
+  const body = document.getElementById('logDetailBody');
+  if(title) title.textContent = logActionLabel(entry) + ' · ' + (entry.action || 'Log');
+  if(body){
+    body.innerHTML = `
+      <div class="section-sub">${escapeHtml(logActorLabel(entry))} · ${escapeHtml(logCompanyLabel(entry))} · ${escapeHtml(fmtDateTime(entry.createdAt))}</div>
+      <div class="log-diff">
+        <div class="log-diff-pane"><b>Dado anterior</b><pre>${escapeHtml(prettyLogJson(entry.valorAnterior))}</pre></div>
+        <div class="log-diff-pane"><b>Dado atual</b><pre>${escapeHtml(prettyLogJson(entry.valorAtual))}</pre></div>
+      </div>`;
+  }
+  openModal('modalLogDetail');
+}
 async function loadOwnLogs(){
   const box = document.getElementById('logList');
   if(!box) return;
   try{
     const result = await accountApi('/api/logs');
-    const title = sessionUser.role === 'administrador_suporte' ? 'Logs do sistema' : 'Meus logs';
-    box.innerHTML = `<div class="section-title" style="font-size:16px;">${title}</div>` + (result.data.length ? result.data.slice(0, 40).map(function(entry){
-      return `<div style="margin-top:8px;"><b>${escapeHtml(entry.action)}</b> · ${escapeHtml(entry.entityKind)} · ${escapeHtml(entry.createdAt)}
-        <pre style="white-space:pre-wrap; font-size:12px;">${escapeHtml(JSON.stringify({ valor_anterior: entry.valorAnterior, valor_atual: entry.valorAtual }))}</pre></div>`;
-    }).join('') : '<div class="section-sub">Nenhum evento ainda.</div>');
+    logCache = result.data || [];
+    renderLogList();
   }catch(error){ box.textContent = error.message; }
 }
 async function toggleUserBlock(id, blocked){
@@ -5817,6 +5999,10 @@ window.closeEmployeePhoto = closeEmployeePhoto;
 window.showForgotPassword = showForgotPassword;
 window.togglePassword = togglePassword;
 window.changeOrderStatus = changeOrderStatus;
+window.changeOrderPriority = changeOrderPriority;
+window.setListPageSize = setListPageSize;
+window.setListPage = setListPage;
+window.openLogDetail = openLogDetail;
 window.addOrderEquipment = addOrderEquipment;
 window.removeOrderDraftItem = removeOrderDraftItem;
 window.setCadastroChoice = setCadastroChoice;

@@ -37,11 +37,11 @@
         var percentual = quantidade > 0 ? (produzida / quantidade) * 100 : 0;
         var isTarget = order.id === input.targetOrderId || label === input.targetOrderId;
         var prioridade = Number(order.prioridade);
-        if (prioridade !== 1 && prioridade !== 3) prioridade = 2;
-        var score = percentual / 10;
-        if (isTarget) score += 1000;
-        if (prioridade === 1) score += 300;
-        else if (prioridade === 2) score += 100;
+        if (!(prioridade >= 1 && prioridade <= 5)) prioridade = 3;
+        // Prioridade do pedido é o critério principal (1=Urgente … 5=Baixíssima).
+        var score = (6 - prioridade) * 10000;
+        score += percentual / 10;
+        if (isTarget) score += 5000;
         if (percentual >= 90) score += 500 + percentual;
         if (status === "Bloqueado") score += 40;
         open.push({
@@ -103,11 +103,13 @@
         funcionarioId: operator.id,
         funcionarioNome: personName(operator),
         prioridade: suggestions.length + 1,
-        motivo: targetHit
-          ? "Prioriza a entrega do pedido " + item.orderLabel + "."
-          : percentual >= 90
-            ? "Fecha o residual de " + item.itemLabel + " (" + percentual + "% pronto) antes de abrir trabalho novo."
-            : "Ocupa " + (machine.nome || "a máquina") + " com o próximo serviço para evitar ociosidade."
+        motivo: (function () {
+          var labels = { 1: "Urgente", 2: "Alta", 3: "Média", 4: "Baixa", 5: "Baixíssima" };
+          var pLabel = labels[item.prioridade] || "Média";
+          if (targetHit) return "Prioridade principal do estudo: pedido " + item.orderLabel + " (" + pLabel + ").";
+          if (percentual >= 90) return "Fecha o residual de " + item.itemLabel + " (" + percentual + "% pronto). Prioridade do pedido: " + pLabel + ".";
+          return "Prioridade " + pLabel + " · ocupa " + (machine.nome || "a máquina") + " com o próximo serviço.";
+        })()
       });
     });
     root.ProdifyStudy = root.ProdifyStudy || {};

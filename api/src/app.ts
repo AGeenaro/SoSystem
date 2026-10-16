@@ -792,7 +792,17 @@ export function createApp(options: AppOptions): Express {
     }).slice(0, 100);
     for (const record of changed) {
       const previous = before.get(`${record.kind}:${record.id}`);
-      await writeLog(actor, "producao_alterada", record.kind, record.id, previous ? previous.payload : null, record.payload, company.id);
+      const removed = !!record.deletedAt;
+      const action = removed ? "producao_excluida" : (previous ? "producao_alterada" : "producao_criada");
+      await writeLog(
+        actor,
+        action,
+        record.kind,
+        record.id,
+        previous ? previous.payload : null,
+        removed ? null : record.payload,
+        company.id
+      );
     }
     res.json({ data: snapshot });
   }));
