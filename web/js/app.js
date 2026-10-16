@@ -3270,7 +3270,7 @@ function syncSameModule(input){
 function permissionGrid(id, selected){
   return `<div class="perm-grid" id="${id}">${MODULE_OPTIONS.map(function(item){
     const checked = selected.indexOf(item.module) >= 0 ? 'checked' : '';
-    return `<label class="perm-item"><input type="checkbox" value="${item.module}" ${checked} onchange="syncSameModule(this)"> ${item.label}</label>`;
+    return `<label class="perm-item"><input type="checkbox" value="${item.module}" ${checked} onchange="syncSameModule(this)"><span class="perm-item-text"><span class="perm-item-title">${escapeHtml(item.label)}</span></span></label>`;
   }).join('')}</div>`;
 }
 let accessUserCache = null;
@@ -3299,7 +3299,7 @@ function sectorCheckMarkup(selected){
   if(!names.length) return '<div class="section-sub">Ainda não há setores. Cadastre em Cadastro, na opção Setor. Sem marcação, o perfil vê todos os setores.</div>';
   return `<div class="perm-grid" id="profileSectors">${names.map(function(name){
     const checked = (selected || []).some(function(item){ return sectorKey(item) === sectorKey(name); }) ? 'checked' : '';
-    return `<label class="perm-item"><input type="checkbox" value="${escapeHtml(name)}" ${checked}> ${escapeHtml(name)}</label>`;
+    return `<label class="perm-item"><input type="checkbox" value="${escapeHtml(name)}" ${checked}><span class="perm-item-text"><span class="perm-item-title">${escapeHtml(name)}</span></span></label>`;
   }).join('')}</div>
     <div class="section-sub">Nenhum setor marcado libera todos. Marcado, o perfil só vê esses setores. Ex.: Chaparia não vê Usinagem.</div>`;
 }
