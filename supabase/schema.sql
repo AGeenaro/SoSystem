@@ -277,6 +277,16 @@ revoke all on table public.notifications from anon, authenticated;
 alter table public.users add column if not exists code text;
 alter table public.users add column if not exists last_access_at timestamptz;
 alter table public.companies add column if not exists code text;
+alter table public.companies add column if not exists code_mode text not null default 'auto';
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'companies_code_mode_check'
+  ) then
+    alter table public.companies
+      add constraint companies_code_mode_check check (code_mode in ('auto', 'manual'));
+  end if;
+end $$;
 
 create table if not exists public.company_profiles (
   company_id uuid not null references public.companies(id) on delete cascade,

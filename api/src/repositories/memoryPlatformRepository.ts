@@ -47,6 +47,7 @@ export function createMemoryPlatformRepository(): PlatformRepository {
         maxRegistrations: input.maxRegistrations ?? 500,
         usageUntil: input.usageUntil ?? null,
         blocked: input.blocked ?? false,
+        codeMode: input.codeMode === "manual" ? "manual" : "auto",
         createdAt: stamp,
         updatedAt: stamp
       };

@@ -155,8 +155,8 @@
       <button class="modal-close" onclick="closeModal('modalOrder')">×</button>
     </div>
     <div class="field">
-      <label>Número da ordem <span class="field-hint">automático, editável</span></label>
-      <input id="ordNumero" maxlength="20">
+      <label>Número da ordem <span class="field-hint">digite o número</span></label>
+      <input id="ordNumero" maxlength="20" placeholder="Ex: 000.001">
     </div>
     <div class="field">
       <label>Prioridade <span class="field-hint">para organizar a fila e a IA</span></label>
@@ -338,7 +338,7 @@
 <script src="js/app.js"></script>
 <script>
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js?v=36').catch(function () {});
+  navigator.serviceWorker.register('sw.js?v=37').catch(function () {});
 }
 </script>
 </body>

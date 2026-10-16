@@ -76,7 +76,7 @@ A resposta `429` inclui os cabeçalhos padrão de rate limit. `/health` fica for
 Resposta `200`:
 
 ```json
-{ "data": { "status": "ok", "service": "sosystem-api", "version": "2026.10.27" } }
+{ "data": { "status": "ok", "service": "sosystem-api", "version": "2026.10.28" } }
 ```
 
 ### `POST /api/auth/register`
@@ -232,7 +232,7 @@ Senha nova: 8 caracteres, uma maiúscula, um número e um caractere especial. Co
 
 `POST /api/users/{id}/block` com `{ "blocked": true }` bloqueia. Se o administrador suporte bloqueou, o administrador da empresa não desbloqueia.
 
-`GET /api/companies` e `PUT /api/companies/{id}` cuidam de nome, limites, data limite de uso e bloqueio da empresa. Limites e bloqueio só o administrador suporte altera.
+`GET /api/companies` e `PUT /api/companies/{id}` cuidam de nome, `codeMode` (`auto` ou `manual`), limites, data limite de uso e bloqueio da empresa. Com `auto`, os códigos de cadastro vêm preenchidos; com `manual`, o campo fica vazio para digitar. O número do pedido é sempre digitado. Limites e bloqueio só o administrador suporte altera.
 
 `GET /api/logs` devolve os próprios eventos. O administrador suporte vê todos, com `valorAnterior` e `valorAtual`.
 

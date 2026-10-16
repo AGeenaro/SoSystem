@@ -1,5 +1,7 @@
 import type { ProductionModule, UserPermissions } from "../access.js";
 
+export type CompanyCodeMode = "auto" | "manual";
+
 export type CompanyRecord = {
   id: string;
   code: string;
@@ -9,6 +11,7 @@ export type CompanyRecord = {
   maxRegistrations: number;
   usageUntil: string | null;
   blocked: boolean;
+  codeMode: CompanyCodeMode;
   createdAt: string;
   updatedAt: string;
 };
@@ -32,6 +35,7 @@ export type NewCompany = {
   maxRegistrations?: number;
   usageUntil?: string | null;
   blocked?: boolean;
+  codeMode?: CompanyCodeMode;
 };
 
 export type CompanyPatch = Partial<Omit<CompanyRecord, "id" | "createdAt" | "updatedAt">>;

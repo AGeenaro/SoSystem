@@ -26,6 +26,7 @@ type CompanyRow = {
   max_registrations: number;
   usage_until: string | null;
   blocked: boolean;
+  code_mode?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -74,6 +75,7 @@ function companyFrom(row: CompanyRow): CompanyRecord {
     maxRegistrations: row.max_registrations,
     usageUntil: row.usage_until,
     blocked: row.blocked,
+    codeMode: row.code_mode === "manual" ? "manual" : "auto",
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
@@ -170,6 +172,13 @@ async function persistCompany(
       ? await supabase.from("companies").insert(body).select("*").single()
       : await supabase.from("companies").update(body).eq("id", id!).select("*").maybeSingle();
     if (!result.error) return result.data ? companyFrom(result.data as CompanyRow) : null;
+    if (/code_mode/i.test(result.error.message) && "code_mode" in body) {
+      throw new HttpError(
+        503,
+        "SCHEMA_PENDING",
+        "Falta a coluna code_mode. Rode supabase/migrations/2026-10-16-company-code-mode.sql no Supabase."
+      );
+    }
     if (/"code"/i.test(result.error.message) && "code" in body) {
       delete body.code;
       body = { ...body };
@@ -216,7 +225,8 @@ export function createSupabasePlatformRepository(url: string, serviceRoleKey: st
         max_machines: input.maxMachines ?? 50,
         max_registrations: input.maxRegistrations ?? 500,
         usage_until: input.usageUntil ?? null,
-        blocked: input.blocked ?? false
+        blocked: input.blocked ?? false,
+        code_mode: input.codeMode === "manual" ? "manual" : "auto"
       });
       if (!created) throw new HttpError(500, "DATABASE_ERROR", "Falha ao acessar o banco de dados.");
       return created;
@@ -230,6 +240,7 @@ export function createSupabasePlatformRepository(url: string, serviceRoleKey: st
       if (patch.maxRegistrations !== undefined) payload.max_registrations = patch.maxRegistrations;
       if (patch.usageUntil !== undefined) payload.usage_until = patch.usageUntil;
       if (patch.blocked !== undefined) payload.blocked = patch.blocked;
+      if (patch.codeMode !== undefined) payload.code_mode = patch.codeMode === "manual" ? "manual" : "auto";
       return persistCompany(supabase, "update", id, payload);
     },
     async listProfiles(companyId) {

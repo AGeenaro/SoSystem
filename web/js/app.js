@@ -94,6 +94,9 @@ let mutationEpoch = 0;
 let syncTimer = null;
 let syncing = false;
 let uiRefreshDeferred = false;
+let knownCompanies = [];
+let companyListLoaded = false;
+let companyListReady = false;
 function colorForName(name){ let h=0; for(let i=0;i<name.length;i++){ h = name.charCodeAt(i) + ((h<<5)-h); } return AVATAR_COLORS[Math.abs(h) % AVATAR_COLORS.length]; }
 function initials(nome, sobrenome){ return ((nome[0]||'')+(sobrenome[0]||'')).toUpperCase(); }
 function productCodeTaken(codigo, exceptIndex){
@@ -137,7 +140,9 @@ function employeeNumberTaken(numero, exceptId){
   });
 }
 function assignEmployeeNumber(raw, exceptId){
-  const parsed = parsePositiveInt(raw);
+  const typed = String(raw || '').trim();
+  const parsed = parsePositiveInt(typed);
+  if(!parsed && !companyCodesAuto()) return { error: 'Informe o número.' };
   const value = parsed || state.nextEmployeeNum;
   const numero = formatEmployeeNumber(value);
   if(employeeNumberTaken(numero, exceptId)) return { error: 'Este número de funcionário já existe.' };
@@ -149,11 +154,11 @@ function orderNumberTaken(numero){
 }
 function assignOrderNumber(raw){
   const typed = String(raw || '').trim();
-  const numero = typed || formatOrderNumber(state.nextOrderNum);
+  if(!typed) return { error: 'Informe o número do pedido.' };
+  const numero = typed;
   if(orderNumberTaken(numero)) return { error: 'Já existe uma ordem com este número.' };
   const parsed = parsePositiveInt(numero);
   if(parsed >= state.nextOrderNum) state.nextOrderNum = parsed + 1;
-  else if(!typed) state.nextOrderNum += 1;
   return { numero: numero };
 }
 function nextResourceCode(){
@@ -221,6 +226,35 @@ function emptyState(){
 function activeCompanyId(){
   if(sessionUser && sessionUser.companyId) return sessionUser.companyId;
   try { return localStorage.getItem('prodfy_company') || ''; } catch(e){ return ''; }
+}
+function currentCompany(){
+  const id = activeCompanyId();
+  if(!id) return null;
+  return knownCompanies.find(function(company){ return company.id === id; }) || null;
+}
+function companyCodesAuto(){
+  const company = currentCompany();
+  return !(company && company.codeMode === 'manual');
+}
+function codeFieldHint(){
+  return companyCodesAuto() ? 'automático, editável' : 'digite o código';
+}
+function defaultSystemCode(list){
+  return companyCodesAuto() ? nextNumericCode(list) : '';
+}
+function setFieldHint(inputId, hint){
+  const input = document.getElementById(inputId);
+  if(!input) return;
+  const label = input.closest('.field') && input.closest('.field').querySelector('label');
+  if(!label) return;
+  let span = label.querySelector('.field-hint');
+  if(!span){
+    span = document.createElement('span');
+    span.className = 'field-hint';
+    label.appendChild(document.createTextNode(' '));
+    label.appendChild(span);
+  }
+  span.textContent = hint;
 }
 function cacheStorageKey(){
   return CACHE_KEY + '_' + (activeCompanyId() || 'local');
@@ -851,9 +885,6 @@ function renderNav(){
   }
   updateCsvActions();
 }
-let knownCompanies = [];
-let companyListLoaded = false;
-let companyListReady = false;
 function companiesByName(list){
   return (list || []).slice().sort(function(a, b){
     return String(a.name || '').localeCompare(String(b.name || ''), 'pt', { sensitivity: 'base' });
@@ -1587,11 +1618,12 @@ function openResourceModal(id){
     fillResourceSetor(r.setorId || '');
   } else {
     document.getElementById('resModalTitle').textContent = 'Nova Máquina';
-    document.getElementById('resNome').value = suggestAlpha(state.resources);
+    document.getElementById('resNome').value = defaultSystemCode(state.resources);
     document.getElementById('resDescricao').value = '';
     document.getElementById('resRestricao').value = '';
     fillResourceSetor('');
   }
+  setFieldHint('resNome', codeFieldHint());
   openModal('modalResource');
 }
 async function saveResource(){
@@ -1603,7 +1635,8 @@ async function saveResource(){
   const setorId = document.getElementById('resSetor') ? document.getElementById('resSetor').value : '';
   const setorRecord = setorById(setorId);
   const setor = setorRecord ? recordLabel(setorRecord) : '';
-  if(!nome) nome = suggestAlpha(state.resources);
+  if(!nome && companyCodesAuto()) nome = nextNumericCode(state.resources);
+  if(!nome){ toast('Informe o código da máquina.', 'error'); return; }
   if(!descricao){ toast('Preencha a descrição.', 'error'); return; }
   if(!setorId){ toast('Escolha o setor da máquina.', 'error'); return; }
   if(state.resources.some(function(resource){ return resource.id !== id && String(resource.codigo || resource.nome).toLowerCase() === nome.toLowerCase(); })){
@@ -1857,7 +1890,11 @@ function openOrderModal(){
   const prioridade = document.getElementById('ordPrioridade');
   if(prioridade) prioridade.value = '2';
   const numeroField = document.getElementById('ordNumero');
-  if(numeroField) numeroField.value = formatOrderNumber(state.nextOrderNum);
+  if(numeroField){
+    numeroField.value = '';
+    numeroField.placeholder = 'Digite o número do pedido';
+  }
+  setFieldHint('ordNumero', 'digite o número');
   const geradoSel = document.getElementById('ordGeradoPor');
   geradoSel.innerHTML = state.employees.length ? state.employees.map(e=>`<option value="${e.nome} ${e.sobrenome}">${e.nome} ${e.sobrenome}</option>`).join('') : '<option value="">Nenhum funcionário cadastrado</option>';
   renderOrderPreview();
@@ -2510,8 +2547,8 @@ function openEmployeeModal(id){
     document.getElementById('empFeriasFim').value = (e.ferias && e.ferias.fim) ? e.ferias.fim : '';
   } else {
     document.getElementById('empModalTitle').textContent = 'Novo Funcionário';
-    document.getElementById('empNumero').value = formatEmployeeNumber(state.nextEmployeeNum);
-    document.getElementById('empCodigo').value = suggestAlpha(state.employees);
+    document.getElementById('empNumero').value = companyCodesAuto() ? formatEmployeeNumber(state.nextEmployeeNum) : '';
+    document.getElementById('empCodigo').value = defaultSystemCode(state.employees);
     document.getElementById('empNome').value = '';
     document.getElementById('empSobrenome').value = '';
     document.getElementById('empFuncao').value = '';
@@ -2521,6 +2558,8 @@ function openEmployeeModal(id){
     document.getElementById('empFeriasInicio').value = '';
     document.getElementById('empFeriasFim').value = '';
   }
+  setFieldHint('empNumero', codeFieldHint());
+  setFieldHint('empCodigo', codeFieldHint());
   toggleFeriasFields();
   const selected = id ? employeeMachines(id).map(function(resource){ return resource.id; }) : [];
   renderMachineChoices('empMaquinas', selected);
@@ -2543,7 +2582,7 @@ async function saveEmployee(){
   const machineIds = Array.from(document.querySelectorAll('#empMaquinas input:checked')).map(function(input){ return input.value; });
   const assignedNumber = assignEmployeeNumber(document.getElementById('empNumero').value, id);
   if(assignedNumber.error){ toast(assignedNumber.error, 'error'); return; }
-  const claimed = claimCode(state.employees, document.getElementById('empCodigo').value || suggestAlpha(state.employees), id);
+  const claimed = claimCode(state.employees, document.getElementById('empCodigo').value || defaultSystemCode(state.employees), id);
   if(claimed.error){ toast(claimed.error, 'error'); return; }
   const novoNumero = assignedNumber.numero;
   let employeeId = id;
@@ -2634,7 +2673,7 @@ function renderIniciarModalBody(){
           <div class="field"><label>Sobrenome</label><input id="quickEmpSobrenome"></div>
         </div>
         <div class="field-row">
-          <div class="field"><label>Número <span class="field-hint">automático, editável</span></label><input id="quickEmpNumero" value="${formatEmployeeNumber(state.nextEmployeeNum)}" maxlength="8"></div>
+          <div class="field"><label>Número <span class="field-hint">${codeFieldHint()}</span></label><input id="quickEmpNumero" value="${escapeHtml(companyCodesAuto() ? formatEmployeeNumber(state.nextEmployeeNum) : '')}" maxlength="8"></div>
           <div class="field"><label>Função</label><input id="quickEmpFuncao" placeholder="Ex: Operador"></div>
         </div>
         <div class="field"><label>Máquinas</label><div id="quickEmpMaquinas" style="display:flex; flex-wrap:wrap;"></div></div>
@@ -2647,7 +2686,7 @@ function renderIniciarModalBody(){
       <button type="button" class="btn btn-ghost btn-sm" style="margin-top:10px;" onclick="toggleQuickMachine()">Cadastrar máquina</button>
       <div id="quickMachineBox" style="display:${apShowNewMachine?'block':'none'}; margin-top:10px;">
         <div class="field-row">
-          <div class="field"><label>Código <span class="field-hint">automático, editável</span></label><input id="quickResNome" value="${escapeHtml(suggestAlpha(state.resources))}" maxlength="12"></div>
+          <div class="field"><label>Código <span class="field-hint">${codeFieldHint()}</span></label><input id="quickResNome" value="${escapeHtml(defaultSystemCode(state.resources))}" maxlength="12"></div>
           <div class="field"><label>Descrição</label><input id="quickResDescricao" placeholder="Ex: Torno"></div>
         </div>
         <button type="button" class="btn btn-primary btn-sm" onclick="saveQuickMachine()">Salvar máquina</button>
@@ -2764,7 +2803,7 @@ async function saveQuickEmployee(){
   if(assignedNumber.error){ toast(assignedNumber.error, 'error'); return; }
   const numero = assignedNumber.numero;
   const id = uid();
-  state.employees.push({ id: id, codigo: suggestAlpha(state.employees), numero: numero, nome: nome, sobrenome: sobrenome, funcao: funcao, turno: '1º Turno', vinculo: 'Efetivo', ferias: null });
+  state.employees.push({ id: id, codigo: nextNumericCode(state.employees), numero: numero, nome: nome, sobrenome: sobrenome, funcao: funcao, turno: '1º Turno', vinculo: 'Efetivo', ferias: null });
   const machineIds = Array.from(document.querySelectorAll('#quickEmpMaquinas input:checked')).map(function(input){ return input.value; });
   syncEmployeeMachines(id, machineIds);
   await persist();
@@ -2777,7 +2816,8 @@ async function saveQuickEmployee(){
 async function saveQuickMachine(){
   if(deny('apontamento')) return;
   let nome = document.getElementById('quickResNome').value.trim().toUpperCase();
-  if(!nome) nome = suggestAlpha(state.resources);
+  if(!nome && companyCodesAuto()) nome = nextNumericCode(state.resources);
+  if(!nome){ toast('Informe o código da máquina.', 'error'); return; }
   const descricao = document.getElementById('quickResDescricao').value.trim() || nome;
   if(state.resources.some(function(resource){ return String(resource.codigo || resource.nome).toLowerCase() === nome.toLowerCase(); })){
     toast('Já existe uma máquina com este código.', 'error');
@@ -3933,14 +3973,14 @@ function guardCadastro(){
   return deny(module);
 }
 function suggestedCadastroCode(){
-  if(cadastroChoice === 'setor') return nextNumericCode(state.setores);
-  if(cadastroChoice === 'grupo') return nextNumericCode(state.groups);
-  if(cadastroChoice === 'familia') return nextNumericCode(state.families);
-  if(cadastroChoice === 'item') return nextNumericCode(state.products);
-  if(cadastroChoice === 'operacao') return nextNumericCode(state.operacoes);
-  if(cadastroChoice === 'operador') return nextNumericCode(state.employees);
-  if(cadastroChoice === 'maquina') return nextNumericCode(state.resources);
-  return nextNumericCode(state.equipments);
+  if(cadastroChoice === 'setor') return defaultSystemCode(state.setores);
+  if(cadastroChoice === 'grupo') return defaultSystemCode(state.groups);
+  if(cadastroChoice === 'familia') return defaultSystemCode(state.families);
+  if(cadastroChoice === 'item') return defaultSystemCode(state.products);
+  if(cadastroChoice === 'operacao') return defaultSystemCode(state.operacoes);
+  if(cadastroChoice === 'operador') return defaultSystemCode(state.employees);
+  if(cadastroChoice === 'maquina') return defaultSystemCode(state.resources);
+  return defaultSystemCode(state.equipments);
 }
 function cadastroRecord(id){
   if(!id) return null;
@@ -4012,7 +4052,7 @@ function toggleCadastroSelectAll(checked){
   applyAccess();
 }
 function codeField(value){
-  return `<div class="field"><label>Código <span class="field-hint">automático, editável</span></label><input id="cadCodigo" data-edit="engenharia" maxlength="12" value="${escapeHtml(value || '')}"></div>`;
+  return `<div class="field"><label>Código <span class="field-hint">${codeFieldHint()}</span></label><input id="cadCodigo" data-edit="engenharia" maxlength="12" value="${escapeHtml(value || '')}" placeholder="${companyCodesAuto() ? '' : 'Digite o código'}"></div>`;
 }
 function descriptionField(value, label){
   return `<div class="field"><label>${label || 'Descrição'}</label><input id="cadDescricao" data-edit="engenharia" maxlength="120" value="${escapeHtml(value || '')}"></div>`;
@@ -4142,7 +4182,7 @@ function renderCadastroBody(){
     const familiaId = fieldValue('cadFamilia', record ? (record.familiaId || '') : '');
     const families = state.families.filter(function(family){ return !grupoId || family.grupoId === grupoId; });
     const classe = fieldValue('cadClasse', record ? (record.classificacao || 'PI') : 'PI');
-    const erp = fieldValue('cadErp', record ? (record.codigoErp || '') : genErpCode(classe));
+    const erp = fieldValue('cadErp', record ? (record.codigoErp || '') : (companyCodesAuto() ? genErpCode(classe) : ''));
     const setorId = fieldValue('cadSetor', record ? (record.setorId || '') : '');
     const material = fieldValue('cadMaterial', record ? (record.material || '') : '');
     const tempo = fieldValue('cadTempo', record ? (record.tempoFabricacaoMin || 1) : 1);
@@ -4162,7 +4202,7 @@ function renderCadastroBody(){
       const setor = setorById(product.setorId);
       return `<tr>${rowSelect(product.codigo)}<td class="mono">${escapeHtml(product.codigo || '')}</td><td class="mono">${escapeHtml(product.codigoErp || '')}</td><td>${escapeHtml(product.descricao || '')}</td><td>${escapeHtml(family ? recordLabel(family) : '—')}</td><td>${escapeHtml(setor ? recordLabel(setor) : '—')}</td><td>${rowActions(product.codigo)}</td></tr>`;
     }).join('');
-    box.innerHTML = `<div class="section-title" style="font-size:16px;">Item</div><div class="section-sub">Peça unitária, consulta e cadastro no mesmo lugar. Código interno automático e editável; ERP separado: <b>30.2000.XXXX</b> (PI) e <b>30.3000.XXXX</b> (PF).</div>
+    box.innerHTML = `<div class="section-title" style="font-size:16px;">Item</div><div class="section-sub">Peça unitária, consulta e cadastro no mesmo lugar. Código interno ${companyCodesAuto() ? 'automático e editável' : 'digitado'}; ERP separado: <b>30.2000.XXXX</b> (PI) e <b>30.3000.XXXX</b> (PF).</div>
       <div class="grid grid-2">${codeField(codigo)}
         <div class="field"><label>Código ERP</label><input id="cadErp" data-edit="engenharia" maxlength="20" value="${escapeHtml(erp)}"></div>
         ${descriptionField(descricao)}
@@ -4403,8 +4443,8 @@ async function saveCadastro(){
       if(family) Object.assign(family, payload);
     } else state.families.push(Object.assign({ id: uid() }, payload));
   } else if(cadastroChoice === 'item'){
-    const codigoErp = cadastroInput('cadErp') || genErpCode(cadastroInput('cadClasse') || 'PI');
-    if(state.products.some(function(product){ return product.codigo !== cadastroEditId && String(product.codigoErp || '').toLowerCase() === codigoErp.toLowerCase(); })){
+    const codigoErp = cadastroInput('cadErp') || (companyCodesAuto() ? genErpCode(cadastroInput('cadClasse') || 'PI') : '');
+    if(codigoErp && state.products.some(function(product){ return product.codigo !== cadastroEditId && String(product.codigoErp || '').toLowerCase() === codigoErp.toLowerCase(); })){
       toast('Este código ERP já existe.', 'error');
       return;
     }
@@ -4806,6 +4846,13 @@ async function renderCompanySettings(){
           <div class="field"><label>Id</label><input id="companyCode" maxlength="12" value="${escapeHtml(current.code || nextAlphaCode(companies.filter(function(company){ return company.id !== current.id; }).map(function(company){ return company.code; })))}" ${manager ? '' : 'disabled'}></div>
           <div class="field"><label>Descrição</label><input id="companyName" value="${escapeHtml(current.name)}" ${manager ? '' : 'disabled'}></div>
         </div>
+        <div class="field"><label>Códigos do sistema</label>
+          <select id="companyCodeMode" ${manager ? '' : 'disabled'}>
+            <option value="auto" ${current.codeMode !== 'manual' ? 'selected' : ''}>Auto incremento (padrão preenchido)</option>
+            <option value="manual" ${current.codeMode === 'manual' ? 'selected' : ''}>Digitados (campo vazio)</option>
+          </select>
+          <div class="section-sub" style="margin-top:6px;">Vale para cadastros, funcionário e máquina. O número do pedido continua sempre digitado.</div>
+        </div>
         ${manager ? `<button class="btn" type="button" onclick="setSettingsChoice('perfis')">Perfis de usuário</button>` : ''}
         ${suporte ? `<div class="field-row">
           <div class="field"><label>Máximo de usuários</label><input id="maxUsers" type="number" min="1" value="${current.maxUsers}"></div>
@@ -4848,7 +4895,11 @@ async function createCompany(event){
 }
 async function saveCompany(event, id){
   event.preventDefault();
-  const body = { name: document.getElementById('companyName').value, code: document.getElementById('companyCode').value.trim().toUpperCase() };
+  const body = {
+    name: document.getElementById('companyName').value,
+    code: document.getElementById('companyCode').value.trim().toUpperCase(),
+    codeMode: document.getElementById('companyCodeMode') ? document.getElementById('companyCodeMode').value : 'auto'
+  };
   if(sessionUser.role === 'administrador_suporte'){
     body.maxUsers = Number(document.getElementById('maxUsers').value);
     body.maxMachines = Number(document.getElementById('maxMachines').value);
@@ -4856,8 +4907,16 @@ async function saveCompany(event, id){
     body.usageUntil = document.getElementById('usageUntil').value || null;
   }
   try{
-    await accountApi('/api/companies/' + id, { method:'PUT', body: body });
+    const updated = await accountApi('/api/companies/' + id, { method:'PUT', body: body });
+    if(updated && updated.data){
+      knownCompanies = companiesByName(knownCompanies.map(function(company){
+        return company.id === id ? updated.data : company;
+      }));
+      if(!knownCompanies.some(function(company){ return company.id === id; })) knownCompanies.push(updated.data);
+      knownCompanies = companiesByName(knownCompanies);
+    }
     toast('Empresa salva.', 'success');
+    await refreshCompanyFoot();
     await renderCompanySettings();
   }catch(error){ toast(error.message, 'error'); }
 }

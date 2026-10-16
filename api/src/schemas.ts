@@ -76,6 +76,8 @@ export const companyCreateSchema = z.object({
   code: codeSchema.optional()
 }).strict();
 
+export const companyCodeModeSchema = z.enum(["auto", "manual"]);
+
 export const companyUpdateSchema = z.object({
   name: z.string().trim().min(2).max(80).optional(),
   code: codeSchema.optional(),
@@ -83,7 +85,8 @@ export const companyUpdateSchema = z.object({
   maxMachines: z.number().int().min(1).max(100_000).optional(),
   maxRegistrations: z.number().int().min(1).max(1_000_000).optional(),
   usageUntil: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
-  blocked: z.boolean().optional()
+  blocked: z.boolean().optional(),
+  codeMode: companyCodeModeSchema.optional()
 }).strict().refine((value) => Object.keys(value).length > 0, {
   message: "Informe ao menos um campo para atualizar."
 });
