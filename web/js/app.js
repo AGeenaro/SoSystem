@@ -234,13 +234,23 @@ function currentCompany(){
 }
 function companyCodesAuto(){
   const company = currentCompany();
-  return !(company && company.codeMode === 'manual');
+  if(company && company.codeMode) return company.codeMode !== 'manual';
+  // Sem empresa carregada ainda: assume auto (padrão da coluna code_mode).
+  return true;
 }
 function codeFieldHint(){
   return companyCodesAuto() ? 'automático, editável' : 'digite o código';
 }
 function defaultSystemCode(list){
-  return companyCodesAuto() ? nextNumericCode(list) : '';
+  if(!companyCodesAuto()) return '';
+  return nextNumericCode(list);
+}
+function freshCadastroCode(){
+  return suggestedCadastroCode();
+}
+function freshErpCode(classe){
+  if(!companyCodesAuto()) return '';
+  return genErpCode(classe || 'PI');
 }
 function setFieldHint(inputId, hint){
   const input = document.getElementById(inputId);
@@ -1008,7 +1018,12 @@ function routeFlags(rota){
 function nextNumericCode(list){
   let max = 0;
   (list || []).forEach(function(item){
-    const number = parsePositiveInt(item && item.codigo);
+    if(!item) return;
+    const number = Math.max(
+      parsePositiveInt(item.codigo),
+      parsePositiveInt(item.nome),
+      parsePositiveInt(item.numero)
+    );
     if(number > max) max = number;
   });
   return String(max + 1);
@@ -4361,7 +4376,10 @@ function renderCadastroBody(){
 }
 function buildCadastroFormHtml(){
   const record = cadastroRecord(cadastroEditId);
-  const codigo = fieldValue('cadCodigo', record ? (record.codigo || '') : suggestedCadastroCode());
+  const suggested = freshCadastroCode();
+  const codigo = cadastroEditId
+    ? fieldValue('cadCodigo', record ? (record.codigo || '') : '')
+    : fieldValue('cadCodigo', suggested || '');
   const descricao = fieldValue('cadDescricao', record ? (cadastroChoice === 'operador' ? ((record.nome || '') + ' ' + (record.sobrenome || '')).trim() : recordLabel(record)) : '');
   if(cadastroChoice === 'setor'){
     return `<div class="section-sub">Lugar da fábrica. O código é numérico.</div><div class="grid grid-2">${codeField(codigo)}${descriptionField(descricao)}</div>${saveButtons()}`;
@@ -4382,20 +4400,23 @@ function buildCadastroFormHtml(){
     const familiaId = fieldValue('cadFamilia', record ? (record.familiaId || '') : '');
     const families = state.families.filter(function(family){ return !grupoId || family.grupoId === grupoId; });
     const classe = fieldValue('cadClasse', record ? (record.classificacao || 'PI') : 'PI');
-    const erp = fieldValue('cadErp', record ? (record.codigoErp || '') : (companyCodesAuto() ? genErpCode(classe) : ''));
+    const erpSuggested = freshErpCode(classe);
+    const erp = cadastroEditId
+      ? fieldValue('cadErp', record ? (record.codigoErp || '') : '')
+      : fieldValue('cadErp', erpSuggested);
     const setorId = fieldValue('cadSetor', record ? (record.setorId || '') : '');
     const material = fieldValue('cadMaterial', record ? (record.material || '') : '');
     const tempo = fieldValue('cadTempo', record ? (record.tempoFabricacaoMin || 1) : 1);
     const machines = checkedDraft('maquinas', record ? (record.maquinas || []) : []);
     return `<div class="section-sub">Código interno ${companyCodesAuto() ? 'automático e editável' : 'digitado'}; ERP: <b>30.2000.XXXX</b> (PI) e <b>30.3000.XXXX</b> (PF).</div>
       <div class="grid grid-2">${codeField(codigo)}
-        <div class="field"><label>Código ERP</label><input id="cadErp" data-edit="engenharia" maxlength="20" value="${escapeHtml(erp)}"></div>
+        <div class="field"><label>Código ERP <span class="field-hint">${codeFieldHint()}</span></label><input id="cadErp" data-edit="engenharia" maxlength="20" value="${escapeHtml(erp)}" onchange="onItemClasseOrErpChange()"></div>
         ${descriptionField(descricao)}
         <div class="field"><label>Material</label><input id="cadMaterial" data-edit="engenharia" maxlength="80" value="${escapeHtml(material)}" placeholder="Ex.: aço inox"></div>
         <div class="field"><label>Grupo</label><select id="cadGrupo" data-edit="engenharia" onchange="onItemGroupChange()">${selectOptions(state.groups, grupoId, 'Selecione o grupo')}</select></div>
         <div class="field"><label>Família</label><select id="cadFamilia" data-edit="engenharia">${selectOptions(families, familiaId, 'Selecione a família')}</select></div>
         <div class="field"><label>Setor</label><select id="cadSetor" data-edit="engenharia">${selectOptions(state.setores, setorId, 'Selecione o setor')}</select></div>
-        <div class="field"><label>Classificação</label><select id="cadClasse" data-edit="engenharia"><option value="PI" ${classe === 'PI' ? 'selected' : ''}>PI — intermediário</option><option value="PF" ${classe === 'PF' ? 'selected' : ''}>PF — final</option></select></div>
+        <div class="field"><label>Classificação</label><select id="cadClasse" data-edit="engenharia" onchange="onItemClasseOrErpChange()"><option value="PI" ${classe === 'PI' ? 'selected' : ''}>PI — intermediário</option><option value="PF" ${classe === 'PF' ? 'selected' : ''}>PF — final</option></select></div>
         <div class="field"><label>Tempo (min/peça)</label><input id="cadTempo" data-edit="engenharia" type="number" min="0" step="0.1" value="${escapeHtml(tempo)}"></div>
       </div>
       <div class="section-sub">Máquinas em que esta peça pode ser feita.</div>
@@ -4452,7 +4473,22 @@ function fillCadastroFormModal(){
   if(title) title.textContent = (cadastroEditId ? 'Editar ' : 'Cadastrar ') + cadastroModuleLabel(cadastroChoice);
   if(body) body.innerHTML = buildCadastroFormHtml();
 }
-function openCadastroForm(id){
+function onItemClasseOrErpChange(){
+  if(!companyCodesAuto() || cadastroEditId) return;
+  rememberTexts();
+  const classe = cadastroInput('cadClasse') || 'PI';
+  const erp = document.getElementById('cadErp');
+  if(erp && (!textDraft.cadErp || textDraft.cadErp === erp.getAttribute('data-auto'))){
+    const next = freshErpCode(classe);
+    textDraft.cadErp = next;
+    erp.value = next;
+    erp.setAttribute('data-auto', next);
+  }
+}
+async function openCadastroForm(id){
+  if(sessionUser && !knownCompanies.length){
+    try{ await refreshCompanyFoot(); }catch(err){}
+  }
   if(id){
     cadastroEditId = id;
     textDraft = {};
@@ -4465,9 +4501,15 @@ function openCadastroForm(id){
     });
   } else {
     resetCadastroForm();
+    if(companyCodesAuto()){
+      textDraft.cadCodigo = freshCadastroCode();
+      if(cadastroChoice === 'item') textDraft.cadErp = freshErpCode('PI');
+    }
   }
   cadastroFormOpen = true;
   fillCadastroFormModal();
+  const erp = document.getElementById('cadErp');
+  if(erp && textDraft.cadErp) erp.setAttribute('data-auto', textDraft.cadErp);
   openModal('modalCadastroForm');
   applyAccess();
 }
@@ -5770,6 +5812,7 @@ window.setCadastroPage = setCadastroPage;
 window.onCadastroSearch = onCadastroSearch;
 window.openCadastroForm = openCadastroForm;
 window.closeCadastroForm = closeCadastroForm;
+window.onItemClasseOrErpChange = onItemClasseOrErpChange;
 window.onMaquinaSetorChange = onMaquinaSetorChange;
 window.onOperadorSetorChange = onOperadorSetorChange;
 window.openAccessUserForm = openAccessUserForm;
