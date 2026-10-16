@@ -112,7 +112,7 @@ function productCodeTaken(codigo, exceptIndex){
 function genErpCode(classificacao){
   const mid = classificacao==='PI' ? '2000' : '3000';
   const used = {};
-  state.products.forEach(function(product){
+  catalogList('products').concat(trashRecords('item')).forEach(function(product){
     [product.codigo, product.codigoErp].forEach(function(value){
       const parts = String(value || '').split('.');
       if(parts[0]==='30' && parts[1]===mid && /^\d{4}$/.test(parts[2] || '')) used[parts[2]] = true;
@@ -1027,6 +1027,26 @@ function nextNumericCode(list){
     if(number > max) max = number;
   });
   return String(max + 1);
+}
+function catalogList(key){
+  const live = state[key] || [];
+  const held = (sectorHold && sectorHold[key]) || [];
+  return live.concat(held);
+}
+function trashRecords(module){
+  return (state.trash || [])
+    .filter(function(item){ return item.module === module; })
+    .map(function(item){ return item.record || {}; });
+}
+function cadastroCodePool(){
+  if(cadastroChoice === 'setor') return catalogList('setores').concat(trashRecords('setor'));
+  if(cadastroChoice === 'grupo') return catalogList('groups').concat(trashRecords('grupo'));
+  if(cadastroChoice === 'familia') return catalogList('families').concat(trashRecords('familia'));
+  if(cadastroChoice === 'item') return catalogList('products').concat(trashRecords('item'));
+  if(cadastroChoice === 'operacao') return catalogList('operacoes').concat(trashRecords('operacao'));
+  if(cadastroChoice === 'operador') return catalogList('employees').concat(trashRecords('operador'));
+  if(cadastroChoice === 'maquina') return catalogList('resources').concat(trashRecords('maquina'));
+  return catalogList('equipments').concat(trashRecords('equipamento'));
 }
 function suggestCode(list){
   return nextNumericCode(list);
@@ -4048,14 +4068,7 @@ function guardCadastro(){
   return deny(module);
 }
 function suggestedCadastroCode(){
-  if(cadastroChoice === 'setor') return defaultSystemCode(state.setores);
-  if(cadastroChoice === 'grupo') return defaultSystemCode(state.groups);
-  if(cadastroChoice === 'familia') return defaultSystemCode(state.families);
-  if(cadastroChoice === 'item') return defaultSystemCode(state.products);
-  if(cadastroChoice === 'operacao') return defaultSystemCode(state.operacoes);
-  if(cadastroChoice === 'operador') return defaultSystemCode(state.employees);
-  if(cadastroChoice === 'maquina') return defaultSystemCode(state.resources);
-  return defaultSystemCode(state.equipments);
+  return defaultSystemCode(cadastroCodePool());
 }
 function cadastroRecord(id){
   if(!id) return null;
@@ -4635,7 +4648,7 @@ async function saveCadastro(){
   pullRouteDraft();
   const descricao = cadastroInput('cadDescricao');
   if(!descricao){ toast('Informe a descrição.', 'error'); return; }
-  const claimed = claimCode(cadastroChoice === 'item' ? state.products : (cadastroChoice === 'operador' ? state.employees : (cadastroChoice === 'maquina' ? state.resources : (cadastroChoice === 'setor' ? state.setores : (cadastroChoice === 'grupo' ? state.groups : (cadastroChoice === 'familia' ? state.families : (cadastroChoice === 'operacao' ? state.operacoes : state.equipments)))))), cadastroInput('cadCodigo') || suggestedCadastroCode(), cadastroEditId);
+  const claimed = claimCode(cadastroCodePool(), cadastroInput('cadCodigo') || suggestedCadastroCode(), cadastroEditId);
   if(claimed.error){ toast(claimed.error, 'error'); return; }
   const codigo = claimed.codigo;
   if(cadastroChoice === 'setor'){
