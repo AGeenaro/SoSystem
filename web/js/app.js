@@ -3393,10 +3393,15 @@ let userPageSize = 20;
 let companyPage = 1;
 let companyPageSize = 20;
 let logCache = [];
+let logPage = 1;
+let logPageSize = 20;
+let logCompanyFilter = ''; // '' = segue empresa ativa; '*' = todas
 const LIST_PAGE_SIZES = [10, 20, 50, 100];
-function sliceListPage(items, page, pageSize){
+const LOG_PAGE_SIZES = [10, 20, 50, 100, 200, 500];
+function sliceListPage(items, page, pageSize, allowedSizes){
+  const sizes = allowedSizes || LIST_PAGE_SIZES;
   const list = items || [];
-  const size = LIST_PAGE_SIZES.indexOf(Number(pageSize)) >= 0 ? Number(pageSize) : 20;
+  const size = sizes.indexOf(Number(pageSize)) >= 0 ? Number(pageSize) : (sizes[1] || sizes[0] || 20);
   const total = list.length;
   const pages = Math.max(1, Math.ceil(total / size) || 1);
   let current = Math.max(1, Number(page) || 1);
@@ -3412,8 +3417,8 @@ function sliceListPage(items, page, pageSize){
     to: Math.min(start + size, total)
   };
 }
-function listPagerHtml(prefix, pageInfo){
-  const sizes = LIST_PAGE_SIZES.map(function(n){
+function listPagerHtml(prefix, pageInfo, allowedSizes){
+  const sizes = (allowedSizes || LIST_PAGE_SIZES).map(function(n){
     return `<option value="${n}" ${pageInfo.pageSize === n ? 'selected' : ''}>${n}</option>`;
   }).join('');
   return `<div class="cadastro-pager">
@@ -3427,13 +3432,38 @@ function listPagerHtml(prefix, pageInfo){
   </div>`;
 }
 function setListPageSize(prefix, size){
+  if(prefix === 'log'){
+    logPageSize = LOG_PAGE_SIZES.indexOf(Number(size)) >= 0 ? Number(size) : 20;
+    logPage = 1;
+    renderLogList();
+    return;
+  }
   const next = LIST_PAGE_SIZES.indexOf(Number(size)) >= 0 ? Number(size) : 20;
   if(prefix === 'user'){ userPageSize = next; userPage = 1; renderAccessUsersTable(); return; }
   if(prefix === 'company'){ companyPageSize = next; companyPage = 1; renderCompanyTable(); return; }
 }
 function setListPage(prefix, page){
+  if(prefix === 'log'){ logPage = Math.max(1, Number(page) || 1); renderLogList(); return; }
   if(prefix === 'user'){ userPage = Math.max(1, Number(page) || 1); renderAccessUsersTable(); return; }
   if(prefix === 'company'){ companyPage = Math.max(1, Number(page) || 1); renderCompanyTable(); return; }
+}
+function effectiveLogCompanyFilter(){
+  if(logCompanyFilter === '*') return '*';
+  if(logCompanyFilter) return logCompanyFilter;
+  if(sessionUser && sessionUser.role === 'administrador_suporte') return activeCompanyId() || '*';
+  return (sessionUser && sessionUser.companyId) || '*';
+}
+function filteredLogEntries(){
+  const filter = effectiveLogCompanyFilter();
+  return (logCache || []).filter(function(entry){
+    if(filter === '*') return true;
+    return String(entry.companyId || '') === String(filter);
+  });
+}
+function setLogCompanyFilter(value){
+  logCompanyFilter = value === '*' ? '*' : String(value || '');
+  logPage = 1;
+  renderLogList();
 }
 function renderConfiguracoes(){
   const el = document.getElementById('panel-configuracoes');
@@ -5274,7 +5304,9 @@ async function renderCompanySettings(){
           ${manager && selected ? `<button class="btn" type="button" onclick="setSettingsChoice('perfis')">Perfis de usuário</button>` : ''}
         </div>
       </div>
-      ${suporte ? `<div class="field" style="margin-top:12px;"><label>Empresa ativa</label><select id="activeCompany" onchange="selectCompany(this.value)"><option value="">Escolha</option>${companies.map(function(company){ return `<option value="${company.id}" ${company.id===selected?'selected':''}>${escapeHtml((company.code ? company.code + ' — ' : '') + company.name)}${company.blocked ? ' — bloqueada' : ''}</option>`; }).join('')}</select></div>` : ''}
+      ${suporte ? `<div class="field" style="margin-top:12px;"><label>Empresa ativa</label><select id="activeCompany" onchange="selectCompany(this.value)"><option value="" ${selected ? '' : 'selected'} disabled>Escolha a empresa</option>${companies.map(function(company){ return `<option value="${company.id}" ${company.id===selected?'selected':''}>${escapeHtml((company.code ? company.code + ' — ' : '') + company.name)}${company.blocked ? ' — bloqueada' : ''}</option>`; }).join('')}</select>
+        <div class="section-sub" style="margin-top:6px;">A empresa ativa define os dados e, por padrão, os logs. Em Logs dá para ver “Todas as Empresas”.</div>
+      </div>` : ''}
       <div class="toolbar" style="margin-top:12px;">
         <div class="search-box"><span class="search-ic">${icon('search',15)}</span><input id="companySearchInput" placeholder="Buscar id ou descrição..." value="${escapeHtml(companySearch || '')}" oninput="onCompanySearch(this.value)"></div>
       </div>
@@ -5291,6 +5323,8 @@ async function renderCompanySettings(){
 async function selectCompany(id){
   if(!id || (sessionUser && sessionUser.role !== 'administrador_suporte')) return;
   localStorage.setItem('prodfy_company', id);
+  logCompanyFilter = id;
+  logPage = 1;
   state = emptyState();
   sectorHold = null;
   fingerprints = {};
@@ -5404,8 +5438,18 @@ function prettyLogJson(value){
 function renderLogList(){
   const box = document.getElementById('logList');
   if(!box) return;
-  const title = sessionUser && sessionUser.role === 'administrador_suporte' ? 'Logs do sistema' : 'Meus logs';
-  const rows = (logCache || []).slice(0, 100).map(function(entry, index){
+  const suporte = sessionUser && sessionUser.role === 'administrador_suporte';
+  const title = suporte ? 'Logs do sistema' : 'Meus logs';
+  const filter = effectiveLogCompanyFilter();
+  const list = filteredLogEntries();
+  const page = sliceListPage(list, logPage, logPageSize, LOG_PAGE_SIZES);
+  logPage = page.page;
+  const companyOptions = `<option value="*" ${filter === '*' ? 'selected' : ''}>Todas as Empresas</option>` +
+    (knownCompanies || []).map(function(company){
+      return `<option value="${escapeHtml(company.id)}" ${filter === company.id ? 'selected' : ''}>${escapeHtml((company.code ? company.code + ' — ' : '') + company.name)}</option>`;
+    }).join('');
+  const rows = page.pageItems.map(function(entry){
+    const key = escapeHtml(entry.id || '');
     return `<tr>
       <td><span class="badge ${logActionKind(entry) === 'Delete' ? 'badge-red' : (logActionKind(entry) === 'Create' ? 'badge-green' : 'badge-blue')}">${escapeHtml(logActionLabel(entry))}</span>
         <div class="section-sub" style="margin:4px 0 0;">${escapeHtml(entry.action || '')} · ${escapeHtml(entry.entityKind || '')}</div>
@@ -5413,18 +5457,23 @@ function renderLogList(){
       <td>${escapeHtml(logActorLabel(entry))}</td>
       <td>${escapeHtml(logCompanyLabel(entry))}</td>
       <td class="mono">${escapeHtml(fmtDateTime(entry.createdAt))}</td>
-      <td><button class="btn btn-sm btn-log" type="button" onclick="openLogDetail(${index})">Log</button></td>
+      <td><button class="btn btn-sm btn-log" type="button" onclick="openLogDetail('${key}')">Log</button></td>
     </tr>`;
   }).join('');
   box.innerHTML = `<div class="section-title" style="font-size:16px;">${title}</div>
     <div class="section-sub">Create, Update e Delete com quem fez, empresa e horário. O botão Log abre o antes e o depois.</div>
+    ${suporte ? `<div class="field" style="margin-top:12px; max-width:360px;"><label>Empresa dos logs</label>
+      <select id="logCompanyFilter" onchange="setLogCompanyFilter(this.value)">${companyOptions}</select>
+      <div class="section-sub" style="margin-top:6px;">Por padrão segue a empresa ativa. “Todas as Empresas” mostra 100% dos eventos.</div>
+    </div>` : ''}
     <div class="table-wrap log-table" style="margin-top:12px;"><table>
       <thead><tr><th>O que foi feito</th><th>Quem fez</th><th>Empresa</th><th>Data e horário</th><th style="width:90px;"></th></tr></thead>
-      <tbody>${rows || '<tr class="empty-row"><td colspan="5">Nenhum evento ainda.</td></tr>'}</tbody>
-    </table></div>`;
+      <tbody>${rows || '<tr class="empty-row"><td colspan="5">Nenhum evento para este filtro.</td></tr>'}</tbody>
+    </table></div>
+    ${listPagerHtml('log', page, LOG_PAGE_SIZES)}`;
 }
-function openLogDetail(index){
-  const entry = logCache[index];
+function openLogDetail(id){
+  const entry = (logCache || []).find(function(item){ return String(item.id) === String(id); });
   if(!entry) return;
   const title = document.getElementById('logDetailTitle');
   const body = document.getElementById('logDetailBody');
@@ -6002,6 +6051,7 @@ window.changeOrderStatus = changeOrderStatus;
 window.changeOrderPriority = changeOrderPriority;
 window.setListPageSize = setListPageSize;
 window.setListPage = setListPage;
+window.setLogCompanyFilter = setLogCompanyFilter;
 window.openLogDetail = openLogDetail;
 window.addOrderEquipment = addOrderEquipment;
 window.removeOrderDraftItem = removeOrderDraftItem;
