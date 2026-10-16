@@ -93,6 +93,7 @@ let syncError = false;
 let mutationEpoch = 0;
 let syncTimer = null;
 let syncing = false;
+let uiRefreshDeferred = false;
 function colorForName(name){ let h=0; for(let i=0;i<name.length;i++){ h = name.charCodeAt(i) + ((h<<5)-h); } return AVATAR_COLORS[Math.abs(h) % AVATAR_COLORS.length]; }
 function initials(nome, sobrenome){ return ((nome[0]||'')+(sobrenome[0]||'')).toUpperCase(); }
 function productCodeTaken(codigo, exceptIndex){
@@ -567,15 +568,41 @@ async function syncNow(){
     syncing = false;
   }
 }
+function isTypingInApp(){
+  const active = document.activeElement;
+  if(!active) return false;
+  const tag = active.tagName;
+  if(tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') return false;
+  if(active.type === 'checkbox' || active.type === 'radio' || active.type === 'button' || active.type === 'submit' || active.type === 'file') return false;
+  const root = document.getElementById('content') || document.getElementById('prodfy-app');
+  return !!(root && root.contains(active));
+}
 function refreshAfterSync(){
+  if(isTypingInApp()){
+    uiRefreshDeferred = true;
+    return;
+  }
+  uiRefreshDeferred = false;
+  if(activeTab === 'cadastro'){
+    rememberTexts();
+    pullKitDraft();
+    pullRouteDraft();
+  }
   if(typeof renderNav === 'function') renderNav();
   if(activeTab==='dashboard' && typeof renderDashboard === 'function') renderDashboard();
   if(activeTab==='ordens' && typeof renderOrdens === 'function') renderOrdens();
   if(activeTab==='apontamento' && typeof renderApontamento === 'function') renderApontamento();
   if(activeTab==='recursos' && typeof renderRecursos === 'function') renderRecursos();
-  if(activeTab==='cadastro' && typeof renderCadastro === 'function') renderCadastro();
+  if(activeTab==='cadastro' && typeof renderCadastroBody === 'function'){
+    renderCadastroBody();
+    if(typeof applyAccess === 'function') applyAccess();
+  }
   if(activeTab==='funcionarios' && typeof renderFuncionarios === 'function') renderFuncionarios();
   if(activeTab==='acompanhamento' && typeof renderAcompanhamento === 'function') renderAcompanhamento();
+}
+function flushDeferredUiRefresh(){
+  if(!uiRefreshDeferred || isTypingInApp()) return;
+  refreshAfterSync();
 }
 async function loadData(){
   loadCache();
@@ -3678,8 +3705,12 @@ async function init(){
     notifOpen = false;
     renderNotifPanel();
   });
+  document.addEventListener('focusout', function(){
+    setTimeout(flushDeferredUiRefresh, 0);
+  });
   await boot();
   setInterval(function(){
+    if(isTypingInApp()) return;
     if(activeTab==='dashboard') renderRankingAndCharts();
     if(activeTab==='apontamento'){ renderApontamento(); applyAccess(); }
     refreshSupportInbox();
@@ -3769,10 +3800,13 @@ let cadastroChoice = 'setor';
 let cadastroEditId = '';
 let cadastroSelectedIds = [];
 let cadastroListIds = [];
+let cadastroPageSize = 20;
+let cadastroPage = 1;
 let kitDraft = [];
 let routeDraft = [];
 let textDraft = {};
 const TURNO_OPTIONS = ['1º Turno', '2º Turno', '3º Turno', 'Turno Comercial', 'Administrativo'];
+const CADASTRO_PAGE_SIZES = [10, 20, 50, 100];
 
 function claimCode(list, raw, exceptId){
   const codigo = String(raw || '').trim().toUpperCase();
@@ -3841,9 +3875,55 @@ function resetCadastroForm(){
 function setCadastroChoice(choice){
   cadastroChoice = choice;
   cadastroSelectedIds = [];
+  cadastroPage = 1;
   resetCadastroForm();
   renderCadastro();
   applyAccess();
+}
+function setCadastroPageSize(size){
+  const next = Number(size);
+  cadastroPageSize = CADASTRO_PAGE_SIZES.indexOf(next) >= 0 ? next : 20;
+  cadastroPage = 1;
+  renderCadastroBody();
+  applyAccess();
+}
+function setCadastroPage(page){
+  cadastroPage = Math.max(1, Number(page) || 1);
+  renderCadastroBody();
+  applyAccess();
+}
+function sliceCadastroPage(items){
+  const list = items || [];
+  const total = list.length;
+  const pages = Math.max(1, Math.ceil(total / cadastroPageSize) || 1);
+  if(cadastroPage > pages) cadastroPage = pages;
+  if(cadastroPage < 1) cadastroPage = 1;
+  const start = (cadastroPage - 1) * cadastroPageSize;
+  return {
+    pageItems: list.slice(start, start + cadastroPageSize),
+    total: total,
+    pages: pages,
+    from: total ? start + 1 : 0,
+    to: Math.min(start + cadastroPageSize, total)
+  };
+}
+function cadastroPager(total){
+  const count = Number(total) || 0;
+  const pages = Math.max(1, Math.ceil(count / cadastroPageSize) || 1);
+  const from = count ? ((cadastroPage - 1) * cadastroPageSize) + 1 : 0;
+  const to = Math.min(cadastroPage * cadastroPageSize, count);
+  const sizes = CADASTRO_PAGE_SIZES.map(function(n){
+    return `<option value="${n}" ${cadastroPageSize === n ? 'selected' : ''}>${n}</option>`;
+  }).join('');
+  return `<div class="cadastro-pager">
+    <label class="cadastro-pager-size">Mostrar <select onchange="setCadastroPageSize(this.value)">${sizes}</select></label>
+    <span class="section-sub" style="margin:0;">${from}–${to} de ${count}</span>
+    <div class="cadastro-pager-nav">
+      <button class="btn btn-sm" type="button" ${cadastroPage <= 1 ? 'disabled' : ''} onclick="setCadastroPage(${cadastroPage - 1})">Anterior</button>
+      <span class="cadastro-pager-page">Pág. ${cadastroPage} / ${pages}</span>
+      <button class="btn btn-sm" type="button" ${cadastroPage >= pages ? 'disabled' : ''} onclick="setCadastroPage(${cadastroPage + 1})">Próxima</button>
+    </div>
+  </div>`;
 }
 function guardCadastro(){
   if(cadastroChoice === 'operador' && (canEdit('funcionarios') || canEdit('engenharia'))) return false;
@@ -3921,7 +4001,13 @@ function toggleCadastroSelect(id, checked){
   applyAccess();
 }
 function toggleCadastroSelectAll(checked){
-  cadastroSelectedIds = checked ? cadastroListIds.slice() : [];
+  if(checked){
+    cadastroListIds.forEach(function(id){
+      if(cadastroSelectedIds.indexOf(id) < 0) cadastroSelectedIds.push(id);
+    });
+  } else {
+    cadastroSelectedIds = cadastroSelectedIds.filter(function(id){ return cadastroListIds.indexOf(id) < 0; });
+  }
   renderCadastroBody();
   applyAccess();
 }
@@ -3993,15 +4079,15 @@ function routeEditor(){
     <button class="btn btn-ghost btn-sm" data-edit="engenharia" type="button" style="margin-top:8px;" onclick="addRouteRow()">Adicionar etapa</button>
     <div class="section-sub">A ordem é a sequência: 1 cortar, 2 dobrar, 3 soldar.</div>`;
 }
-function listTable(headers, body, ids){
+function listTable(headers, body, ids, totalCount){
   cadastroListIds = (ids || []).map(function(id){ return String(id); });
-  cadastroSelectedIds = cadastroSelectedIds.filter(function(id){ return cadastroListIds.indexOf(id) >= 0; });
   const cols = headers.length + 2;
-  const selectedCount = cadastroSelectedIds.length;
-  const allChecked = cadastroListIds.length && selectedCount === cadastroListIds.length ? 'checked' : '';
-  const selectTh = `<th class="cadastro-check-cell"><input class="cadastro-check" type="checkbox" ${allChecked} ${cadastroListIds.length ? '' : 'disabled'} onclick="toggleCadastroSelectAll(this.checked)" title="Selecionar todos" aria-label="Selecionar todos"></th>`;
+  const selectedOnPage = cadastroListIds.filter(function(id){ return cadastroSelectedIds.indexOf(id) >= 0; }).length;
+  const allChecked = cadastroListIds.length && selectedOnPage === cadastroListIds.length ? 'checked' : '';
+  const selectTh = `<th class="cadastro-check-cell"><input class="cadastro-check" type="checkbox" ${allChecked} ${cadastroListIds.length ? '' : 'disabled'} onclick="toggleCadastroSelectAll(this.checked)" title="Selecionar página" aria-label="Selecionar página"></th>`;
   updateCadastroSelectBar();
-  return `<div class="table-wrap" style="margin-top:14px;"><table><thead><tr>${selectTh}${headers.map(function(header){ return '<th>' + header + '</th>'; }).join('')}<th style="width:120px;"></th></tr></thead><tbody>${body || '<tr class="empty-row"><td colspan="' + cols + '">Nenhum cadastro ainda.</td></tr>'}</tbody></table></div>`;
+  const total = totalCount == null ? cadastroListIds.length : totalCount;
+  return `<div class="table-wrap" style="margin-top:14px;"><table><thead><tr>${selectTh}${headers.map(function(header){ return '<th>' + header + '</th>'; }).join('')}<th style="width:120px;"></th></tr></thead><tbody>${body || '<tr class="empty-row"><td colspan="' + cols + '">Nenhum cadastro ainda.</td></tr>'}</tbody></table></div>${cadastroPager(total)}`;
 }
 function renderCadastroBody(){
   const box = document.getElementById('cadastroBody');
@@ -4010,20 +4096,22 @@ function renderCadastroBody(){
   const codigo = fieldValue('cadCodigo', record ? (record.codigo || '') : suggestedCadastroCode());
   const descricao = fieldValue('cadDescricao', record ? (cadastroChoice === 'operador' ? ((record.nome || '') + ' ' + (record.sobrenome || '')).trim() : recordLabel(record)) : '');
   if(cadastroChoice === 'setor'){
-    const ids = state.setores.map(function(setor){ return setor.id; });
-    const rows = state.setores.map(function(setor){
+    const page = sliceCadastroPage(state.setores);
+    const ids = page.pageItems.map(function(setor){ return setor.id; });
+    const rows = page.pageItems.map(function(setor){
       return `<tr>${rowSelect(setor.id)}<td class="mono">${escapeHtml(setor.codigo || '')}</td><td>${escapeHtml(recordLabel(setor))}</td><td>${rowActions(setor.id)}</td></tr>`;
     }).join('');
-    box.innerHTML = `<div class="section-title" style="font-size:16px;">Setor</div><div class="section-sub">Lugar da fábrica. O código é numérico.</div><div class="grid grid-2">${codeField(codigo)}${descriptionField(descricao)}</div>${saveButtons()}${listTable(['Código','Descrição'], rows, ids)}`;
+    box.innerHTML = `<div class="section-title" style="font-size:16px;">Setor</div><div class="section-sub">Lugar da fábrica. O código é numérico.</div><div class="grid grid-2">${codeField(codigo)}${descriptionField(descricao)}</div>${saveButtons()}${listTable(['Código','Descrição'], rows, ids, page.total)}`;
     return;
   }
   if(cadastroChoice === 'grupo'){
-    const ids = state.groups.map(function(group){ return group.id; });
-    const rows = state.groups.map(function(group){
+    const page = sliceCadastroPage(state.groups);
+    const ids = page.pageItems.map(function(group){ return group.id; });
+    const rows = page.pageItems.map(function(group){
       const families = state.families.filter(function(family){ return family.grupoId === group.id; }).map(recordLabel).join(', ');
       return `<tr>${rowSelect(group.id)}<td class="mono">${escapeHtml(group.codigo || '')}</td><td>${escapeHtml(recordLabel(group))}</td><td>${escapeHtml(families || '—')}</td><td>${rowActions(group.id)}</td></tr>`;
     }).join('');
-    const detail = state.groups.map(function(group){
+    const detail = page.pageItems.map(function(group){
       const families = state.families.filter(function(family){ return family.grupoId === group.id; });
       const blocks = families.map(function(family){
         const items = state.products.filter(function(product){ return product.familiaId === family.id; }).map(function(product){ return product.codigo + ' ' + (product.descricao || ''); }).join(', ');
@@ -4031,13 +4119,14 @@ function renderCadastroBody(){
       }).join('') || '<div class="section-sub">Nenhuma família neste grupo.</div>';
       return `<div style="margin-top:8px;"><b>${escapeHtml((group.codigo || '') + ' ' + recordLabel(group))}</b>${blocks}</div>`;
     }).join('');
-    box.innerHTML = `<div class="section-title" style="font-size:16px;">Grupo</div><div class="section-sub">Categoria acima da família. Ex.: Separação reúne Decanter e Prensa. O código é numérico.</div><div class="grid grid-2">${codeField(codigo)}${descriptionField(descricao)}</div>${saveButtons()}${listTable(['Código','Descrição','Famílias'], rows, ids)}<div style="margin-top:12px;">${detail}</div>`;
+    box.innerHTML = `<div class="section-title" style="font-size:16px;">Grupo</div><div class="section-sub">Categoria acima da família. Ex.: Separação reúne Decanter e Prensa. O código é numérico.</div><div class="grid grid-2">${codeField(codigo)}${descriptionField(descricao)}</div>${saveButtons()}${listTable(['Código','Descrição','Famílias'], rows, ids, page.total)}<div style="margin-top:12px;">${detail}</div>`;
     return;
   }
   if(cadastroChoice === 'familia'){
     const grupoId = fieldValue('cadGrupo', record ? (record.grupoId || '') : '');
-    const ids = state.families.map(function(family){ return family.id; });
-    const rows = state.families.map(function(family){
+    const page = sliceCadastroPage(state.families);
+    const ids = page.pageItems.map(function(family){ return family.id; });
+    const rows = page.pageItems.map(function(family){
       const group = groupById(family.grupoId);
       return `<tr>${rowSelect(family.id)}<td class="mono">${escapeHtml(family.codigo || '')}</td><td>${escapeHtml(recordLabel(family))}</td><td>${escapeHtml(group ? recordLabel(group) : '—')}</td><td>${(family.itens || []).length}</td><td>${rowActions(family.id)}</td></tr>`;
     }).join('');
@@ -4045,7 +4134,7 @@ function renderCadastroBody(){
       <div class="grid grid-2">${codeField(codigo)}${descriptionField(descricao)}
         <div class="field"><label>Grupo</label><select id="cadGrupo" data-edit="engenharia">${selectOptions(state.groups, grupoId, 'Selecione o grupo')}</select></div>
       </div>
-      <div class="section-sub" style="margin-top:8px;">Conjunto padrão</div>${kitEditor()}${saveButtons()}${listTable(['Código','Descrição','Grupo','Peças'], rows, ids)}`;
+      <div class="section-sub" style="margin-top:8px;">Conjunto padrão</div>${kitEditor()}${saveButtons()}${listTable(['Código','Descrição','Grupo','Peças'], rows, ids, page.total)}`;
     return;
   }
   if(cadastroChoice === 'item'){
@@ -4066,8 +4155,9 @@ function renderCadastroBody(){
       const hay = [product.codigo, product.codigoErp, product.descricao, product.material, family && recordLabel(family), setor && recordLabel(setor)].join(' ').toLowerCase();
       return hay.indexOf(query) >= 0;
     });
-    const ids = filtered.map(function(product){ return product.codigo; });
-    const rows = filtered.map(function(product){
+    const page = sliceCadastroPage(filtered);
+    const ids = page.pageItems.map(function(product){ return product.codigo; });
+    const rows = page.pageItems.map(function(product){
       const family = familyById(product.familiaId);
       const setor = setorById(product.setorId);
       return `<tr>${rowSelect(product.codigo)}<td class="mono">${escapeHtml(product.codigo || '')}</td><td class="mono">${escapeHtml(product.codigoErp || '')}</td><td>${escapeHtml(product.descricao || '')}</td><td>${escapeHtml(family ? recordLabel(family) : '—')}</td><td>${escapeHtml(setor ? recordLabel(setor) : '—')}</td><td>${rowActions(product.codigo)}</td></tr>`;
@@ -4089,25 +4179,27 @@ function renderCadastroBody(){
       })}
       <div class="section-sub" style="margin-top:8px;">Rota ordenada</div>${routeEditor()}${saveButtons()}
       <div class="toolbar" style="margin-top:16px;">
-        <div class="search-box"><span class="search-ic">${icon('search',15)}</span><input placeholder="Buscar código, ERP ou descrição..." value="${escapeHtml(engSearch || '')}" oninput="engSearch=this.value; renderCadastroBody(); applyAccess();"></div>
+        <div class="search-box"><span class="search-ic">${icon('search',15)}</span><input id="cadastroItemSearch" placeholder="Buscar código, ERP ou descrição..." value="${escapeHtml(engSearch || '')}" oninput="onCadastroItemSearch(this.value)"></div>
         <span class="section-sub" style="margin:0;">${filtered.length} de ${state.products.length} itens</span>
       </div>
-      ${listTable(['Código','ERP','Descrição','Família','Setor'], rows, ids)}`;
+      ${listTable(['Código','ERP','Descrição','Família','Setor'], rows, ids, page.total)}`;
     return;
   }
   if(cadastroChoice === 'operacao'){
-    const ids = state.operacoes.map(function(operation){ return operation.id; });
-    const rows = state.operacoes.map(function(operation){
+    const page = sliceCadastroPage(state.operacoes);
+    const ids = page.pageItems.map(function(operation){ return operation.id; });
+    const rows = page.pageItems.map(function(operation){
       return `<tr>${rowSelect(operation.id)}<td class="mono">${escapeHtml(operation.codigo || '')}</td><td>${escapeHtml(recordLabel(operation))}</td><td>${rowActions(operation.id)}</td></tr>`;
     }).join('');
-    box.innerHTML = `<div class="section-title" style="font-size:16px;">Operação</div><div class="section-sub">Etapa de processo. Ex.: cortar, dobrar, calandrar, soldar, jatear, tornear, montar. A sequência fica no item.</div><div class="grid grid-2">${codeField(codigo)}${descriptionField(descricao)}</div>${saveButtons()}${listTable(['Código','Descrição'], rows, ids)}`;
+    box.innerHTML = `<div class="section-title" style="font-size:16px;">Operação</div><div class="section-sub">Etapa de processo. Ex.: cortar, dobrar, calandrar, soldar, jatear, tornear, montar. A sequência fica no item.</div><div class="grid grid-2">${codeField(codigo)}${descriptionField(descricao)}</div>${saveButtons()}${listTable(['Código','Descrição'], rows, ids, page.total)}`;
     return;
   }
   if(cadastroChoice === 'operador'){
     const turno = fieldValue('cadTurno', record ? (record.turno || '1º Turno') : '1º Turno');
     const machines = checkedDraft('maquinas', record ? employeeMachines(record.id).map(function(resource){ return resource.id; }) : []);
-    const ids = state.employees.map(function(employee){ return employee.id; });
-    const rows = state.employees.map(function(employee){
+    const page = sliceCadastroPage(state.employees);
+    const ids = page.pageItems.map(function(employee){ return employee.id; });
+    const rows = page.pageItems.map(function(employee){
       const names = employeeMachines(employee.id).map(function(resource){ return resource.codigo || resource.nome; }).join(', ');
       return `<tr>${rowSelect(employee.id)}<td class="mono">${escapeHtml(employee.codigo || '')}</td><td>${escapeHtml(((employee.nome || '') + ' ' + (employee.sobrenome || '')).trim())}</td><td>${escapeHtml(employee.turno || '')}</td><td>${escapeHtml(names || '—')}</td><td>${rowActions(employee.id)}</td></tr>`;
     }).join('');
@@ -4119,15 +4211,16 @@ function renderCadastroBody(){
       ${checkGrid('cadMaquinas', state.resources, machines, function(resource){
         return { code: resource.codigo || resource.nome || '', title: resource.descricao || resource.codigo || resource.nome || '' };
       })}
-      ${saveButtons()}${listTable(['Código','Descrição','Turno','Máquinas'], rows, ids)}`;
+      ${saveButtons()}${listTable(['Código','Descrição','Turno','Máquinas'], rows, ids, page.total)}`;
     return;
   }
   if(cadastroChoice === 'maquina'){
     const setorId = fieldValue('cadSetor', record ? (record.setorId || '') : '');
     const operations = checkedDraft('operacoes', record ? (record.operacoes || []) : []);
     const operators = checkedDraft('operadores', record ? (record.funcionarios || []) : []);
-    const ids = state.resources.map(function(resource){ return resource.id; });
-    const rows = state.resources.map(function(resource){
+    const page = sliceCadastroPage(state.resources);
+    const ids = page.pageItems.map(function(resource){ return resource.id; });
+    const rows = page.pageItems.map(function(resource){
       const setor = setorById(resource.setorId);
       return `<tr>${rowSelect(resource.id)}<td class="mono">${escapeHtml(resource.codigo || resource.nome || '')}</td><td>${escapeHtml(resource.descricao || '')}</td><td>${escapeHtml(setor ? recordLabel(setor) : (resource.setor || '—'))}</td><td>${rowActions(resource.id)}</td></tr>`;
     }).join('');
@@ -4146,12 +4239,13 @@ function renderCadastroBody(){
           title: ((employee.nome || '') + ' ' + (employee.sobrenome || '')).trim() || employee.codigo || ''
         };
       })}
-      ${saveButtons()}${listTable(['Código','Descrição','Setor'], rows, ids)}`;
+      ${saveButtons()}${listTable(['Código','Descrição','Setor'], rows, ids, page.total)}`;
     return;
   }
   const familiaId = fieldValue('cadFamilia', record ? (record.familiaId || '') : '');
-  const ids = state.equipments.map(function(equipment){ return equipment.id; });
-  const rows = state.equipments.map(function(equipment){
+  const page = sliceCadastroPage(state.equipments);
+  const ids = page.pageItems.map(function(equipment){ return equipment.id; });
+  const rows = page.pageItems.map(function(equipment){
     const family = familyById(equipment.familiaId);
     return `<tr>${rowSelect(equipment.id)}<td class="mono">${escapeHtml(equipment.codigo || '')}</td><td>${escapeHtml(recordLabel(equipment))}</td><td>${escapeHtml(family ? recordLabel(family) : '—')}</td><td>${(equipment.itens || []).length}</td><td>${rowActions(equipment.id)}</td></tr>`;
   }).join('');
@@ -4159,7 +4253,22 @@ function renderCadastroBody(){
     <div class="grid grid-2">${codeField(codigo)}${descriptionField(descricao)}
       <div class="field"><label>Família</label><select id="cadFamilia" data-edit="engenharia" onchange="onEquipmentFamilyChange()">${selectOptions(state.families, familiaId, 'Selecione a família')}</select></div>
     </div>
-    ${kitEditor()}${saveButtons()}${listTable(['Código','Descrição','Família','Peças'], rows, ids)}`;
+    ${kitEditor()}${saveButtons()}${listTable(['Código','Descrição','Família','Peças'], rows, ids, page.total)}`;
+}
+function onCadastroItemSearch(value){
+  engSearch = value;
+  cadastroPage = 1;
+  rememberTexts();
+  pullKitDraft();
+  pullRouteDraft();
+  renderCadastroBody();
+  applyAccess();
+  const search = document.getElementById('cadastroItemSearch');
+  if(search){
+    search.focus();
+    const len = search.value.length;
+    try{ search.setSelectionRange(len, len); }catch(err){}
+  }
 }
 function refreshCadastroDraft(){
   pullKitDraft();
@@ -5344,6 +5453,9 @@ window.changeOrderStatus = changeOrderStatus;
 window.addOrderEquipment = addOrderEquipment;
 window.removeOrderDraftItem = removeOrderDraftItem;
 window.setCadastroChoice = setCadastroChoice;
+window.setCadastroPageSize = setCadastroPageSize;
+window.setCadastroPage = setCadastroPage;
+window.onCadastroItemSearch = onCadastroItemSearch;
 window.saveCadastro = saveCadastro;
 window.editCadastro = editCadastro;
 window.deleteCadastro = deleteCadastro;
