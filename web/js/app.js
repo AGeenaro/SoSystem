@@ -2128,7 +2128,6 @@ function printOrder(orderId){
 }
 
 /* ===================== ENGENHARIA DE PRODUTO ===================== */
-let engSearch = '';
 function renderEngenharia(){
   openCadastroItem();
 }
@@ -2407,7 +2406,7 @@ function refreshItemCode(){
 function renderEngenhariaTable(){
   const tbody = document.getElementById('engTbody');
   if(!tbody) return;
-  const q = engSearch.trim().toLowerCase();
+  const q = String(cadastroSearch || '').trim().toLowerCase();
   const list = state.products.filter(function(product){
     const blob = [product.codigo, product.codigoErp, product.descricao].join(' ').toLowerCase();
     return !q || blob.indexOf(q) >= 0;
@@ -3311,6 +3310,8 @@ function roleCheckMarkup(){
     <div class="section-sub">Setores que este perfil pode ver</div>${sectorCheckMarkup(current.sectors || [])}`;
 }
 let settingsChoice = 'usuario';
+let userSearch = '';
+let companySearch = '';
 function renderConfiguracoes(){
   const el = document.getElementById('panel-configuracoes');
   if(!el || !sessionUser) return;
@@ -3342,50 +3343,29 @@ function renderSettingsPanel(){
     return;
   }
   if(settingsChoice === 'usuario'){
-    const roles = sessionUser.role === 'administrador_suporte'
-      ? ['visualizador','operador','administrador','administrador_suporte']
-      : ['visualizador','operador','administrador'];
     panel.innerHTML = canManageUsers() ? `
-      <form id="accessUserForm" class="card" style="margin-bottom:14px;" onsubmit="saveAccessUser(event)">
-        <div class="section-title" style="font-size:16px;">Usuários</div>
-        <div class="section-sub">O perfil escolhido aqui usa as regras da empresa. O que ele vê e edita fica em Empresa → Perfis de usuário.</div>
-        <input type="hidden" id="editingUserId" value="">
-        <div class="field-row">
-          <div class="field"><label>Código</label><input id="userCode" maxlength="12" autocomplete="off" oninput="this.dataset.touched='1'"></div>
-          <div class="field"><label>Descrição</label><input id="userName" required minlength="2" maxlength="80"></div>
-        </div>
-        <div class="field-row">
-          <div class="field"><label>E-mail</label><input id="userEmail" type="email" required></div>
-          <div class="field"><label>Perfil de usuário</label>
-            <select id="userRole" onchange="fillUserCompanySelect(); suggestUserCode();">${roles.map(function(role){ return `<option value="${role}">${ROLE_LABELS[role]}</option>`; }).join('')}</select>
+      <div class="card">
+        <div class="cadastro-list-head">
+          <div>
+            <div class="section-title" style="font-size:16px;">Usuários</div>
+            <div class="section-sub" style="margin:0;">Lista das contas. O cadastro abre na telinha.</div>
+          </div>
+          <div class="cadastro-list-actions">
+            <button class="btn btn-primary" type="button" onclick="openAccessUserForm()">Cadastrar usuário</button>
           </div>
         </div>
-        <div class="field-row">
-          <div class="field"><label>Senha provisória</label>
-            <div class="password-field">
-              <input id="userPassword" type="password" maxlength="72" autocomplete="new-password" placeholder="Opcional. Vazio gera uma senha ao criar.">
-              <button class="eye-btn" type="button" onclick="togglePassword('userPassword', this)" aria-label="Mostrar senha">${icon('eye',16)}</button>
-            </div>
-          </div>
-          <div class="field"><label>Bloqueado</label>
-            <button class="btn" id="userBlockedBtn" type="button" onclick="toggleDraftBlocked()">Não</button>
-          </div>
+        <div class="toolbar" style="margin-top:12px;">
+          <div class="search-box"><span class="search-ic">${icon('search',15)}</span><input id="userSearchInput" placeholder="Buscar código, nome, e-mail ou perfil..." value="${escapeHtml(userSearch || '')}" oninput="onUserSearch(this.value)"></div>
         </div>
-        <div class="field" id="userCompanyField">
-          <label>Empresa</label>
-          <select id="userCompany" onchange="suggestUserCode()"><option value="">Escolha a empresa</option></select>
-        </div>
-        <button class="btn btn-primary" type="submit">Salvar usuário</button>
-      </form>
-      <div class="card"><div class="table-wrap"><table>
-        <thead><tr><th>Código</th><th>Descrição</th><th>Perfil</th><th>Empresa</th><th>Bloqueado</th><th>Cadastro</th><th>Último acesso</th><th style="width:90px;"></th></tr></thead>
-        <tbody id="accessUsersBody"><tr class="empty-row"><td colspan="8">Carregando contas…</td></tr></tbody>
-      </table></div></div>
+        <div class="table-wrap" style="margin-top:12px;"><table>
+          <thead><tr><th>Código</th><th>Descrição</th><th>Perfil</th><th>Empresa</th><th>Bloqueado</th><th>Cadastro</th><th>Último acesso</th><th style="width:90px;"></th></tr></thead>
+          <tbody id="accessUsersBody"><tr class="empty-row"><td colspan="8">Carregando contas…</td></tr></tbody>
+        </table></div>
+      </div>
       <div class="card" style="margin-top:14px;" id="passwordRequestList">Carregando pedidos de senha…</div>` : `<div class="card">Contas novas são criadas por um administrador. Os seus dados ficam em Perfil de Usuário.</div>`;
     if(canManageUsers()){
       draftBlocked = false;
       editingBlocked = false;
-      fillUserCompanySelect();
       loadAccessUsers();
       loadPasswordRequests();
     }
@@ -3412,32 +3392,107 @@ function fillUserCompanySelect(selectedId){
     return `<option value="${company.id}" ${company.id===current?'selected':''}>${escapeHtml(company.name)}</option>`;
   }).join('');
 }
+function buildAccessUserFormHtml(){
+  const roles = sessionUser.role === 'administrador_suporte'
+    ? ['visualizador','operador','administrador','administrador_suporte']
+    : ['visualizador','operador','administrador'];
+  return `<form id="accessUserForm" onsubmit="saveAccessUser(event)">
+    <div class="section-sub">O perfil usa as regras da empresa. O que ele vê e edita fica em Empresa → Perfis.</div>
+    <input type="hidden" id="editingUserId" value="">
+    <div class="field-row">
+      <div class="field"><label>Código</label><input id="userCode" maxlength="12" autocomplete="off" oninput="this.dataset.touched='1'"></div>
+      <div class="field"><label>Descrição</label><input id="userName" required minlength="2" maxlength="80"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>E-mail</label><input id="userEmail" type="email" required></div>
+      <div class="field"><label>Perfil de usuário</label>
+        <select id="userRole" onchange="fillUserCompanySelect(); suggestUserCode();">${roles.map(function(role){ return `<option value="${role}">${ROLE_LABELS[role]}</option>`; }).join('')}</select>
+      </div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Senha provisória</label>
+        <div class="password-field">
+          <input id="userPassword" type="password" maxlength="72" autocomplete="new-password" placeholder="Opcional. Vazio gera uma senha ao criar.">
+          <button class="eye-btn" type="button" onclick="togglePassword('userPassword', this)" aria-label="Mostrar senha">${icon('eye',16)}</button>
+        </div>
+      </div>
+      <div class="field"><label>Bloqueado</label>
+        <button class="btn" id="userBlockedBtn" type="button" onclick="toggleDraftBlocked()">Não</button>
+      </div>
+    </div>
+    <div class="field" id="userCompanyField">
+      <label>Empresa</label>
+      <select id="userCompany" onchange="suggestUserCode()"><option value="">Escolha a empresa</option></select>
+    </div>
+    <div class="cadastro-save-row">
+      <button class="btn btn-primary" type="submit">Salvar usuário</button>
+      <button class="btn btn-ghost" type="button" onclick="closeAccessUserForm()">Cancelar</button>
+    </div>
+  </form>`;
+}
+function openAccessUserForm(id){
+  const body = document.getElementById('accessUserFormBody');
+  const title = document.getElementById('accessUserTitle');
+  if(!body) return;
+  body.innerHTML = buildAccessUserFormHtml();
+  draftBlocked = false;
+  editingBlocked = false;
+  fillUserCompanySelect();
+  suggestUserCode();
+  if(title) title.textContent = id ? 'Editar usuário' : 'Cadastrar usuário';
+  openModal('modalAccessUser');
+  if(id) editAccessUser(id);
+}
+function closeAccessUserForm(){
+  closeModal('modalAccessUser');
+  const body = document.getElementById('accessUserFormBody');
+  if(body) body.innerHTML = '';
+}
+function onUserSearch(value){
+  userSearch = value;
+  renderAccessUsersTable();
+  const search = document.getElementById('userSearchInput');
+  if(search){
+    search.focus();
+    const len = search.value.length;
+    try{ search.setSelectionRange(len, len); }catch(err){}
+  }
+}
+function renderAccessUsersTable(){
+  const body = document.getElementById('accessUsersBody');
+  if(!body) return;
+  const query = String(userSearch || '').trim().toLowerCase();
+  const list = (accessUserCache || []).filter(function(user){
+    if(!query) return true;
+    const hay = [user.code, user.name, user.email, ROLE_LABELS[user.role] || user.role, userCompanyLabel(user)].join(' ').toLowerCase();
+    return hay.indexOf(query) >= 0;
+  });
+  body.innerHTML = list.map(function(user){
+    const mine = sessionUser && sessionUser.id === user.id;
+    const missing = user.role !== 'administrador_suporte' && !user.companyId;
+    return `<tr>
+      <td class="mono">${escapeHtml(user.code || '—')}</td>
+      <td>${escapeHtml(user.name)}</td>
+      <td>${escapeHtml(ROLE_LABELS[user.role] || user.role)}</td>
+      <td${missing ? ' style="color:var(--red-dark); font-weight:700;"' : ''}>${escapeHtml(userCompanyLabel(user))}</td>
+      <td>${mine ? (user.blocked ? 'Sim' : 'Não') : `<button class="btn btn-sm" type="button" onclick="toggleUserBlock('${user.id}', ${user.blocked ? 'false' : 'true'})">${user.blocked ? 'Sim' : 'Não'}</button>`}</td>
+      <td class="mono">${fmtDateTime(user.createdAt)}</td>
+      <td class="mono">${fmtDateTime(user.lastAccessAt)}</td>
+      <td>
+        <button class="icon-btn" type="button" onclick="openAccessUserForm('${user.id}')" title="Editar">${icon('edit',14)}</button>
+        <button class="icon-btn danger" type="button" onclick="deleteAccessUser('${user.id}')" ${mine ? 'disabled' : ''} title="Excluir">${icon('trash',14)}</button>
+      </td>
+    </tr>`;
+  }).join('') || `<tr class="empty-row"><td colspan="8">Nenhuma conta.</td></tr>`;
+}
 async function loadAccessUsers(){
   const body = document.getElementById('accessUsersBody');
   if(!body) return;
   try{
     try{ accessCompanies = companiesByName((await accountApi('/api/companies')).data || []); }catch(e){ accessCompanies = []; }
-    fillUserCompanySelect();
     const result = await accountApi('/api/users');
     accessUserCache = result.data || [];
-    body.innerHTML = accessUserCache.map(function(user){
-      const mine = sessionUser && sessionUser.id === user.id;
-      const missing = user.role !== 'administrador_suporte' && !user.companyId;
-      return `<tr>
-        <td class="mono">${escapeHtml(user.code || '—')}</td>
-        <td>${escapeHtml(user.name)}</td>
-        <td>${escapeHtml(ROLE_LABELS[user.role] || user.role)}</td>
-        <td${missing ? ' style="color:var(--red-dark); font-weight:700;"' : ''}>${escapeHtml(userCompanyLabel(user))}</td>
-        <td>${mine ? (user.blocked ? 'Sim' : 'Não') : `<button class="btn btn-sm" type="button" onclick="toggleUserBlock('${user.id}', ${user.blocked ? 'false' : 'true'})">${user.blocked ? 'Sim' : 'Não'}</button>`}</td>
-        <td class="mono">${fmtDateTime(user.createdAt)}</td>
-        <td class="mono">${fmtDateTime(user.lastAccessAt)}</td>
-        <td>
-          <button class="icon-btn" type="button" onclick="editAccessUser('${user.id}')" title="Editar">${icon('edit',14)}</button>
-          <button class="icon-btn danger" type="button" onclick="deleteAccessUser('${user.id}')" ${mine ? 'disabled' : ''} title="Excluir">${icon('trash',14)}</button>
-        </td>
-      </tr>`;
-    }).join('') || `<tr class="empty-row"><td colspan="8">Nenhuma conta.</td></tr>`;
-    suggestUserCode();
+    renderAccessUsersTable();
   }catch(error){
     body.innerHTML = `<tr class="empty-row"><td colspan="8">${escapeHtml(error.message)}</td></tr>`;
   }
@@ -3461,6 +3516,10 @@ async function editAccessUser(id){
   try{
     const result = await accountApi('/api/users/' + id);
     const user = result.data;
+    if(!document.getElementById('editingUserId')){
+      const body = document.getElementById('accessUserFormBody');
+      if(body) body.innerHTML = buildAccessUserFormHtml();
+    }
     document.getElementById('editingUserId').value = user.id;
     const code = document.getElementById('userCode');
     code.value = user.code || '';
@@ -3474,6 +3533,8 @@ async function editAccessUser(id){
     const blocked = document.getElementById('userBlockedBtn');
     if(blocked) blocked.textContent = draftBlocked ? 'Sim' : 'Não';
     fillUserCompanySelect(user.companyId || '');
+    const title = document.getElementById('accessUserTitle');
+    if(title) title.textContent = 'Editar usuário';
   }catch(error){
     toast(error.message, 'error');
   }
@@ -3581,14 +3642,9 @@ async function saveAccessUser(event){
       }
       toast(password ? 'Usuário criado. No primeiro acesso a pessoa troca essa senha.' : 'Usuário criado. A senha provisória foi mostrada nesta tela.', 'success');
     }
-    event.target.reset();
-    document.getElementById('editingUserId').value = '';
-    document.getElementById('userCode').dataset.touched = '';
+    closeAccessUserForm();
     draftBlocked = false;
     editingBlocked = false;
-    const blocked = document.getElementById('userBlockedBtn');
-    if(blocked) blocked.textContent = 'Não';
-    fillUserCompanySelect();
     await loadAccessUsers();
   }catch(error){
     toast(error.message, 'error');
@@ -3842,6 +3898,8 @@ let cadastroSelectedIds = [];
 let cadastroListIds = [];
 let cadastroPageSize = 20;
 let cadastroPage = 1;
+let cadastroFormOpen = false;
+let cadastroSearch = '';
 let kitDraft = [];
 let routeDraft = [];
 let textDraft = {};
@@ -3916,6 +3974,8 @@ function setCadastroChoice(choice){
   cadastroChoice = choice;
   cadastroSelectedIds = [];
   cadastroPage = 1;
+  cadastroSearch = '';
+  closeCadastroForm(true);
   resetCadastroForm();
   renderCadastro();
   applyAccess();
@@ -4023,6 +4083,43 @@ function checkGrid(id, items, selected, label){
     return `<label class="perm-item"><input data-edit="engenharia" type="checkbox" value="${escapeHtml(item.id)}" ${checked}>${body}</label>`;
   }).join('')}</div>`;
 }
+function operatorCheckGrid(selected, setorFilterId){
+  let employees = (state.employees || []).slice();
+  if(setorFilterId){
+    employees = employees.filter(function(employee){
+      return !employee.setorId || employee.setorId === setorFilterId || (selected || []).indexOf(employee.id) >= 0;
+    });
+  }
+  if(!employees.length){
+    return `<div class="section-sub" id="cadOperadores">${setorFilterId ? 'Nenhum operador neste setor. Cadastre o setor no operador.' : 'Nenhum operador cadastrado.'}</div>`;
+  }
+  const buckets = {};
+  employees.forEach(function(employee){
+    const key = employee.setorId || '_none';
+    if(!buckets[key]) buckets[key] = [];
+    buckets[key].push(employee);
+  });
+  const order = Object.keys(buckets).sort(function(a, b){
+    if(a === '_none') return 1;
+    if(b === '_none') return -1;
+    const sa = setorById(a);
+    const sb = setorById(b);
+    return String(sa ? recordLabel(sa) : a).localeCompare(String(sb ? recordLabel(sb) : b), 'pt', { sensitivity: 'base' });
+  });
+  return `<div id="cadOperadores">${order.map(function(key){
+    const setor = key === '_none' ? null : setorById(key);
+    const title = key === '_none' ? 'Sem setor' : (setor ? recordLabel(setor) : 'Setor');
+    const items = buckets[key];
+    return `<div class="operator-sector-block">
+      <div class="operator-sector-title">${escapeHtml(title)} · ${items.length}</div>
+      <div class="perm-grid">${items.map(function(employee){
+        const checked = (selected || []).indexOf(employee.id) >= 0 ? 'checked' : '';
+        const name = ((employee.nome || '') + ' ' + (employee.sobrenome || '')).trim() || employee.codigo || '';
+        return `<label class="perm-item"><input data-edit="engenharia" type="checkbox" value="${escapeHtml(employee.id)}" ${checked}><span class="perm-item-text"><span class="perm-item-code mono">${escapeHtml(employee.codigo || '')}</span><span class="perm-item-title">${escapeHtml(name)}</span></span></label>`;
+      }).join('')}</div>
+    </div>`;
+  }).join('')}</div>`;
+}
 function rowActions(id){
   return `<button class="btn btn-sm" type="button" onclick="editCadastro('${escapeHtml(id)}')">Editar</button> <button class="icon-btn danger" data-edit="engenharia" type="button" onclick="deleteCadastro('${escapeHtml(id)}')" title="Excluir">${icon('trash',14)}</button>`;
 }
@@ -4058,12 +4155,32 @@ function descriptionField(value, label){
   return `<div class="field"><label>${label || 'Descrição'}</label><input id="cadDescricao" data-edit="engenharia" maxlength="120" value="${escapeHtml(value || '')}"></div>`;
 }
 function saveButtons(){
-  const trashed = (state.trash || []).filter(function(item){ return item.module === cadastroChoice; }).length;
   return `<div class="cadastro-save-row">
     <button class="btn btn-primary" data-edit="engenharia" type="button" onclick="saveCadastro()">Salvar</button>
-    <button class="btn btn-ghost" type="button" onclick="setCadastroChoice('${cadastroChoice}')">Limpar</button>
-    <button class="icon-btn danger cadastro-delete" type="button" onclick="openCadastroTrash()" title="Lixeira">${icon('trash',16)}${trashed ? `<span class="cadastro-trash-count">${trashed}</span>` : ''}</button>
+    <button class="btn btn-ghost" type="button" onclick="closeCadastroForm()">Cancelar</button>
   </div>`;
+}
+function cadastroListToolbar(placeholder, filteredCount, totalCount){
+  const trashed = (state.trash || []).filter(function(item){ return item.module === cadastroChoice; }).length;
+  const label = cadastroModuleLabel(cadastroChoice);
+  return `<div class="cadastro-list-head">
+      <div>
+        <div class="section-title" style="font-size:16px;">${escapeHtml(label)}</div>
+        <div class="section-sub" style="margin:0;">${filteredCount} de ${totalCount}</div>
+      </div>
+      <div class="cadastro-list-actions">
+        <button class="btn btn-primary" data-edit="engenharia" type="button" onclick="openCadastroForm()">Cadastrar ${escapeHtml(label)}</button>
+        <button class="icon-btn danger cadastro-delete" type="button" onclick="openCadastroTrash()" title="Lixeira">${icon('trash',16)}${trashed ? `<span class="cadastro-trash-count">${trashed}</span>` : ''}</button>
+      </div>
+    </div>
+    <div class="toolbar" style="margin-top:12px;">
+      <div class="search-box"><span class="search-ic">${icon('search',15)}</span><input id="cadastroSearchInput" placeholder="${escapeHtml(placeholder)}" value="${escapeHtml(cadastroSearch || '')}" oninput="onCadastroSearch(this.value)"></div>
+    </div>`;
+}
+function matchCadastroSearch(parts){
+  const query = String(cadastroSearch || '').trim().toLowerCase();
+  if(!query) return true;
+  return parts.join(' ').toLowerCase().indexOf(query) >= 0;
 }
 function updateCadastroSelectBar(){
   const bar = document.getElementById('cadastroSelectBar');
@@ -4132,50 +4249,133 @@ function listTable(headers, body, ids, totalCount){
 function renderCadastroBody(){
   const box = document.getElementById('cadastroBody');
   if(!box) return;
-  const record = cadastroRecord(cadastroEditId);
-  const codigo = fieldValue('cadCodigo', record ? (record.codigo || '') : suggestedCadastroCode());
-  const descricao = fieldValue('cadDescricao', record ? (cadastroChoice === 'operador' ? ((record.nome || '') + ' ' + (record.sobrenome || '')).trim() : recordLabel(record)) : '');
   if(cadastroChoice === 'setor'){
-    const page = sliceCadastroPage(state.setores);
+    const filtered = state.setores.filter(function(setor){
+      return matchCadastroSearch([setor.codigo, recordLabel(setor)]);
+    });
+    const page = sliceCadastroPage(filtered);
     const ids = page.pageItems.map(function(setor){ return setor.id; });
     const rows = page.pageItems.map(function(setor){
       return `<tr>${rowSelect(setor.id)}<td class="mono">${escapeHtml(setor.codigo || '')}</td><td>${escapeHtml(recordLabel(setor))}</td><td>${rowActions(setor.id)}</td></tr>`;
     }).join('');
-    box.innerHTML = `<div class="section-title" style="font-size:16px;">Setor</div><div class="section-sub">Lugar da fábrica. O código é numérico.</div><div class="grid grid-2">${codeField(codigo)}${descriptionField(descricao)}</div>${saveButtons()}${listTable(['Código','Descrição'], rows, ids, page.total)}`;
+    box.innerHTML = cadastroListToolbar('Buscar código ou descrição...', filtered.length, state.setores.length) + listTable(['Código','Descrição'], rows, ids, page.total);
     return;
   }
   if(cadastroChoice === 'grupo'){
-    const page = sliceCadastroPage(state.groups);
+    const filtered = state.groups.filter(function(group){
+      const families = state.families.filter(function(family){ return family.grupoId === group.id; }).map(recordLabel).join(' ');
+      return matchCadastroSearch([group.codigo, recordLabel(group), families]);
+    });
+    const page = sliceCadastroPage(filtered);
     const ids = page.pageItems.map(function(group){ return group.id; });
     const rows = page.pageItems.map(function(group){
       const families = state.families.filter(function(family){ return family.grupoId === group.id; }).map(recordLabel).join(', ');
       return `<tr>${rowSelect(group.id)}<td class="mono">${escapeHtml(group.codigo || '')}</td><td>${escapeHtml(recordLabel(group))}</td><td>${escapeHtml(families || '—')}</td><td>${rowActions(group.id)}</td></tr>`;
     }).join('');
-    const detail = page.pageItems.map(function(group){
-      const families = state.families.filter(function(family){ return family.grupoId === group.id; });
-      const blocks = families.map(function(family){
-        const items = state.products.filter(function(product){ return product.familiaId === family.id; }).map(function(product){ return product.codigo + ' ' + (product.descricao || ''); }).join(', ');
-        return `<div>${escapeHtml(recordLabel(family))}: ${escapeHtml(items || 'sem itens')}</div>`;
-      }).join('') || '<div class="section-sub">Nenhuma família neste grupo.</div>';
-      return `<div style="margin-top:8px;"><b>${escapeHtml((group.codigo || '') + ' ' + recordLabel(group))}</b>${blocks}</div>`;
-    }).join('');
-    box.innerHTML = `<div class="section-title" style="font-size:16px;">Grupo</div><div class="section-sub">Categoria acima da família. Ex.: Separação reúne Decanter e Prensa. O código é numérico.</div><div class="grid grid-2">${codeField(codigo)}${descriptionField(descricao)}</div>${saveButtons()}${listTable(['Código','Descrição','Famílias'], rows, ids, page.total)}<div style="margin-top:12px;">${detail}</div>`;
+    box.innerHTML = cadastroListToolbar('Buscar código, descrição ou família...', filtered.length, state.groups.length) + listTable(['Código','Descrição','Famílias'], rows, ids, page.total);
     return;
   }
   if(cadastroChoice === 'familia'){
-    const grupoId = fieldValue('cadGrupo', record ? (record.grupoId || '') : '');
-    const page = sliceCadastroPage(state.families);
+    const filtered = state.families.filter(function(family){
+      const group = groupById(family.grupoId);
+      return matchCadastroSearch([family.codigo, recordLabel(family), group && recordLabel(group)]);
+    });
+    const page = sliceCadastroPage(filtered);
     const ids = page.pageItems.map(function(family){ return family.id; });
     const rows = page.pageItems.map(function(family){
       const group = groupById(family.grupoId);
       return `<tr>${rowSelect(family.id)}<td class="mono">${escapeHtml(family.codigo || '')}</td><td>${escapeHtml(recordLabel(family))}</td><td>${escapeHtml(group ? recordLabel(group) : '—')}</td><td>${(family.itens || []).length}</td><td>${rowActions(family.id)}</td></tr>`;
     }).join('');
-    box.innerHTML = `<div class="section-title" style="font-size:16px;">Família</div><div class="section-sub">Linha do produto. Ex.: Decanter é a família; os tamanhos ficam no equipamento. Aqui fica o conjunto padrão de peças.</div>
+    box.innerHTML = cadastroListToolbar('Buscar código, descrição ou grupo...', filtered.length, state.families.length) + listTable(['Código','Descrição','Grupo','Peças'], rows, ids, page.total);
+    return;
+  }
+  if(cadastroChoice === 'item'){
+    const filtered = state.products.filter(function(product){
+      const family = familyById(product.familiaId);
+      const setor = setorById(product.setorId);
+      return matchCadastroSearch([product.codigo, product.codigoErp, product.descricao, product.material, family && recordLabel(family), setor && recordLabel(setor)]);
+    });
+    const page = sliceCadastroPage(filtered);
+    const ids = page.pageItems.map(function(product){ return product.codigo; });
+    const rows = page.pageItems.map(function(product){
+      const family = familyById(product.familiaId);
+      const setor = setorById(product.setorId);
+      return `<tr>${rowSelect(product.codigo)}<td class="mono">${escapeHtml(product.codigo || '')}</td><td class="mono">${escapeHtml(product.codigoErp || '')}</td><td>${escapeHtml(product.descricao || '')}</td><td>${escapeHtml(family ? recordLabel(family) : '—')}</td><td>${escapeHtml(setor ? recordLabel(setor) : '—')}</td><td>${rowActions(product.codigo)}</td></tr>`;
+    }).join('');
+    box.innerHTML = cadastroListToolbar('Buscar código, ERP ou descrição...', filtered.length, state.products.length) + listTable(['Código','ERP','Descrição','Família','Setor'], rows, ids, page.total);
+    return;
+  }
+  if(cadastroChoice === 'operacao'){
+    const filtered = state.operacoes.filter(function(operation){
+      return matchCadastroSearch([operation.codigo, recordLabel(operation)]);
+    });
+    const page = sliceCadastroPage(filtered);
+    const ids = page.pageItems.map(function(operation){ return operation.id; });
+    const rows = page.pageItems.map(function(operation){
+      return `<tr>${rowSelect(operation.id)}<td class="mono">${escapeHtml(operation.codigo || '')}</td><td>${escapeHtml(recordLabel(operation))}</td><td>${rowActions(operation.id)}</td></tr>`;
+    }).join('');
+    box.innerHTML = cadastroListToolbar('Buscar código ou descrição...', filtered.length, state.operacoes.length) + listTable(['Código','Descrição'], rows, ids, page.total);
+    return;
+  }
+  if(cadastroChoice === 'operador'){
+    const filtered = state.employees.filter(function(employee){
+      const setor = setorById(employee.setorId);
+      const names = employeeMachines(employee.id).map(function(resource){ return resource.codigo || resource.nome; }).join(' ');
+      return matchCadastroSearch([employee.codigo, employee.nome, employee.sobrenome, employee.turno, setor && recordLabel(setor), names]);
+    });
+    const page = sliceCadastroPage(filtered);
+    const ids = page.pageItems.map(function(employee){ return employee.id; });
+    const rows = page.pageItems.map(function(employee){
+      const setor = setorById(employee.setorId);
+      const names = employeeMachines(employee.id).map(function(resource){ return resource.codigo || resource.nome; }).join(', ');
+      return `<tr>${rowSelect(employee.id)}<td class="mono">${escapeHtml(employee.codigo || '')}</td><td>${escapeHtml(((employee.nome || '') + ' ' + (employee.sobrenome || '')).trim())}</td><td>${escapeHtml(setor ? recordLabel(setor) : '—')}</td><td>${escapeHtml(employee.turno || '')}</td><td>${escapeHtml(names || '—')}</td><td>${rowActions(employee.id)}</td></tr>`;
+    }).join('');
+    box.innerHTML = cadastroListToolbar('Buscar código, nome, setor ou máquina...', filtered.length, state.employees.length) + listTable(['Código','Descrição','Setor','Turno','Máquinas'], rows, ids, page.total);
+    return;
+  }
+  if(cadastroChoice === 'maquina'){
+    const filtered = state.resources.filter(function(resource){
+      const setor = setorById(resource.setorId);
+      return matchCadastroSearch([resource.codigo || resource.nome, resource.descricao, setor && recordLabel(setor), resource.setor]);
+    });
+    const page = sliceCadastroPage(filtered);
+    const ids = page.pageItems.map(function(resource){ return resource.id; });
+    const rows = page.pageItems.map(function(resource){
+      const setor = setorById(resource.setorId);
+      return `<tr>${rowSelect(resource.id)}<td class="mono">${escapeHtml(resource.codigo || resource.nome || '')}</td><td>${escapeHtml(resource.descricao || '')}</td><td>${escapeHtml(setor ? recordLabel(setor) : (resource.setor || '—'))}</td><td>${rowActions(resource.id)}</td></tr>`;
+    }).join('');
+    box.innerHTML = cadastroListToolbar('Buscar código, descrição ou setor...', filtered.length, state.resources.length) + listTable(['Código','Descrição','Setor'], rows, ids, page.total);
+    return;
+  }
+  const filtered = state.equipments.filter(function(equipment){
+    const family = familyById(equipment.familiaId);
+    return matchCadastroSearch([equipment.codigo, recordLabel(equipment), family && recordLabel(family)]);
+  });
+  const page = sliceCadastroPage(filtered);
+  const ids = page.pageItems.map(function(equipment){ return equipment.id; });
+  const rows = page.pageItems.map(function(equipment){
+    const family = familyById(equipment.familiaId);
+    return `<tr>${rowSelect(equipment.id)}<td class="mono">${escapeHtml(equipment.codigo || '')}</td><td>${escapeHtml(recordLabel(equipment))}</td><td>${escapeHtml(family ? recordLabel(family) : '—')}</td><td>${(equipment.itens || []).length}</td><td>${rowActions(equipment.id)}</td></tr>`;
+  }).join('');
+  box.innerHTML = cadastroListToolbar('Buscar código, descrição ou família...', filtered.length, state.equipments.length) + listTable(['Código','Descrição','Família','Peças'], rows, ids, page.total);
+}
+function buildCadastroFormHtml(){
+  const record = cadastroRecord(cadastroEditId);
+  const codigo = fieldValue('cadCodigo', record ? (record.codigo || '') : suggestedCadastroCode());
+  const descricao = fieldValue('cadDescricao', record ? (cadastroChoice === 'operador' ? ((record.nome || '') + ' ' + (record.sobrenome || '')).trim() : recordLabel(record)) : '');
+  if(cadastroChoice === 'setor'){
+    return `<div class="section-sub">Lugar da fábrica. O código é numérico.</div><div class="grid grid-2">${codeField(codigo)}${descriptionField(descricao)}</div>${saveButtons()}`;
+  }
+  if(cadastroChoice === 'grupo'){
+    return `<div class="section-sub">Categoria acima da família. O código é numérico.</div><div class="grid grid-2">${codeField(codigo)}${descriptionField(descricao)}</div>${saveButtons()}`;
+  }
+  if(cadastroChoice === 'familia'){
+    const grupoId = fieldValue('cadGrupo', record ? (record.grupoId || '') : '');
+    return `<div class="section-sub">Linha do produto e o conjunto padrão de peças.</div>
       <div class="grid grid-2">${codeField(codigo)}${descriptionField(descricao)}
         <div class="field"><label>Grupo</label><select id="cadGrupo" data-edit="engenharia">${selectOptions(state.groups, grupoId, 'Selecione o grupo')}</select></div>
       </div>
-      <div class="section-sub" style="margin-top:8px;">Conjunto padrão</div>${kitEditor()}${saveButtons()}${listTable(['Código','Descrição','Grupo','Peças'], rows, ids, page.total)}`;
-    return;
+      <div class="section-sub" style="margin-top:8px;">Conjunto padrão</div>${kitEditor()}${saveButtons()}`;
   }
   if(cadastroChoice === 'item'){
     const grupoId = fieldValue('cadGrupo', record ? (record.grupoId || '') : '');
@@ -4187,22 +4387,7 @@ function renderCadastroBody(){
     const material = fieldValue('cadMaterial', record ? (record.material || '') : '');
     const tempo = fieldValue('cadTempo', record ? (record.tempoFabricacaoMin || 1) : 1);
     const machines = checkedDraft('maquinas', record ? (record.maquinas || []) : []);
-    const query = String(engSearch || '').trim().toLowerCase();
-    const filtered = state.products.filter(function(product){
-      if(!query) return true;
-      const family = familyById(product.familiaId);
-      const setor = setorById(product.setorId);
-      const hay = [product.codigo, product.codigoErp, product.descricao, product.material, family && recordLabel(family), setor && recordLabel(setor)].join(' ').toLowerCase();
-      return hay.indexOf(query) >= 0;
-    });
-    const page = sliceCadastroPage(filtered);
-    const ids = page.pageItems.map(function(product){ return product.codigo; });
-    const rows = page.pageItems.map(function(product){
-      const family = familyById(product.familiaId);
-      const setor = setorById(product.setorId);
-      return `<tr>${rowSelect(product.codigo)}<td class="mono">${escapeHtml(product.codigo || '')}</td><td class="mono">${escapeHtml(product.codigoErp || '')}</td><td>${escapeHtml(product.descricao || '')}</td><td>${escapeHtml(family ? recordLabel(family) : '—')}</td><td>${escapeHtml(setor ? recordLabel(setor) : '—')}</td><td>${rowActions(product.codigo)}</td></tr>`;
-    }).join('');
-    box.innerHTML = `<div class="section-title" style="font-size:16px;">Item</div><div class="section-sub">Peça unitária, consulta e cadastro no mesmo lugar. Código interno ${companyCodesAuto() ? 'automático e editável' : 'digitado'}; ERP separado: <b>30.2000.XXXX</b> (PI) e <b>30.3000.XXXX</b> (PF).</div>
+    return `<div class="section-sub">Código interno ${companyCodesAuto() ? 'automático e editável' : 'digitado'}; ERP: <b>30.2000.XXXX</b> (PI) e <b>30.3000.XXXX</b> (PF).</div>
       <div class="grid grid-2">${codeField(codigo)}
         <div class="field"><label>Código ERP</label><input id="cadErp" data-edit="engenharia" maxlength="20" value="${escapeHtml(erp)}"></div>
         ${descriptionField(descricao)}
@@ -4213,137 +4398,148 @@ function renderCadastroBody(){
         <div class="field"><label>Classificação</label><select id="cadClasse" data-edit="engenharia"><option value="PI" ${classe === 'PI' ? 'selected' : ''}>PI — intermediário</option><option value="PF" ${classe === 'PF' ? 'selected' : ''}>PF — final</option></select></div>
         <div class="field"><label>Tempo (min/peça)</label><input id="cadTempo" data-edit="engenharia" type="number" min="0" step="0.1" value="${escapeHtml(tempo)}"></div>
       </div>
-      <div class="section-sub">Máquinas em que esta peça pode ser feita. As outras ficam proibidas.</div>
+      <div class="section-sub">Máquinas em que esta peça pode ser feita.</div>
       ${checkGrid('cadMaquinas', state.resources, machines, function(resource){
         return { code: resource.codigo || resource.nome || '', title: resource.descricao || resource.codigo || resource.nome || '' };
       })}
-      <div class="section-sub" style="margin-top:8px;">Rota ordenada</div>${routeEditor()}${saveButtons()}
-      <div class="toolbar" style="margin-top:16px;">
-        <div class="search-box"><span class="search-ic">${icon('search',15)}</span><input id="cadastroItemSearch" placeholder="Buscar código, ERP ou descrição..." value="${escapeHtml(engSearch || '')}" oninput="onCadastroItemSearch(this.value)"></div>
-        <span class="section-sub" style="margin:0;">${filtered.length} de ${state.products.length} itens</span>
-      </div>
-      ${listTable(['Código','ERP','Descrição','Família','Setor'], rows, ids, page.total)}`;
-    return;
+      <div class="section-sub" style="margin-top:8px;">Rota ordenada</div>${routeEditor()}${saveButtons()}`;
   }
   if(cadastroChoice === 'operacao'){
-    const page = sliceCadastroPage(state.operacoes);
-    const ids = page.pageItems.map(function(operation){ return operation.id; });
-    const rows = page.pageItems.map(function(operation){
-      return `<tr>${rowSelect(operation.id)}<td class="mono">${escapeHtml(operation.codigo || '')}</td><td>${escapeHtml(recordLabel(operation))}</td><td>${rowActions(operation.id)}</td></tr>`;
-    }).join('');
-    box.innerHTML = `<div class="section-title" style="font-size:16px;">Operação</div><div class="section-sub">Etapa de processo. Ex.: cortar, dobrar, calandrar, soldar, jatear, tornear, montar. A sequência fica no item.</div><div class="grid grid-2">${codeField(codigo)}${descriptionField(descricao)}</div>${saveButtons()}${listTable(['Código','Descrição'], rows, ids, page.total)}`;
-    return;
+    return `<div class="section-sub">Etapa de processo. A sequência fica no item.</div><div class="grid grid-2">${codeField(codigo)}${descriptionField(descricao)}</div>${saveButtons()}`;
   }
   if(cadastroChoice === 'operador'){
     const turno = fieldValue('cadTurno', record ? (record.turno || '1º Turno') : '1º Turno');
+    const setorId = fieldValue('cadSetor', record ? (record.setorId || '') : '');
     const machines = checkedDraft('maquinas', record ? employeeMachines(record.id).map(function(resource){ return resource.id; }) : []);
-    const page = sliceCadastroPage(state.employees);
-    const ids = page.pageItems.map(function(employee){ return employee.id; });
-    const rows = page.pageItems.map(function(employee){
-      const names = employeeMachines(employee.id).map(function(resource){ return resource.codigo || resource.nome; }).join(', ');
-      return `<tr>${rowSelect(employee.id)}<td class="mono">${escapeHtml(employee.codigo || '')}</td><td>${escapeHtml(((employee.nome || '') + ' ' + (employee.sobrenome || '')).trim())}</td><td>${escapeHtml(employee.turno || '')}</td><td>${escapeHtml(names || '—')}</td><td>${rowActions(employee.id)}</td></tr>`;
-    }).join('');
-    box.innerHTML = `<div class="section-title" style="font-size:16px;">Operador</div><div class="section-sub">A mesma pessoa do cadastro de funcionários. O vínculo com a máquina aparece dos dois lados.</div>
+    const machinesForSetor = state.resources.filter(function(resource){ return !setorId || resource.setorId === setorId; });
+    return `<div class="section-sub">Operador com setor. As máquinas aparecem conforme o setor escolhido.</div>
       <div class="grid grid-2">${codeField(codigo)}${descriptionField(descricao)}
+        <div class="field"><label>Setor</label><select id="cadSetor" data-edit="engenharia" onchange="onOperadorSetorChange()">${selectOptions(state.setores, setorId, 'Selecione o setor')}</select></div>
         <div class="field"><label>Turno</label><select id="cadTurno" data-edit="engenharia">${TURNO_OPTIONS.map(function(item){ return `<option ${item === turno ? 'selected' : ''}>${escapeHtml(item)}</option>`; }).join('')}</select></div>
       </div>
       <div class="section-sub">Máquinas deste operador</div>
-      ${checkGrid('cadMaquinas', state.resources, machines, function(resource){
+      ${checkGrid('cadMaquinas', machinesForSetor, machines, function(resource){
         return { code: resource.codigo || resource.nome || '', title: resource.descricao || resource.codigo || resource.nome || '' };
       })}
-      ${saveButtons()}${listTable(['Código','Descrição','Turno','Máquinas'], rows, ids, page.total)}`;
-    return;
+      ${saveButtons()}`;
   }
   if(cadastroChoice === 'maquina'){
     const setorId = fieldValue('cadSetor', record ? (record.setorId || '') : '');
     const operations = checkedDraft('operacoes', record ? (record.operacoes || []) : []);
     const operators = checkedDraft('operadores', record ? (record.funcionarios || []) : []);
-    const page = sliceCadastroPage(state.resources);
-    const ids = page.pageItems.map(function(resource){ return resource.id; });
-    const rows = page.pageItems.map(function(resource){
-      const setor = setorById(resource.setorId);
-      return `<tr>${rowSelect(resource.id)}<td class="mono">${escapeHtml(resource.codigo || resource.nome || '')}</td><td>${escapeHtml(resource.descricao || '')}</td><td>${escapeHtml(setor ? recordLabel(setor) : (resource.setor || '—'))}</td><td>${rowActions(resource.id)}</td></tr>`;
-    }).join('');
-    box.innerHTML = `<div class="section-title" style="font-size:16px;">Máquina</div><div class="section-sub">Recurso de produção: setor, operações que executa e operadores vinculados.</div>
+    return `<div class="section-sub">Setor, operações e operadores do mesmo setor.</div>
       <div class="grid grid-2">${codeField(codigo)}${descriptionField(descricao)}
-        <div class="field"><label>Setor</label><select id="cadSetor" data-edit="engenharia">${selectOptions(state.setores, setorId, 'Selecione o setor')}</select></div>
+        <div class="field"><label>Setor</label><select id="cadSetor" data-edit="engenharia" onchange="onMaquinaSetorChange()">${selectOptions(state.setores, setorId, 'Selecione o setor')}</select></div>
       </div>
       <div class="section-sub">Operações que esta máquina executa</div>
       ${checkGrid('cadOperacoes', state.operacoes, operations, function(operation){
         return { code: operation.codigo || '', title: recordLabel(operation) };
       })}
-      <div class="section-sub">Operadores vinculados</div>
-      ${checkGrid('cadOperadores', state.employees, operators, function(employee){
-        return {
-          code: employee.codigo || '',
-          title: ((employee.nome || '') + ' ' + (employee.sobrenome || '')).trim() || employee.codigo || ''
-        };
-      })}
-      ${saveButtons()}${listTable(['Código','Descrição','Setor'], rows, ids, page.total)}`;
-    return;
+      <div class="section-sub">Operadores vinculados${setorId ? ' (do setor escolhido)' : ''}</div>
+      ${operatorCheckGrid(operators, setorId)}
+      ${saveButtons()}`;
   }
   const familiaId = fieldValue('cadFamilia', record ? (record.familiaId || '') : '');
-  const page = sliceCadastroPage(state.equipments);
-  const ids = page.pageItems.map(function(equipment){ return equipment.id; });
-  const rows = page.pageItems.map(function(equipment){
-    const family = familyById(equipment.familiaId);
-    return `<tr>${rowSelect(equipment.id)}<td class="mono">${escapeHtml(equipment.codigo || '')}</td><td>${escapeHtml(recordLabel(equipment))}</td><td>${escapeHtml(family ? recordLabel(family) : '—')}</td><td>${(equipment.itens || []).length}</td><td>${rowActions(equipment.id)}</td></tr>`;
-  }).join('');
-  box.innerHTML = `<div class="section-title" style="font-size:16px;">Equipamento</div><div class="section-sub">Um modelo da família. Ex.: Decanter 220. Ao escolher a família, as peças padrão são copiadas e podem ser ajustadas.</div>
+  return `<div class="section-sub">Um modelo da família. As peças padrão são copiadas e podem ser ajustadas.</div>
     <div class="grid grid-2">${codeField(codigo)}${descriptionField(descricao)}
       <div class="field"><label>Família</label><select id="cadFamilia" data-edit="engenharia" onchange="onEquipmentFamilyChange()">${selectOptions(state.families, familiaId, 'Selecione a família')}</select></div>
     </div>
-    ${kitEditor()}${saveButtons()}${listTable(['Código','Descrição','Família','Peças'], rows, ids, page.total)}`;
+    ${kitEditor()}${saveButtons()}`;
 }
-function onCadastroItemSearch(value){
-  engSearch = value;
+function fillCadastroFormModal(){
+  const title = document.getElementById('cadastroFormTitle');
+  const body = document.getElementById('cadastroFormBody');
+  if(title) title.textContent = (cadastroEditId ? 'Editar ' : 'Cadastrar ') + cadastroModuleLabel(cadastroChoice);
+  if(body) body.innerHTML = buildCadastroFormHtml();
+}
+function openCadastroForm(id){
+  if(id){
+    cadastroEditId = id;
+    textDraft = {};
+    const record = cadastroRecord(id);
+    kitDraft = ((record && record.itens) || []).map(function(part){
+      return { codigo: part.codigo, quantidade: Number(part.quantidade) || 1, setorId: part.setorId || '' };
+    });
+    routeDraft = ((record && record.rota) || []).map(function(step){
+      return { operacaoId: step.operacaoId || '', setorId: step.setorId || '', maquinaId: step.maquinaId || '' };
+    });
+  } else {
+    resetCadastroForm();
+  }
+  cadastroFormOpen = true;
+  fillCadastroFormModal();
+  openModal('modalCadastroForm');
+  applyAccess();
+}
+function closeCadastroForm(silent){
+  cadastroFormOpen = false;
+  closeModal('modalCadastroForm');
+  if(!silent){
+    resetCadastroForm();
+    renderCadastroBody();
+    applyAccess();
+  }
+}
+function onCadastroSearch(value){
+  cadastroSearch = value;
   cadastroPage = 1;
-  rememberTexts();
-  pullKitDraft();
-  pullRouteDraft();
   renderCadastroBody();
   applyAccess();
-  const search = document.getElementById('cadastroItemSearch');
+  const search = document.getElementById('cadastroSearchInput');
   if(search){
     search.focus();
     const len = search.value.length;
     try{ search.setSelectionRange(len, len); }catch(err){}
   }
 }
+function onMaquinaSetorChange(){
+  rememberTexts();
+  if(document.getElementById('cadOperadores')){
+    textDraft.operadores = readChecks('cadOperadores');
+  }
+  fillCadastroFormModal();
+  applyAccess();
+}
+function onOperadorSetorChange(){
+  rememberTexts();
+  if(document.getElementById('cadMaquinas')) textDraft.maquinas = readChecks('cadMaquinas');
+  fillCadastroFormModal();
+  applyAccess();
+}
+function refreshCadastroView(){
+  if(cadastroFormOpen) fillCadastroFormModal();
+  else renderCadastroBody();
+  applyAccess();
+}
 function refreshCadastroDraft(){
   pullKitDraft();
   pullRouteDraft();
   rememberTexts();
-  renderCadastro();
-  applyAccess();
+  refreshCadastroView();
 }
 function addKitRow(){
   pullKitDraft();
   rememberTexts();
   kitDraft.push({ codigo: '', quantidade: 1, setorId: '' });
-  renderCadastro();
-  applyAccess();
+  refreshCadastroView();
 }
 function removeKitRow(index){
   pullKitDraft();
   rememberTexts();
   kitDraft.splice(index, 1);
-  renderCadastro();
-  applyAccess();
+  refreshCadastroView();
 }
 function addRouteRow(){
   pullRouteDraft();
   rememberTexts();
   routeDraft.push({ operacaoId: '', setorId: '', maquinaId: '' });
-  renderCadastro();
-  applyAccess();
+  refreshCadastroView();
 }
 function removeRouteRow(index){
   pullRouteDraft();
   rememberTexts();
   routeDraft.splice(index, 1);
-  renderCadastro();
-  applyAccess();
+  refreshCadastroView();
 }
 function moveRouteRow(index, delta){
   pullRouteDraft();
@@ -4352,14 +4548,12 @@ function moveRouteRow(index, delta){
   if(next < 0 || next >= routeDraft.length) return;
   const step = routeDraft.splice(index, 1)[0];
   routeDraft.splice(next, 0, step);
-  renderCadastro();
-  applyAccess();
+  refreshCadastroView();
 }
 function onItemGroupChange(){
   pullRouteDraft();
   rememberTexts();
-  renderCadastro();
-  applyAccess();
+  refreshCadastroView();
 }
 function onEquipmentFamilyChange(){
   rememberTexts();
@@ -4367,37 +4561,15 @@ function onEquipmentFamilyChange(){
   kitDraft = ((family && family.itens) || []).map(function(part){
     return { codigo: part.codigo, quantidade: Number(part.quantidade) || 1, setorId: part.setorId || '' };
   });
-  renderCadastro();
-  applyAccess();
+  refreshCadastroView();
 }
 function editCadastro(id){
-  cadastroEditId = id;
-  textDraft = {};
-  const record = cadastroRecord(id);
-  kitDraft = ((record && record.itens) || []).map(function(part){
-    return { codigo: part.codigo, quantidade: Number(part.quantidade) || 1, setorId: part.setorId || '' };
-  });
-  routeDraft = ((record && record.rota) || []).map(function(step){
-    return { operacaoId: step.operacaoId || '', setorId: step.setorId || '', maquinaId: step.maquinaId || '' };
-  });
-  renderCadastro();
-  applyAccess();
+  openCadastroForm(id);
 }
 function openCadastroItem(codigo){
   cadastroChoice = 'item';
-  textDraft = {};
-  kitDraft = [];
-  if(codigo){
-    cadastroEditId = codigo;
-    const product = state.products.find(function(item){ return item.codigo === codigo; });
-    routeDraft = ((product && product.rota) || []).map(function(step){
-      return { operacaoId: step.operacaoId || '', setorId: step.setorId || '', maquinaId: step.maquinaId || '' };
-    });
-  } else {
-    cadastroEditId = '';
-    routeDraft = [];
-  }
   setTab('cadastro');
+  openCadastroForm(codigo || '');
 }
 function cleanKit(){
   return kitDraft.filter(function(part){ return part.codigo && Number(part.quantidade) > 0; }).map(function(part){
@@ -4484,16 +4656,17 @@ async function saveCadastro(){
     } else state.operacoes.push({ id: uid(), codigo: codigo, descricao: descricao, nome: descricao });
   } else if(cadastroChoice === 'operador'){
     const turno = cadastroInput('cadTurno') || '1º Turno';
+    const setorId = cadastroInput('cadSetor');
     const machines = readChecks('cadMaquinas');
     if(cadastroEditId){
       const employee = state.employees.find(function(item){ return item.id === cadastroEditId; });
-      if(employee) Object.assign(employee, { codigo: codigo, nome: descricao, sobrenome: '', turno: turno, funcao: employee.funcao || 'Operador' });
+      if(employee) Object.assign(employee, { codigo: codigo, nome: descricao, sobrenome: '', turno: turno, setorId: setorId, funcao: employee.funcao || 'Operador' });
       syncEmployeeMachines(cadastroEditId, machines);
     } else {
       const assigned = assignEmployeeNumber('', '');
       if(assigned.error){ toast(assigned.error, 'error'); return; }
       const employeeId = uid();
-      state.employees.push({ id: employeeId, codigo: codigo, numero: assigned.numero, nome: descricao, sobrenome: '', funcao: 'Operador', turno: turno, vinculo: 'Efetivo', ferias: null });
+      state.employees.push({ id: employeeId, codigo: codigo, numero: assigned.numero, nome: descricao, sobrenome: '', funcao: 'Operador', turno: turno, setorId: setorId, vinculo: 'Efetivo', ferias: null });
       syncEmployeeMachines(employeeId, machines);
     }
   } else if(cadastroChoice === 'maquina'){
@@ -4526,7 +4699,8 @@ async function saveCadastro(){
   }
   resetCadastroForm();
   await persist();
-  renderCadastro();
+  closeCadastroForm(true);
+  renderCadastroBody();
   applyAccess();
   toast('Cadastro salvo.', 'success');
 }
@@ -4825,47 +4999,123 @@ function discardStudy(){
   renderStudyBoard();
   toast('Estudo descartado.', 'success');
 }
+function buildCompanyFormHtml(company, mode){
+  const suporte = sessionUser.role === 'administrador_suporte';
+  const manager = canManageUsers();
+  const companies = knownCompanies || [];
+  if(mode === 'create'){
+    return `<form onsubmit="createCompany(event)">
+      <div class="section-sub">Nova empresa nesta conta suporte.</div>
+      <div class="field-row">
+        <div class="field"><label>Id</label><input id="newCompanyCode" maxlength="12" value="${escapeHtml(nextAlphaCode(companies.map(function(item){ return item.code; })))}"></div>
+        <div class="field"><label>Descrição</label><input id="newCompanyName" required minlength="2"></div>
+      </div>
+      <div class="cadastro-save-row">
+        <button class="btn btn-primary" type="submit">Criar empresa</button>
+        <button class="btn btn-ghost" type="button" onclick="closeCompanyForm()">Cancelar</button>
+      </div>
+    </form>`;
+  }
+  if(!company) return '<div class="section-sub">Empresa não encontrada.</div>';
+  return `<form onsubmit="saveCompany(event, '${company.id}')">
+    <div class="field-row">
+      <div class="field"><label>Id</label><input id="companyCode" maxlength="12" value="${escapeHtml(company.code || '')}" ${manager ? '' : 'disabled'}></div>
+      <div class="field"><label>Descrição</label><input id="companyName" value="${escapeHtml(company.name)}" ${manager ? '' : 'disabled'}></div>
+    </div>
+    <div class="field"><label>Códigos do sistema</label>
+      <select id="companyCodeMode" ${manager ? '' : 'disabled'}>
+        <option value="auto" ${company.codeMode !== 'manual' ? 'selected' : ''}>Auto incremento (padrão preenchido)</option>
+        <option value="manual" ${company.codeMode === 'manual' ? 'selected' : ''}>Digitados (campo vazio)</option>
+      </select>
+      <div class="section-sub" style="margin-top:6px;">Vale para cadastros, funcionário e máquina. O número do pedido continua sempre digitado.</div>
+    </div>
+    ${manager ? `<button class="btn" type="button" style="margin-bottom:10px;" onclick="closeCompanyForm(); setSettingsChoice('perfis')">Perfis de usuário</button>` : ''}
+    ${suporte ? `<div class="field-row">
+      <div class="field"><label>Máximo de usuários</label><input id="maxUsers" type="number" min="1" value="${company.maxUsers}"></div>
+      <div class="field"><label>Máximo de máquinas</label><input id="maxMachines" type="number" min="1" value="${company.maxMachines}"></div>
+      <div class="field"><label>Máximo de cadastros</label><input id="maxRegistrations" type="number" min="1" value="${company.maxRegistrations}"></div>
+    </div>
+    <div class="field"><label>Data limite de uso</label><input id="usageUntil" type="date" value="${company.usageUntil || ''}"></div>
+    <button class="btn" type="button" onclick="toggleCompanyBlock('${company.id}', ${company.blocked ? 'false' : 'true'})">${company.blocked ? 'Desbloquear empresa' : 'Bloquear empresa'}</button>` : ''}
+    <div class="cadastro-save-row">
+      ${manager ? '<button class="btn btn-primary" type="submit">Salvar empresa</button>' : ''}
+      <button class="btn btn-ghost" type="button" onclick="closeCompanyForm()">Cancelar</button>
+    </div>
+  </form>`;
+}
+function openCompanyForm(id){
+  const body = document.getElementById('companyFormBody');
+  const title = document.getElementById('companyFormTitle');
+  if(!body) return;
+  if(!id){
+    if(title) title.textContent = 'Cadastrar empresa';
+    body.innerHTML = buildCompanyFormHtml(null, 'create');
+  } else {
+    const company = knownCompanies.find(function(item){ return item.id === id; });
+    if(title) title.textContent = 'Editar empresa';
+    body.innerHTML = buildCompanyFormHtml(company, 'edit');
+  }
+  openModal('modalCompanyForm');
+}
+function closeCompanyForm(){
+  closeModal('modalCompanyForm');
+  const body = document.getElementById('companyFormBody');
+  if(body) body.innerHTML = '';
+}
+function onCompanySearch(value){
+  companySearch = value;
+  renderCompanySettings();
+}
 async function renderCompanySettings(){
   const box = document.getElementById('companySettings');
   if(!box || !sessionUser) return;
   let companies = [];
   try{ companies = companiesByName((await accountApi('/api/companies')).data || []); }catch(e){ companies = []; }
+  knownCompanies = companies;
   const selected = activeCompanyId();
-  const current = companies.find(function(company){ return company.id === selected; }) || companies[0] || null;
   const suporte = sessionUser.role === 'administrador_suporte';
   const manager = canManageUsers();
+  const query = String(companySearch || '').trim().toLowerCase();
+  const filtered = companies.filter(function(company){
+    if(!query) return true;
+    return [company.code, company.name, company.codeMode].join(' ').toLowerCase().indexOf(query) >= 0;
+  });
   box.innerHTML = `
-    <div class="card" style="margin-top:14px;">
-      <div class="section-title" style="font-size:16px;">Dados da empresa</div>
-      <div class="section-sub">Versão ${escapeHtml((window.PRODIFY_CONFIG && window.PRODIFY_CONFIG.version) || '')}</div>
-      ${current && current.blocked ? '<div class="section-sub" style="color:var(--red-dark);font-weight:700;">Esta empresa está bloqueada. Quem pertence a ela não entra, e a produção fica parada.</div>' : ''}
-      ${suporte ? `<div class="field"><label>Empresa ativa</label><select id="activeCompany" onchange="selectCompany(this.value)"><option value="">Escolha</option>${companies.map(function(company){ return `<option value="${company.id}" ${company.id===selected?'selected':''}>${escapeHtml((company.code ? company.code + ' — ' : '') + company.name)}${company.blocked ? ' — bloqueada' : ''}</option>`; }).join('')}</select></div>
-        <form onsubmit="createCompany(event)"><div class="field-row"><div class="field"><label>Id</label><input id="newCompanyCode" maxlength="12" value="${escapeHtml(nextAlphaCode(companies.map(function(company){ return company.code; })))}"></div><div class="field"><label>Descrição</label><input id="newCompanyName" required minlength="2"></div></div><button class="btn btn-primary" type="submit">Criar empresa</button></form>` : ''}
-      ${current ? `<form onsubmit="saveCompany(event, '${current.id}')">
-        <div class="field-row">
-          <div class="field"><label>Id</label><input id="companyCode" maxlength="12" value="${escapeHtml(current.code || nextAlphaCode(companies.filter(function(company){ return company.id !== current.id; }).map(function(company){ return company.code; })))}" ${manager ? '' : 'disabled'}></div>
-          <div class="field"><label>Descrição</label><input id="companyName" value="${escapeHtml(current.name)}" ${manager ? '' : 'disabled'}></div>
+    <div class="card">
+      <div class="cadastro-list-head">
+        <div>
+          <div class="section-title" style="font-size:16px;">Empresas</div>
+          <div class="section-sub" style="margin:0;">Versão ${escapeHtml((window.PRODIFY_CONFIG && window.PRODIFY_CONFIG.version) || '')} · ${filtered.length} de ${companies.length}</div>
         </div>
-        <div class="field"><label>Códigos do sistema</label>
-          <select id="companyCodeMode" ${manager ? '' : 'disabled'}>
-            <option value="auto" ${current.codeMode !== 'manual' ? 'selected' : ''}>Auto incremento (padrão preenchido)</option>
-            <option value="manual" ${current.codeMode === 'manual' ? 'selected' : ''}>Digitados (campo vazio)</option>
-          </select>
-          <div class="section-sub" style="margin-top:6px;">Vale para cadastros, funcionário e máquina. O número do pedido continua sempre digitado.</div>
+        <div class="cadastro-list-actions">
+          ${suporte ? '<button class="btn btn-primary" type="button" onclick="openCompanyForm()">Cadastrar empresa</button>' : ''}
+          ${manager && selected ? `<button class="btn" type="button" onclick="setSettingsChoice('perfis')">Perfis de usuário</button>` : ''}
         </div>
-        ${manager ? `<button class="btn" type="button" onclick="setSettingsChoice('perfis')">Perfis de usuário</button>` : ''}
-        ${suporte ? `<div class="field-row">
-          <div class="field"><label>Máximo de usuários</label><input id="maxUsers" type="number" min="1" value="${current.maxUsers}"></div>
-          <div class="field"><label>Máximo de máquinas</label><input id="maxMachines" type="number" min="1" value="${current.maxMachines}"></div>
-          <div class="field"><label>Máximo de cadastros</label><input id="maxRegistrations" type="number" min="1" value="${current.maxRegistrations}"></div>
-        </div>
-        <div class="field"><label>Data limite de uso</label><input id="usageUntil" type="date" value="${current.usageUntil || ''}"></div>
-        <button class="btn" type="button" onclick="toggleCompanyBlock('${current.id}', ${current.blocked ? 'false' : 'true'})">${current.blocked ? 'Desbloquear empresa' : 'Bloquear empresa'}</button>` : ''}
-        ${manager ? '<button class="btn btn-primary" type="submit">Salvar empresa</button>' : ''}
-      </form>` : '<div class="section-sub">Nenhuma empresa cadastrada.</div>'}
+      </div>
+      ${suporte ? `<div class="field" style="margin-top:12px;"><label>Empresa ativa</label><select id="activeCompany" onchange="selectCompany(this.value)"><option value="">Escolha</option>${companies.map(function(company){ return `<option value="${company.id}" ${company.id===selected?'selected':''}>${escapeHtml((company.code ? company.code + ' — ' : '') + company.name)}${company.blocked ? ' — bloqueada' : ''}</option>`; }).join('')}</select></div>` : ''}
+      <div class="toolbar" style="margin-top:12px;">
+        <div class="search-box"><span class="search-ic">${icon('search',15)}</span><input id="companySearchInput" placeholder="Buscar id ou descrição..." value="${escapeHtml(companySearch || '')}" oninput="onCompanySearch(this.value)"></div>
+      </div>
+      <div class="table-wrap" style="margin-top:12px;"><table>
+        <thead><tr><th>Id</th><th>Descrição</th><th>Códigos</th><th>Status</th><th style="width:90px;"></th></tr></thead>
+        <tbody>${filtered.map(function(company){
+          return `<tr>
+            <td class="mono">${escapeHtml(company.code || '—')}</td>
+            <td>${escapeHtml(company.name || '')}${company.id===selected ? ' · <b>ativa</b>' : ''}</td>
+            <td>${company.codeMode === 'manual' ? 'Digitados' : 'Auto'}</td>
+            <td>${company.blocked ? '<span style="color:var(--red-dark);font-weight:700;">Bloqueada</span>' : 'Ativa'}</td>
+            <td>${manager ? `<button class="icon-btn" type="button" onclick="openCompanyForm('${company.id}')" title="Editar">${icon('edit',14)}</button>` : ''}</td>
+          </tr>`;
+        }).join('') || '<tr class="empty-row"><td colspan="5">Nenhuma empresa cadastrada.</td></tr>'}</tbody>
+      </table></div>
     </div>
     <div class="card" style="margin-top:14px;" id="logList">Carregando logs…</div>`;
   loadOwnLogs();
+  const search = document.getElementById('companySearchInput');
+  if(search && document.activeElement === search){
+    const len = search.value.length;
+    try{ search.setSelectionRange(len, len); }catch(err){}
+  }
 }
 async function selectCompany(id){
   if(!id || (sessionUser && sessionUser.role !== 'administrador_suporte')) return;
@@ -4887,6 +5137,7 @@ async function createCompany(event){
     const created = await accountApi('/api/companies', { method:'POST', body:{ name: document.getElementById('newCompanyName').value, code: code || undefined } });
     localStorage.setItem('prodfy_company', created.data.id);
     toast('Empresa criada.', 'success');
+    closeCompanyForm();
     await refreshCompanyFoot();
     await renderCompanySettings();
     await syncNow();
@@ -4916,6 +5167,7 @@ async function saveCompany(event, id){
       knownCompanies = companiesByName(knownCompanies);
     }
     toast('Empresa salva.', 'success');
+    closeCompanyForm();
     await refreshCompanyFoot();
     await renderCompanySettings();
   }catch(error){ toast(error.message, 'error'); }
@@ -4924,6 +5176,7 @@ async function toggleCompanyBlock(id, blocked){
   try{
     await accountApi('/api/companies/' + id, { method:'PUT', body:{ blocked: blocked } });
     toast(blocked ? 'Empresa bloqueada.' : 'Empresa desbloqueada.', 'success');
+    closeCompanyForm();
     await refreshCompanyFoot();
     await renderCompanySettings();
   }catch(error){ toast(error.message, 'error'); }
@@ -5514,7 +5767,17 @@ window.removeOrderDraftItem = removeOrderDraftItem;
 window.setCadastroChoice = setCadastroChoice;
 window.setCadastroPageSize = setCadastroPageSize;
 window.setCadastroPage = setCadastroPage;
-window.onCadastroItemSearch = onCadastroItemSearch;
+window.onCadastroSearch = onCadastroSearch;
+window.openCadastroForm = openCadastroForm;
+window.closeCadastroForm = closeCadastroForm;
+window.onMaquinaSetorChange = onMaquinaSetorChange;
+window.onOperadorSetorChange = onOperadorSetorChange;
+window.openAccessUserForm = openAccessUserForm;
+window.closeAccessUserForm = closeAccessUserForm;
+window.onUserSearch = onUserSearch;
+window.openCompanyForm = openCompanyForm;
+window.closeCompanyForm = closeCompanyForm;
+window.onCompanySearch = onCompanySearch;
 window.saveCadastro = saveCadastro;
 window.editCadastro = editCadastro;
 window.deleteCadastro = deleteCadastro;

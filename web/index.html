@@ -326,6 +326,33 @@
     <div id="cadastroTrashBody"></div>
   </div>
 </div>
+<div class="modal-overlay" id="modalCadastroForm">
+  <div class="modal modal-wide">
+    <div class="modal-header">
+      <div class="modal-title" id="cadastroFormTitle">Cadastrar</div>
+      <button class="modal-close" type="button" onclick="closeCadastroForm()">×</button>
+    </div>
+    <div id="cadastroFormBody"></div>
+  </div>
+</div>
+<div class="modal-overlay" id="modalAccessUser">
+  <div class="modal modal-wide">
+    <div class="modal-header">
+      <div class="modal-title" id="accessUserTitle">Cadastrar usuário</div>
+      <button class="modal-close" type="button" onclick="closeAccessUserForm()">×</button>
+    </div>
+    <div id="accessUserFormBody"></div>
+  </div>
+</div>
+<div class="modal-overlay" id="modalCompanyForm">
+  <div class="modal modal-wide">
+    <div class="modal-header">
+      <div class="modal-title" id="companyFormTitle">Empresa</div>
+      <button class="modal-close" type="button" onclick="closeCompanyForm()">×</button>
+    </div>
+    <div id="companyFormBody"></div>
+  </div>
+</div>
 <div id="cadastroSelectBar" class="cadastro-select-bar" hidden>
   <span id="cadastroSelectCount">0 selecionados</span>
   <button class="btn btn-sm btn-danger" data-edit="engenharia" type="button" onclick="deleteCadastroSelected()">Excluir selecionados</button>
@@ -338,7 +365,7 @@
 <script src="js/app.js"></script>
 <script>
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js?v=37').catch(function () {});
+  navigator.serviceWorker.register('sw.js?v=38').catch(function () {});
 }
 </script>
 </body>
